@@ -49,8 +49,9 @@ steps 4 to 8 follow once Bluetooth is powered on and registers its endpoints. Th
 (0.5 s), so it reads one line at a time even when Bluetooth reports several at once. The whole request has 45 s, as in
 Settings > Speaka; a step still waiting then fails with its own message (step 4's says to check that Bluetooth is on).
 
-The log's column is as wide as the widest line this Start or Stop could show, set before its first line, so lines
-never shift sideways when a longer one appears or a running line (20 pt) finishes (18 pt).
+The log's column is as wide as the widest line a Start or a Stop could show, the same for both and fixed for the
+app's life, so lines never shift sideways when a longer one appears or a running line (20 pt) finishes (18 pt), and a
+line sits in the same place in a Start's log as in a Stop's.
 
 The title beside the dot helix reads *Starting* or *Stopping*, then *Done*, or *Stopped* if a step fails. Each finished
 line gives a light tap and the last one a success buzz. 1.6 s later the log folds back into the button, which now reads
@@ -65,7 +66,7 @@ step and the tweak's reason in Caz's warning colour until the speaker's state ch
 | Header | *Speaka*, *iOS 17.0*, then *by Parv*, or what needs your attention in the warning colour |
 | Audio Output | A window with iPhone speaker, Wired headphones or earbuds, and Any device; a gold checkmark on the one in use; then Choose Output Device |
 | Credits | A window with the app's and the tweak's versions, a line on what iOS's Bluetooth list reports, and Dopamine's license |
-| Connection line | *LAPTOP-XXXX · iPhone speaker*, *Waiting: no wired headphones plugged in*, or *Connect from your PC*. The PC's name comes from iOS's Bluetooth list: a computer it reports as connected, else the only computer paired with the iPhone, else the only phone connected; *Your PC* if none of those is certain |
+| Connection line | *LAPTOP-XXXX · connected* as soon as the PC connects, *LAPTOP-XXXX · iPhone speaker* while it plays, *Waiting: no wired headphones plugged in*, or *Connect from your PC*. The name comes from iOS's Bluetooth list, read every 3 s while the speaker is on: a computer it lists as connected (by its device class in any of the forms iOS uses, or a Windows *DESKTOP-* or *LAPTOP-* name), or, while audio plays, the one computer paired with the iPhone; *Your PC* if neither is certain |
 | The button | Start or Stop, as above |
 
 Update Available sits where Caz has it, 20 pt above the button, and slides up 25 pt as it fades in. The connection line

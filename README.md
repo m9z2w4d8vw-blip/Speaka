@@ -125,10 +125,10 @@ background.
   adding the speaker and advertising it, then *Ready for your PC*. If a step fails, its line says so and the header
   keeps the tweak's own reason. The log folds back 1.6 s after the last line, or 6 s after a failure, and the button
   then reads the other word.
-- **The connection line** above the button says what's happening, for example *LAPTOP-XXXX · iPhone speaker*, or
-  *Connect from your PC* while the speaker waits. The PC's name comes from iOS's Bluetooth list: a computer it reports
-  as connected, or else the only computer paired with the iPhone. When neither is certain it says *Your PC*, and
-  **Credits** shows what the list reports.
+- **The connection line** above the button says what's happening: *LAPTOP-XXXX · connected* as soon as the PC
+  connects, *LAPTOP-XXXX · iPhone speaker* while it plays, or *Connect from your PC* while the speaker waits. The PC's
+  name comes from iOS's Bluetooth list; when it isn't certain it says *Your PC*, and **Credits** shows what the list
+  reports, device by device.
 - **The header** reads *by Parv*, or, when something needs your attention, says what in the warning colour: for
   example that the volume is at zero, or that Bluetooth was turned off and on.
 - **Audio Output** opens a window with the three outputs; the current one has a checkmark. **Choose Output Device**

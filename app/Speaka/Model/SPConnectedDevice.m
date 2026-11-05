@@ -10,11 +10,9 @@
 #import <dlfcn.h>
 #import <objc/message.h>
 
-// Bluetooth major device classes, as BluetoothDevice may report them: the masked Class of Device value, or its index.
-static const unsigned int SPMajorClassComputerMasked = 0x100;
-static const unsigned int SPMajorClassComputerIndex = 1;
-static const unsigned int SPMajorClassPhoneMasked = 0x200;
-static const unsigned int SPMajorClassPhoneIndex = 2;
+// Bluetooth major device classes, by index (bits 8 to 12 of the Class of Device).
+static const unsigned int SPMajorComputer = 1;
+static const unsigned int SPMajorPhone = 2;
 
 static Class SPBluetoothManagerClass(void)
 {
@@ -30,7 +28,9 @@ static Class SPBluetoothManagerClass(void)
 /// One device as BluetoothManager reports it.
 @interface SPBluetoothDevice : NSObject
 @property (nonatomic, copy) NSString *name;
-@property (nonatomic, copy) NSString *key;   // its address, or its name if it reports none
+@property (nonatomic, copy) NSString *key;     // its address, or its name if it reports none
+@property (nonatomic) BOOL hasClass;
+@property (nonatomic) unsigned int rawClass;   // majorClass exactly as reported, for Credits
 @property (nonatomic) BOOL computer;
 @property (nonatomic) BOOL phone;
 @property (nonatomic) BOOL connected;
@@ -59,6 +59,21 @@ static id SPManager(void)
     return managerClass ? SPSend((id)managerClass, @selector(sharedInstance)) : nil;
 }
 
+/// The major class's index, from whichever form majorClass comes in: the plain index (1), the masked major class
+/// (0x100), major and minor together (0x10C, a laptop), or the whole Class of Device with its service bits (0x2A010C).
+/// v9.4 compared it with 0x100 and 1 only, so a PC reported any other way was never recognised as a computer.
+static unsigned int SPMajorIndex(unsigned int value)
+{
+    return value >= 0x100 ? (value >> 8) & 0x1F : value & 0x1F;
+}
+
+/// Windows names a PC DESKTOP-XXXXXXX or LAPTOP-XXXXXXXX until someone renames it.
+static BOOL SPLooksLikeWindowsPC(NSString *name)
+{
+    NSString *upper = name.uppercaseString;
+    return [upper hasPrefix:@"DESKTOP-"] || [upper hasPrefix:@"LAPTOP-"];
+}
+
 /// The named devices in one of BluetoothManager's lists.
 static NSArray<SPBluetoothDevice *> *SPDevices(id manager, SEL list, BOOL listedAsConnected)
 {
@@ -75,9 +90,15 @@ static NSArray<SPBluetoothDevice *> *SPDevices(id manager, SEL list, BOOL listed
         id address = SPSend(device, @selector(address));
         info.key = ([address isKindOfClass:[NSString class]] && ((NSString *)address).length > 0) ? address : name;
         if ([device respondsToSelector:@selector(majorClass)]) {
-            unsigned int major = ((unsigned int (*)(id, SEL))objc_msgSend)(device, @selector(majorClass));
-            info.computer = major == SPMajorClassComputerMasked || major == SPMajorClassComputerIndex;
-            info.phone = major == SPMajorClassPhoneMasked || major == SPMajorClassPhoneIndex;
+            info.hasClass = YES;
+            info.rawClass = ((unsigned int (*)(id, SEL))objc_msgSend)(device, @selector(majorClass));
+            unsigned int major = SPMajorIndex(info.rawClass);
+            info.computer = major == SPMajorComputer;
+            info.phone = major == SPMajorPhone;
+        }
+        if (SPLooksLikeWindowsPC(info.name)) {
+            info.computer = YES;
+            info.phone = NO;
         }
         info.connected = listedAsConnected || SPSendBool(device, @selector(connected), NO);
         [found addObject:info];
@@ -89,6 +110,8 @@ static NSArray<SPBluetoothDevice *> *SPDevices(id manager, SEL list, BOOL listed
 static NSArray<SPBluetoothDevice *> *SPAllDevices(id manager)
 {
     NSMutableArray<SPBluetoothDevice *> *all = [NSMutableArray array];
+    if (!manager)
+        return all;
     NSMutableDictionary<NSString *, SPBluetoothDevice *> *byKey = [NSMutableDictionary dictionary];
     NSArray<SPBluetoothDevice *> *listed = [SPDevices(manager, @selector(connectedDevices), YES)
         arrayByAddingObjectsFromArray:SPDevices(manager, @selector(pairedDevices), NO)];
@@ -109,28 +132,12 @@ static NSArray<SPBluetoothDevice *> *SPAllDevices(id manager)
 + (NSString *)connectedComputerName
 {
     @try {
-        id manager = SPManager();
-        if (!manager || !SPSendBool(manager, @selector(available), YES))
-            return nil;
-        NSArray<SPBluetoothDevice *> *devices = SPAllDevices(manager);
-        // 1. A computer iOS reports as connected.
+        NSArray<SPBluetoothDevice *> *devices = SPAllDevices(SPManager());
         for (SPBluetoothDevice *device in devices) {
             if (device.computer && device.connected)
                 return device.name;
         }
-        // 2. A PC can only stream to Speaka once it's paired with this iPhone, and iOS doesn't always count Speaka's
-        //    connection as one of its own. With exactly one computer paired, it's that one.
-        SPBluetoothDevice *computer = nil;
-        NSUInteger computers = 0;
-        for (SPBluetoothDevice *device in devices) {
-            if (device.computer) {
-                computer = device;
-                computers++;
-            }
-        }
-        if (computers == 1)
-            return computer.name;
-        // 3. Another phone can stream too: exactly one connected. Watches, headphones and the like never count.
+        // Another phone can stream too: exactly one connected. Watches, headphones and the like never count.
         SPBluetoothDevice *phone = nil;
         NSUInteger phones = 0;
         for (SPBluetoothDevice *device in devices) {
@@ -145,27 +152,47 @@ static NSArray<SPBluetoothDevice *> *SPAllDevices(id manager)
     }
 }
 
++ (NSString *)pairedComputerName
+{
+    @try {
+        SPBluetoothDevice *computer = nil;
+        NSUInteger computers = 0;
+        for (SPBluetoothDevice *device in SPAllDevices(SPManager())) {
+            if (device.computer) {
+                computer = device;
+                computers++;
+            }
+        }
+        return computers == 1 ? computer.name : nil;
+    } @catch (NSException *exception) {
+        return nil;
+    }
+}
+
 + (NSString *)lookupSummary
 {
     @try {
         id manager = SPManager();
         if (!manager)
             return @"Bluetooth's device list isn't available to Speaka.";
-        if (!SPSendBool(manager, @selector(available), YES))
-            return @"Bluetooth's device list isn't ready yet.";
+        BOOL available = SPSendBool(manager, @selector(available), YES);
         NSArray<SPBluetoothDevice *> *devices = SPAllDevices(manager);
-        NSMutableArray<NSString *> *connected = [NSMutableArray array];
-        NSMutableArray<NSString *> *computers = [NSMutableArray array];
+        if (devices.count == 0)
+            return available ? @"Bluetooth's device list is empty." : @"Bluetooth's device list isn't ready yet.";
+        NSMutableArray<NSString *> *parts = [NSMutableArray array];
         for (SPBluetoothDevice *device in devices) {
+            NSMutableArray<NSString *> *traits = [NSMutableArray array];
             if (device.connected)
-                [connected addObject:device.name];
+                [traits addObject:@"connected"];
             if (device.computer)
-                [computers addObject:device.name];
+                [traits addObject:@"computer"];
+            [traits addObject:device.hasClass ? [NSString stringWithFormat:@"class %#x", device.rawClass] : @"no class"];
+            [parts addObject:[NSString stringWithFormat:@"%@ (%@)", device.name, [traits componentsJoinedByString:@", "]]];
+            if (parts.count == 8)
+                break;
         }
-        return [NSString stringWithFormat:@"Bluetooth knows %lu devices. Connected: %@. Computers: %@.",
-                (unsigned long)devices.count,
-                connected.count > 0 ? [connected componentsJoinedByString:@", "] : @"none",
-                computers.count > 0 ? [computers componentsJoinedByString:@", "] : @"none"];
+        return [NSString stringWithFormat:@"Bluetooth knows %lu devices: %@.", (unsigned long)devices.count,
+                [parts componentsJoinedByString:@"; "]];
     } @catch (NSException *exception) {
         return @"Bluetooth's device list couldn't be read.";
     }

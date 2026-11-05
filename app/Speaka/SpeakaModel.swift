@@ -66,14 +66,17 @@ final class SpeakaModel: ObservableObject {
     @Published private(set) var snapshot = Snapshot()
     @Published private(set) var request: SPRequest? = nil
     @Published private(set) var lyrics: [LyricLine] = []
-    /// Every line this Start's or Stop's log could show, so the log keeps one column width throughout.
-    @Published private(set) var logTexts: [LyricText] = []
+    /// Every line a Start's or a Stop's log could show. Both logs size their column from it, so a line sits in the same
+    /// place in either, and nothing moves sideways while one runs.
+    let logTexts = SpeakaModel.possibleLines()
     @Published private(set) var sheetVisible = false
     @Published private(set) var sheetTitle = "Starting"
     @Published private(set) var completedSteps = 0
     @Published private(set) var successCount = 0
     @Published private(set) var problem: String? = nil
+    /// A computer iOS reports as connected, and the one computer paired with this iPhone (SPConnectedDevice).
     @Published private(set) var computerName: String? = nil
+    @Published private(set) var pairedName: String? = nil
 
     private let client = SPTweakClient()
     /// The tweak's own status block, which the steps of a Start or a Stop are read from.
@@ -158,9 +161,14 @@ final class SpeakaModel: ObservableObject {
         switch snapshot.session {
         case .on:
             guard snapshot.receiving else {
+                // Connected but not playing yet: name the PC as soon as iOS lists it as connected.
+                if let name = computerName {
+                    return StatusLine(symbol: "laptopcomputer", text: "\(name) · connected")
+                }
                 return StatusLine(symbol: "dot.radiowaves.left.and.right", text: "Connect from your PC")
             }
-            let who = computerName ?? "Your PC"
+            // A PC is streaming, so the one paired computer is it, even if iOS doesn't list it as connected.
+            let who = computerName ?? pairedName ?? "Your PC"
             if snapshot.playing {
                 let place = snapshot.playingOn.isEmpty ? "this iPhone" : snapshot.playingOn
                 return StatusLine(symbol: "laptopcomputer", text: "\(who) · \(place)")
@@ -243,16 +251,25 @@ final class SpeakaModel: ObservableObject {
             problem = nil
             self.problemSession = nil
         }
-        // The PC's name is looked up at most every 5 s; nil means "Your PC".
-        if next.session == .on && next.receiving {
-            let stale = computerNameDate.map { Date().timeIntervalSince($0) > 5.0 } ?? true
+        // The PC's name is looked up at most every 3 s while the speaker is on, playing or not, so it shows as soon as
+        // the PC connects; nil means "Connect from your PC" before audio, and "Your PC" during it.
+        if next.session == .on {
+            let stale = computerNameDate.map { Date().timeIntervalSince($0) > 3.0 } ?? true
             if stale {
                 computerNameDate = Date()
-                let name = SPConnectedDevice.connectedComputerName()
-                if name != computerName {
-                    computerName = name
+                let connected = SPConnectedDevice.connectedComputerName()
+                if connected != computerName {
+                    computerName = connected
+                }
+                let paired = SPConnectedDevice.pairedComputerName()
+                if paired != pairedName {
+                    pairedName = paired
                 }
             }
+        } else if computerName != nil || pairedName != nil {
+            computerName = nil
+            pairedName = nil
+            computerNameDate = nil
         }
     }
 
@@ -265,7 +282,6 @@ final class SpeakaModel: ObservableObject {
         problem = nil
         problemSession = nil
         lyrics.removeAll()
-        logTexts = Self.possibleLines(for: action)
         sheetTitle = action == "start" ? "Starting" : "Stopping"
         sheetVisible = true
         startLyric("Restarting Bluetooth")
@@ -358,14 +374,15 @@ final class SpeakaModel: ObservableObject {
     }
 
     /// Every line a Start's or a Stop's log can show, each once, so the log can size its column to the widest of them
-    /// before its first line (LyricsLog). tests/test_speaka_app.py checks that every line this model writes is here.
-    static func possibleLines(for action: String) -> [LyricText] {
+    /// before its first line (LyricsLog). Start's and Stop's together, so both logs get the same column and a line
+    /// sits in the same place in either. tests/test_speaka_app.py checks that every line this model writes is here.
+    static func possibleLines() -> [LyricText] {
         var lines = [LyricText(text: "Restarting Bluetooth", running: true)]
         for text in ["Bluetooth restarted", "Bluetooth didn't restart", "Bluetooth wasn't restarted",
-                     "Couldn't reach Bluetooth", action == "start" ? "Ready for your PC" : "Bluetooth back to normal"] {
+                     "Couldn't reach Bluetooth", "Ready for your PC", "Bluetooth back to normal"] {
             lines.append(LyricText(text: text, running: false))
         }
-        for step in (action == "start" ? SessionStep.start : SessionStep.stop) {
+        for step in SessionStep.start + SessionStep.stop {
             lines.append(LyricText(text: step.running, running: true))
             lines.append(LyricText(text: step.done, running: false))
             lines.append(LyricText(text: step.failed, running: false))

@@ -98,6 +98,27 @@ Both are in the app only (`SPConnectedDevice`, `MainComponents.swift`, `SpeakaMo
 tweak didn't change. This is also the first update the app can install for itself: the next release's Update
 Available installs the `.deb` and the `.tipa`, then resprings.
 
+## After the second device test
+
+The log no longer moved while it ran, but three things were still off:
+
+- **Still *Your PC*.** The PC is LAPTOP-UGIVBIA5, and the helper's own log shows iOS treating it as a connected
+  Bluetooth audio device of that name (`type=BluetoothA2DPOutput name=LAPTOP-UGIVBIA5`), so iOS's list does know it.
+  What failed was the app's test for "a computer": it compared the device class with exactly `0x100` or `1`, but the
+  class comes in several forms (a laptop is also `0x10C`, or the whole Class of Device with its service bits), so the
+  PC was never recognised. The major class is now read from any of those forms, and a Windows default name
+  (*DESKTOP-…* or *LAPTOP-…*) counts as a computer too. **Credits** now lists each device with its class exactly as
+  iOS reports it, so if the name is still missing, that line says why.
+- **The name showed only once audio played.** The app looked the name up only while audio was arriving. Now it looks
+  every 3 s while the speaker is on, and as soon as iOS lists the PC as connected, the line reads
+  *LAPTOP-UGIVBIA5 · connected*. Being the one paired computer names the PC only while it's streaming, because being
+  paired doesn't mean being connected.
+- **Start's and Stop's lines sat in different places.** Each log was sized from its own lines, and Start's longest is
+  wider than Stop's. Both now use the same list, Start's and Stop's lines together, so a line sits in the same place
+  in either.
+
+All in the app (`SPConnectedDevice`, `SpeakaModel.swift`); the tweak didn't change.
+
 ## Apply and build
 
 Copy the zip's contents over your clone. Nothing needs deleting. The changed files:
@@ -130,9 +151,10 @@ README.md, app/README.md, docs/history/TESTING-v9.4.md
    the tap, fails with *Check that Bluetooth is on*, and the log stays up for 6 s. Turn Bluetooth back on: the speaker
    should then be added, and the header's message clears once it is.
 6. Tap **Stop**: *Restarting Bluetooth*, *Switching the speaker off*, *Bluetooth back to normal*.
-7. After the fixes above: Start again and watch the lines; none should move sideways. While the PC plays, the
-   connection line should name it. If it still says *Your PC*, open **Credits** and send a screenshot of the line
-   under the versions.
+7. After the fixes above: Start, then Stop, and compare the two logs; their lines should start in the same place,
+   and none should move sideways. Connect from the PC without playing anything: the connection line should read
+   *LAPTOP-UGIVBIA5 · connected*, and once audio plays, *LAPTOP-UGIVBIA5 · Headphones (wired)* or similar. If it still
+   says *Your PC* or *Connect from your PC*, open **Credits** and send a screenshot of the line under the versions.
 
 ## Host run
 

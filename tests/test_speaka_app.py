@@ -176,7 +176,7 @@ class SpeakaApp(unittest.TestCase):
         headers = read(CLIENT_H) + read(DEVICE_H)
         pinned = set(re.findall(r"NS_SWIFT_NAME\((\w+)\(", headers))
         self.assertEqual(pinned, {"outputModes", "readStatus", "setOutputMode", "sendAction", "pollRequest",
-                                  "connectedComputerName", "lookupSummary"})
+                                  "connectedComputerName", "pairedComputerName", "lookupSummary"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -373,12 +373,15 @@ class SpeakaApp(unittest.TestCase):
             self.assertIn(shared, measure)
         self.assertIn(".font(.system(size: line.status == .running ? 20 : 18))", row)
         self.assertIn(".font(.system(size: text.running ? 20 : 18))", measure)
-        # The model sets the lines before the log opens, and every line it writes is one of them.
+        # Start's and Stop's lines together, fixed for the model's life: both logs get the same column, so a line sits
+        # in the same place in either (it didn't when each was sized from its own lines). Every line written is there.
         model = read(MODEL)
-        toggle = block(model, "func toggle() {")
-        self.assertLess(toggle.index("logTexts = Self.possibleLines(for: action)"), toggle.index("sheetVisible = true"))
-        possible = block(model, "static func possibleLines(for action: String) -> [LyricText] {")
-        self.assertIn("for step in (action == \"start\" ? SessionStep.start : SessionStep.stop) {", possible)
+        self.assertIn("let logTexts = SpeakaModel.possibleLines()", model)
+        self.assertNotIn("logTexts =", block(model, "func toggle() {"))
+        possible = block(model, "static func possibleLines() -> [LyricText] {")
+        self.assertIn("for step in SessionStep.start + SessionStep.stop {", possible)
+        for final in ("Ready for your PC", "Bluetooth back to normal"):
+            self.assertIn(f'"{final}"', possible)
         for kind in ("running", "done", "failed"):
             self.assertIn(f"step.{kind}", possible)
         written = set(re.findall(r'(?:startLyric|finishLyric)\("([^"]+)"\)', model))
@@ -391,30 +394,48 @@ class SpeakaApp(unittest.TestCase):
         for text in written:
             self.assertIn(f'"{text}"', possible, f"the log can show {text!r}, but its column isn't sized for it")
 
-    def test_the_pcs_name_comes_from_the_paired_devices_too(self):
-        """iOS doesn't always count Speaka's connection as one of its own, so a lone paired computer names the PC."""
+    def test_the_pcs_name_shows_as_soon_as_it_connects(self):
+        """The PC is named from iOS's Bluetooth list once it's connected, before any audio, whatever form its device class
+        comes in; while it streams, the one paired computer names it even if iOS doesn't list it as connected."""
         source = read(ROOT / "app/Speaka/Model/SPConnectedDevice.m")
         for selector in ("sharedInstance", "available", "connectedDevices", "pairedDevices", "name", "address",
                          "majorClass", "connected"):
             self.assertIn(f"@selector({selector})", source)
         self.assertEqual(source.count("objc_msgSend)"), 3)          # every private call goes through these three
         self.assertIn("if (!target || ![target respondsToSelector:selector])", source)
-        lookup = block(source, "+ (NSString *)connectedComputerName\n{")
-        connected = lookup.index("if (device.computer && device.connected)")
-        paired = lookup.index("if (computers == 1)")
-        phone = lookup.index("return phones == 1 ? phone.name : nil;")
-        self.assertLess(connected, paired)
-        self.assertLess(paired, phone)
-        self.assertIn("@catch (NSException *exception)", lookup)
-        self.assertIn("SPMajorClassComputerMasked = 0x100", source)
-        self.assertIn("SPMajorClassPhoneMasked = 0x200", source)
-        # Credits says what Bluetooth reports, so a missing name can be explained from a screenshot.
+        # The class in any form: index 1, masked 0x100, with the minor class 0x10C, or the whole Class of Device.
+        self.assertIn("return value >= 0x100 ? (value >> 8) & 0x1F : value & 0x1F;", source)
+        major = lambda v: (v >> 8) & 0x1F if v >= 0x100 else v & 0x1F
+        for value in (1, 0x100, 0x10C, 0x2A010C):
+            self.assertEqual(major(value), 1, hex(value))
+        for value in (2, 0x200, 0x20C):
+            self.assertEqual(major(value), 2, hex(value))
+        self.assertEqual(major(0x240404), 4)
+        self.assertNotIn("== SPMajorClassComputerMasked", source)    # v9.4's exact match, which missed the PC
+        self.assertIn('[upper hasPrefix:@"DESKTOP-"] || [upper hasPrefix:@"LAPTOP-"]', source)   # Windows' own names
+        connected = block(source, "+ (NSString *)connectedComputerName\n{")
+        self.assertIn("if (device.computer && device.connected)", connected)
+        self.assertIn("return phones == 1 ? phone.name : nil;", connected)
+        self.assertNotIn("computers == 1", connected)              # being paired doesn't make it connected
+        paired = block(source, "+ (NSString *)pairedComputerName\n{")
+        self.assertIn("return computers == 1 ? computer.name : nil;", paired)
+        for method in (connected, paired):
+            self.assertIn("@catch (NSException *exception)", method)
+        # Credits lists each device with its class exactly as reported, so a wrong guess shows in a screenshot.
         self.assertIn("Text(SPConnectedDevice.lookupSummary())", read(WINDOWS))
-        self.assertIn('@"Bluetooth knows %lu devices. Connected: %@. Computers: %@."', source)
-        # The main screen still says "Your PC" when nothing is certain, and asks again every 5 s.
+        self.assertIn('@"Bluetooth knows %lu devices: %@."', source)
+        self.assertIn('@"class %#x"', source)
+        # The model looks it up whenever the speaker is on, and names the PC before audio once it's connected.
         model = read(MODEL)
-        self.assertIn('let who = computerName ?? "Your PC"', model)
-        self.assertIn("Date().timeIntervalSince($0) > 5.0", model)
+        lookup = model.split("// The PC's name is looked up", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("if next.session == .on {", lookup)
+        self.assertNotIn("next.receiving", lookup)
+        self.assertIn("Date().timeIntervalSince($0) > 3.0", lookup)
+        self.assertIn("SPConnectedDevice.connectedComputerName()", lookup)
+        self.assertIn("SPConnectedDevice.pairedComputerName()", lookup)
+        line = block(model, "var statusLine: StatusLine? {")
+        self.assertLess(line.index('text: "\\(name) · connected"'), line.index('text: "Connect from your PC"'))
+        self.assertIn('let who = computerName ?? pairedName ?? "Your PC"', line)
 
     # ------------------------------------------------------------------ updates
     def test_updater_installs_the_tweak_then_the_app_then_resprings(self):

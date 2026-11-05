@@ -9,15 +9,18 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface SPConnectedDevice : NSObject
 
-/// Best effort: the name of the PC streaming to Speaka, read through the private BluetoothManager framework. In order:
-/// a computer iOS reports as connected; the one computer paired with this iPhone, since a PC must be paired to stream
-/// and iOS doesn't always count Speaka's connection as one of its own; the one phone connected. Returns nil when none
-/// of those is certain, or the framework is unavailable or not ready yet; callers then say "Your PC". Call on the
-/// main thread.
+/// The name of a computer iOS's Bluetooth list reports as connected (or, failing that, of the one phone connected),
+/// read through the private BluetoothManager framework. nil when there's none, or the framework is unavailable or not
+/// ready yet. This is what lets the main screen name the PC as soon as it connects. Call on the main thread.
 + (nullable NSString *)connectedComputerName NS_SWIFT_NAME(connectedComputerName());
 
-/// One line on what BluetoothManager reports (how many devices, which are connected, which are computers), shown in
-/// Credits, so a missing name can be explained from a screenshot. Call on the main thread.
+/// The name of the one computer paired with this iPhone, connected or not, or nil if there isn't exactly one. A PC has
+/// to be paired to stream, so while one is streaming this names it even when iOS doesn't list it as connected.
+/// Call on the main thread.
++ (nullable NSString *)pairedComputerName NS_SWIFT_NAME(pairedComputerName());
+
+/// One line on what BluetoothManager reports, each device with its class as reported, shown in Credits so a missing
+/// name can be explained from a screenshot. Call on the main thread.
 + (NSString *)lookupSummary NS_SWIFT_NAME(lookupSummary());
 
 @end
