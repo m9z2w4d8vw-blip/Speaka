@@ -4,16 +4,18 @@
 #
 #   make -C app tipa      ->  app/packages/Speaka.tipa and app/packages/Speaka.ipa (the same file)
 #
-# CI passes VERSION (tools/release_version.sh) and BUILD (the run number). Locally the version is control's.
+# CI passes VERSION (tools/release_version.sh), BUILD (the run number) and DEB, the release's own .deb, which the app
+# carries so one .tipa installs both. Locally the version is control's, and without DEB the app carries no tweak.
 # Needs macOS with Xcode, plus XcodeGen and ldid (brew install xcodegen ldid). Independent of the tweak's
-# Makefile at the repository root: the app never goes into the tweak's .deb.
+# Makefile at the repository root: the app never goes into the tweak's .deb, though the tweak goes into the app.
 
 DERIVED = build/DerivedData
 VERSION ?= $(shell sed -n 's/^Version:[[:space:]]*//p' ../control | head -n 1)
 BUILD ?= 1
+DEB ?=
 
 tipa: app helper
-	bash scripts/package.sh
+	DEB="$(DEB)" bash scripts/package.sh
 
 ipa: tipa
 

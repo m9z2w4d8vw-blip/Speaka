@@ -9,6 +9,16 @@ APP="build/DerivedData/Build/Products/Release-iphoneos/Speaka.app"
 [ -f build/speakahelper ] || { echo "build/speakahelper not found"; exit 1; }
 
 cp build/speakahelper "$APP/speakahelper"
+
+# v9.5: the tweak's .deb rides inside the app, so one .tipa installs both (speakahelper --tweak-from-app). CI passes the
+# release's .deb as DEB; a local build without one makes an app that carries no tweak and downloads it instead.
+if [ -n "${DEB:-}" ]; then
+    [ -f "$DEB" ] || { echo "DEB=$DEB not found"; exit 1; }
+    cp "$DEB" "$APP/Speaka.deb"
+    echo "Carrying the tweak: $(basename "$DEB")"
+else
+    rm -f "$APP/Speaka.deb"
+fi
 rm -rf "$APP/_CodeSignature" "$APP/embedded.mobileprovision"
 
 ldid -SRootHelper/entitlements.plist "$APP/speakahelper"

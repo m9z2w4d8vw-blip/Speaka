@@ -455,9 +455,18 @@ class SpeakaApp(unittest.TestCase):
         choose = block(updater, "func choose(from releases: [SpeakaRelease], app: [Int], package: [Int]?) {")
         self.assertIn("Self.compare(release.version, app) > 0", choose)
         self.assertIn("package.map({ Self.compare(release.version, $0) > 0 }) ?? true", choose)
-        # The .deb is downloaded first and handed over as --deb, the .tipa as --tipa.
+        # v9.5: one .tipa carries the tweak. A newer app is the only download, and its tweak comes from inside it; with
+        # only the tweak behind, this app's own carried tweak is installed; a build carrying none downloads the .deb.
         start = block(updater, "func startDownload() {")
-        self.assertLess(start.index('"Speaka-update.deb"'), start.index('"Speaka-update.tipa"'))
+        app_part = start.index('Part(url: url, name: "Speaka-update.tipa", label: "the app")')
+        self.assertLess(app_part, start.index("tweakFromApp = deb != nil"))
+        self.assertLess(start.index("} else if deb != nil {"), start.index("if Self.carriedTweak != nil {"))
+        self.assertLess(start.index("if Self.carriedTweak != nil {"),
+                        start.index('Part(url: url, name: "Speaka-update.deb", label: "the tweak")'))
+        self.assertIn('args.append("--tweak-from-app")', updater)
+        self.assertIn("let withTweak = tweakFromApp || files.contains", updater)
+        self.assertIn('static var carriedTweak: String? { Bundle.main.path(forResource: "Speaka", ofType: "deb") }',
+                      updater)
         self.assertIn('var args = ["install-update"]', updater)
         self.assertIn('args += [file.pathExtension.lowercased() == "deb" ? "--deb" : "--tipa", file.path]', updater)
         # v9.4: no download task (its temporary file goes in the app's data folder, which v9.3 couldn't write) and no
@@ -485,18 +494,53 @@ class SpeakaApp(unittest.TestCase):
         done = block(updater, "private func installed(status: Int32, errors: [String], withTweak: Bool) {")
         self.assertLess(done.index("if withTweak {"), done.index("openInTrollStore()"))
         self.assertIn('"apple-magnifier://install?url="', updater)
-        self.assertIn("var resprings: Bool { deb != nil }", updater)
+        self.assertIn("var resprings: Bool { deb != nil || installingTweak }", updater)
         views = read(UPDATE_VIEWS)
         self.assertIn('updater.resprings ? "Bluetooth restarts, then your iPhone resprings"', views)
         self.assertIn('"Speaka will close when it\'s done"', views)
         self.assertNotIn("Caz will", views)
         content = read(CONTENT)
-        self.assertIn('UpdateLinkButton(title: "Update Available", symbol: "arrow.down.circle")', content)
+        self.assertIn('UpdateLinkButton(title: updater.tweakMissing ? "Install Tweak" : "Update Available",', content)
         self.assertIn("if window == .update && updater.isBusy { return }", content)
         self.assertIn("updater.check()", content)
         # Update Available keeps Caz's place; the connection line moves up a line while it shows, so they never overlap.
         self.assertIn(".offset(y: -(30 + linkGap))\n", content)
-        self.assertIn(".offset(y: -(30 + linkGap) - (updater.isAvailable ? 40 : 0))", content)
+        self.assertIn(".offset(y: -(30 + linkGap) - (updater.showsLink ? 40 : 0))", content)
+
+    def test_one_tipa_carries_the_tweak(self):
+        """v9.5: Speaka.tipa carries the release's .deb, and Install Tweak shows only while the tweak isn't installed."""
+        package = read(APP / "scripts/package.sh")
+        carry = package.index('cp "$DEB" "$APP/Speaka.deb"')
+        self.assertLess(carry, package.index('ldid -SSpeaka.entitlements "$APP/Speaka"'))   # in the bundle before the zip
+        self.assertLess(carry, package.index("zip -qry"))
+        self.assertIn('rm -f "$APP/Speaka.deb"', package)                  # no DEB, no stale tweak from a last build
+        makefile = read(APP / "Makefile")
+        self.assertIn("DEB ?=\n", makefile)
+        self.assertIn('\tDEB="$(DEB)" bash scripts/package.sh\n', makefile)
+        self.assertIn('#define SPEAKA_CARRIED_DEB "Speaka.app/Speaka.deb"', read(HELPER))
+        updater = read(UPDATER)
+        # Install Tweak: only when dpkg doesn't list the tweak, this app carries one, and there's a jailbreak.
+        refresh = block(updater, "func refreshTweak() {")
+        for condition in ("Self.installedPackageVersion() == nil", "Self.carriedTweak != nil",
+                          "FileManager.default.fileExists(atPath: Self.dpkgPath)"):
+            self.assertIn(condition, refresh)
+        self.assertIn('static let dpkgPath = "/var/jb/usr/bin/dpkg"', updater)
+        install = block(updater, "func installTweak() {")
+        self.assertIn("guard tweakMissing, !isBusy else { return }", install)
+        self.assertIn("install([], tweakFromApp: true)", install)           # nothing to download
+        self.assertIn("var showsLink: Bool { tweakMissing || isAvailable }", updater)
+        self.assertIn("init() {\n        refreshTweak()\n    }", updater)
+        content = read(CONTENT)
+        self.assertIn("if updater.showsLink {", content)
+        tap = content.split('UpdateLinkButton(title: updater.tweakMissing ? "Install Tweak" : "Update Available",', 1)[1]
+        tap = tap.split("window = .update", 1)[0]
+        self.assertIn("if updater.tweakMissing {\n                            updater.installTweak()", tap)
+        self.assertIn("updater.refreshTweak()", content.split(".onChange(of: scenePhase) { phase in", 1)[1].split("}\n        }", 1)[0])
+        views = read(UPDATE_VIEWS)
+        self.assertIn('updater.installingTweak ? "Installing the tweak..." : "Installing update..."', views)
+        model = read(MODEL)
+        self.assertIn('return "The tweak isn\'t installed yet. Tap Install Tweak."', model)
+        self.assertIn("let missing = SpeakaUpdater.installedPackageVersion() == nil", model)
 
     def test_update_helper(self):
         """The root helper, compiled for the host in its test mode, on a fake phone: what it would run, and in what order."""
@@ -516,6 +560,12 @@ class SpeakaApp(unittest.TestCase):
             caches.mkdir(parents=True)
             (phone / "var/jb/usr/bin").mkdir(parents=True)
             (phone / "var/jb/usr/bin/dpkg").write_text("")
+            (phone / "var/tmp").mkdir(parents=True)
+            speaka = phone / "private/var/containers/Bundle/Application/SPK"
+            (speaka / "Speaka.app").mkdir(parents=True)
+            (speaka / ".com.apple.mobile_container_manager.metadata.plist").write_text("com.parv.speaka\n")
+            carried = speaka / "Speaka.app/Speaka.deb"
+            carried.write_text("the tweak this app carries")
             box = phone / "private/var/containers/Bundle/Application/ABC"
             (box / "TrollStore.app").mkdir(parents=True)
             (box / "TrollStore.app/trollstorehelper").write_text("")
@@ -556,6 +606,43 @@ class SpeakaApp(unittest.TestCase):
             self.assertIn("trollstorehelper in its own session", out)
             self.assertNotIn("SpringBoard", out)
             self.assertNotIn("would start", out)
+            # v9.5, Install Tweak: the tweak inside the installed Speaka.app, from a copy in a folder of root's own,
+            # which goes afterwards; the app's own copy stays. Then the respring.
+            code, out = run("install-update", "--tweak-from-app")
+            self.assertEqual(code, 0, out)
+            before = out.split("would start", 1)[0]
+            self.assertEqual(arguments(before)[0], "-i")
+            copy = arguments(before)[1]
+            self.assertTrue(copy.startswith(str(phone / "var/tmp/speaka-tweak.")) and copy.endswith("/Speaka.deb"), copy)
+            self.assertEqual(carried.read_text(), "the tweak this app carries")
+            self.assertEqual(list((phone / "var/tmp").iterdir()), [])
+            self.assertEqual(arguments(out.split("would start", 1)[1]), ["finish-update", "--respring"])
+            # v9.5, an update: the new app's tweak can only be installed once TrollStore has installed the app, so it
+            # all happens in the last step, in its own session: TrollStore's installer, the tweak, the respring.
+            code, out = run("install-update", "--tipa", str(tipa), "--tweak-from-app")
+            self.assertEqual(code, 0, out)
+            self.assertNotIn("dpkg", out.split("would start", 1)[0])
+            self.assertEqual(arguments(out.split("would start", 1)[1]),
+                             ["finish-update", "--tipa", str(tipa), "--tweak-from-app", "--respring"])
+            code, out = run("finish-update", "--tipa", str(tipa), "--tweak-from-app", "--respring")
+            self.assertEqual(code, 0, out)
+            self.assertLess(out.index("trollstorehelper in its own session"), out.index("dpkg"))
+            self.assertLess(out.index("dpkg"), out.index("would kill SpringBoard"))
+            # TrollStore's installer fails: no tweak, but Speaka has closed, so the respring still resets the screen.
+            code, out = run("finish-update", "--tipa", str(tipa), "--tweak-from-app", "--respring", fail="trollstorehelper")
+            self.assertEqual(code, 7, out)
+            self.assertNotIn("dpkg", out)
+            self.assertIn("would kill SpringBoard", out)
+            # A downloaded tweak and the app's own, both at once, isn't allowed; an app that carries none is reported.
+            self.assertEqual(run("install-update", "--deb", str(deb), "--tweak-from-app")[0], 2)
+            carried.unlink()
+            code, out = run("install-update", "--tweak-from-app")
+            self.assertEqual(code, 4, out)
+            self.assertIn("The tweak inside Speaka wasn't found", out)
+            carried.symlink_to(deb)                             # never a link: only TrollStore writes there
+            self.assertEqual(run("install-update", "--tweak-from-app")[0], 4)
+            carried.unlink()
+            carried.write_text("the tweak this app carries")
             # dpkg fails: nothing else runs and nothing resprings.
             code, out = run("install-update", "--deb", str(deb), "--tipa", str(tipa), fail="dpkg")
             self.assertEqual(code, 8, out)
@@ -747,7 +834,7 @@ class SpeakaApp(unittest.TestCase):
         for name in imported:
             self.assertTrue((APP / "Speaka" / name).is_file(), name)
         make = read(APP / "Makefile")
-        self.assertIn("tipa: app helper\n\tbash scripts/package.sh", make)
+        self.assertIn("tipa: app helper\n\tDEB=\"$(DEB)\" bash scripts/package.sh", make)
         helper_rule = make.split("\nhelper:\n", 1)[1].split("\n\n", 1)[0]
         for flag in ("xcrun --sdk iphoneos clang -arch arm64 -mios-version-min=16.0", "-framework CoreFoundation",
                      "-o build/speakahelper RootHelper/main.c"):
@@ -801,6 +888,15 @@ class SpeakaApp(unittest.TestCase):
                       app_job)
         self.assertNotIn("theos", app_job.lower())
         self.assertIn("name: Speaka-app", app_job)
+        # v9.5: built after the tweak, carrying exactly the release's .deb.
+        self.assertIn("    needs: build\n", app_job)
+        fetch = app_job.split("- name: Get the tweak the app carries\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("uses: actions/download-artifact@v8", fetch)
+        self.assertIn("name: Speaka-deb", fetch)
+        self.assertIn("path: carried", fetch)
+        self.assertIn('DEB="$PWD/$deb"', app_job)
+        self.assertIn('cmp "$bundle/Speaka.deb" "$carried"', app_job)
+        self.assertIn('*"_${{ steps.version.outputs.version }}_"*)', app_job)
         upload = app_job.split("actions/upload-artifact", 1)[1]
         self.assertIn("app/packages/Speaka.tipa", upload)
         self.assertIn("app/packages/Speaka.ipa", upload)
@@ -901,8 +997,9 @@ class SpeakaApp(unittest.TestCase):
                 self.assertTrue(line.strip().startswith("echo 'Speaka: "), line)
         workflow = read(ROOT / ".github/workflows/build.yml")
         self.assertIn('cp "$deb" "dist/Speaka_${name#*_}"', workflow)
-        # Uploaded by build (and by its second try, if the first timed out), downloaded by release.
-        self.assertEqual(workflow.count("name: Speaka-deb\n"), 3)
+        # Uploaded by build (and by its second try, if the first timed out), downloaded by the app, which carries it
+        # (v9.5), and by release.
+        self.assertEqual(workflow.count("name: Speaka-deb\n"), 4)
 
     def test_the_former_name_appears_nowhere(self):
         """Neither file contents nor paths contain the project's former name. Only its SHA-256 is stored here, so this

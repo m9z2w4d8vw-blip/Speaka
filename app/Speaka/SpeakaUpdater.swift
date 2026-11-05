@@ -47,6 +47,16 @@ final class SpeakaUpdater: ObservableObject {
 
     /// What the update window says while it works: "Downloading the tweak, 1 of 2".
     @Published private(set) var activity = ""
+    /// v9.5: the tweak isn't installed and this app carries one, so Install Tweak takes Update Available's place.
+    /// Read at launch and whenever Speaka comes back to the front.
+    @Published private(set) var tweakMissing = false
+    /// The update window is installing the carried tweak, rather than an update.
+    @Published private(set) var installingTweak = false
+
+    /// The tweak's .deb inside this app (app/scripts/package.sh), if this build carries one. Same version as the app.
+    static var carriedTweak: String? { Bundle.main.path(forResource: "Speaka", ofType: "deb") }
+    /// dpkg where Dopamine's rootless jailbreak puts it. Without it there's no jailbreak to install the tweak into.
+    static let dpkgPath = "/var/jb/usr/bin/dpkg"
 
     private struct Part {
         let url: URL
@@ -72,11 +82,40 @@ final class SpeakaUpdater: ObservableObject {
     private var partsDone = 0
     private var checking = false
     private var checked = false
+    /// This update's tweak comes from inside an app (the new one, or this one) rather than as a download.
+    private var tweakFromApp = false
+
+    init() {
+        refreshTweak()
+    }
 
     var isAvailable: Bool { tipa != nil || deb != nil }
+    /// Something sits where Caz has Update Available: Install Tweak, or Update Available itself.
+    var showsLink: Bool { tweakMissing || isAvailable }
     var isBusy: Bool { stage == .downloading || stage == .installing }
     /// A new tweak restarts Bluetooth and ends with a respring.
-    var resprings: Bool { deb != nil }
+    var resprings: Bool { deb != nil || installingTweak }
+
+    /// Whether the tweak is missing, for Install Tweak: dpkg doesn't list it, this app carries one, and there's a
+    /// jailbreak to install it into. When the tweak is installed, whatever its version, the app works as before.
+    func refreshTweak() {
+        let missing = Self.installedPackageVersion() == nil && Self.carriedTweak != nil
+            && FileManager.default.fileExists(atPath: Self.dpkgPath)
+        if missing != tweakMissing {
+            tweakMissing = missing
+        }
+    }
+
+    /// Install Tweak: the tweak this app carries, through the update helper, with nothing to download. Bluetooth
+    /// restarts and the iPhone resprings, as after an update.
+    func installTweak() {
+        guard tweakMissing, !isBusy else { return }
+        installingTweak = true
+        progress = 0
+        target = 0
+        startTimer()
+        install([], tweakFromApp: true)
+    }
 
     // MARK: - Checking
 
@@ -206,8 +245,20 @@ final class SpeakaUpdater: ObservableObject {
     func startDownload() {
         guard isAvailable, !isBusy else { return }
         var parts: [Part] = []
-        if let url = deb?.debURL { parts.append(Part(url: url, name: "Speaka-update.deb", label: "the tweak")) }
-        if let url = tipa?.tipaURL { parts.append(Part(url: url, name: "Speaka-update.tipa", label: "the app")) }
+        // v9.5: an app carries the tweak of its own release. A newer app brings the newer tweak inside it, so only the
+        // .tipa is downloaded; if only the tweak is behind, this app already carries one at least as new. A build that
+        // carries none downloads the release's .deb, as before.
+        tweakFromApp = false
+        if let url = tipa?.tipaURL {
+            parts.append(Part(url: url, name: "Speaka-update.tipa", label: "the app"))
+            tweakFromApp = deb != nil
+        } else if deb != nil {
+            if Self.carriedTweak != nil {
+                tweakFromApp = true
+            } else if let url = deb?.debURL {
+                parts.append(Part(url: url, name: "Speaka-update.deb", label: "the tweak"))
+            }
+        }
         stage = .downloading
         progress = 0
         target = 0
@@ -219,7 +270,7 @@ final class SpeakaUpdater: ObservableObject {
 
     private func download(_ parts: [Part], saved: [URL]) {
         guard let part = parts.first else {
-            install(saved)
+            install(saved, tweakFromApp: tweakFromApp)
             return
         }
         activity = partCount > 1
@@ -282,7 +333,7 @@ final class SpeakaUpdater: ObservableObject {
         return text + ")"
     }
 
-    private func install(_ files: [URL]) {
+    private func install(_ files: [URL], tweakFromApp: Bool) {
         activity = ""
         target = 1
         stage = .installing
@@ -290,8 +341,11 @@ final class SpeakaUpdater: ObservableObject {
         for file in files {
             args += [file.pathExtension.lowercased() == "deb" ? "--deb" : "--tipa", file.path]
         }
+        if tweakFromApp {
+            args.append("--tweak-from-app")   // the helper finds the installed Speaka.app's own Speaka.deb
+        }
         let helper = Bundle.main.bundlePath + "/speakahelper"
-        let withTweak = files.contains { $0.pathExtension.lowercased() == "deb" }
+        let withTweak = tweakFromApp || files.contains { $0.pathExtension.lowercased() == "deb" }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var errors: [String] = []
             let status = SpeakaSpawnRoot(helper, args) { line in
@@ -365,6 +419,9 @@ final class SpeakaUpdater: ObservableObject {
 
     /// Back to the changelog when the window closes, unless something is still running.
     func resetIfIdle() {
-        if !isBusy { stage = .changelog }
+        if !isBusy {
+            stage = .changelog
+            installingTweak = false
+        }
     }
 }

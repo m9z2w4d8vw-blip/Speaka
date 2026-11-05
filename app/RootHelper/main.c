@@ -7,8 +7,8 @@
 //   ERR <text>
 //
 // Usage:
-//   speakahelper install-update [--deb <path>] [--tipa <path>]
-//   speakahelper finish-update [--tipa <path>] [--respring]      (started by install-update, in its own session)
+//   speakahelper install-update [--deb <path> | --tweak-from-app] [--tipa <path>]
+//   speakahelper finish-update [--tipa <path>] [--tweak-from-app] [--respring]   (started by install-update, own session)
 //   speakahelper version
 //
 // install-update installs the tweak's .deb with dpkg first and reports how that went; the package's install script
@@ -16,9 +16,13 @@
 // installer for the .tipa, then a respring. With only a .tipa it works like Caz's helper: TrollStore's installer runs in
 // its own session, and its result comes back, so Speaka can fall back to TrollStore's link if it fails.
 //
+// v9.5: Speaka.app carries the tweak (Speaka.app/Speaka.deb), so one .tipa installs both. --tweak-from-app installs the
+// tweak carried by the installed Speaka app, found by its bundle id. Without --tipa that's this app's, for Install Tweak
+// or a tweak behind the app; with --tipa it's the new app's, so it runs in the last step, after TrollStore's installer.
+//
 // Exit codes: 0 done, 2 usage, 3 not root, 4 an update file is missing or outside its folders, 5 TrollStore's installer
 // wasn't found, 6 it couldn't be started, 7 it failed, 8 dpkg failed, 9 dpkg wasn't found, 10 the last step couldn't be
-// started.
+// started, 11 the tweak carried in the app couldn't be copied out.
 //
 // Built by app/Makefile. Test builds (-DSPEAKA_TEST, tests/test_speaka_app.py) run nothing: they take every absolute
 // path under $SPEAKA_ROOT and print what they would run.
@@ -44,7 +48,7 @@
 #include <sys/sysctl.h>
 #endif
 
-#define SPEAKA_HELPER_VERSION "1.0"
+#define SPEAKA_HELPER_VERSION "1.1"
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
@@ -58,6 +62,9 @@ static char *const k_dpkg_env[] = {
 };
 #define SPEAKA_DPKG "/var/jb/usr/bin/dpkg"
 #define SPEAKA_TROLLSTORE "com.opa334.TrollStore"
+#define SPEAKA_APP_ID "com.parv.speaka"
+#define SPEAKA_CARRIED_DEB "Speaka.app/Speaka.deb"                 // inside the app's bundle container
+#define SPEAKA_TWEAK_TEMP "/var/tmp/speaka-tweak.XXXXXX"          // root's own copy, for dpkg
 #define SPEAKA_UPDATE_LOG "/tmp/FTABHarvest/SpeakaUpdate.log"
 
 extern char **environ;
@@ -169,8 +176,8 @@ static int read_container_id(const char *dir, char *out, size_t len) {
 }
 #endif
 
-// The installer inside TrollStore.app, found through the bundle container whose id is TrollStore's.
-static int find_trollstore_helper(char *out) {
+// `inside`, in the bundle container of the app whose id is `bundle_id`: TrollStore's, or Speaka's own.
+static int find_in_app(const char *bundle_id, const char *inside, char *out) {
     char base[PATH_MAX];
     rp(base, "/private/var/containers/Bundle/Application");
     out[0] = 0;
@@ -181,12 +188,23 @@ static int find_trollstore_helper(char *out) {
         if (de->d_name[0] == '.') continue;
         char dir[PATH_MAX], id[256] = "";
         if (!pathf(dir, "%s/%s", base, de->d_name) || !is_dir(dir)) continue;
-        if (!read_container_id(dir, id, sizeof id) || strcmp(id, SPEAKA_TROLLSTORE) != 0) continue;
-        pathf(out, "%s/TrollStore.app/trollstorehelper", dir);
+        if (!read_container_id(dir, id, sizeof id) || strcmp(id, bundle_id) != 0) continue;
+        pathf(out, "%s/%s", dir, inside);
         break;
     }
     closedir(d);
-    return out[0] && access(out, F_OK) == 0;
+    return out[0] != 0;
+}
+
+// The installer inside TrollStore.app.
+static int find_trollstore_helper(char *out) {
+    return find_in_app(SPEAKA_TROLLSTORE, "TrollStore.app/trollstorehelper", out) && access(out, F_OK) == 0;
+}
+
+// The tweak carried inside the installed Speaka.app: a regular file, never a link. Only TrollStore writes there.
+static int find_carried_tweak(char *out) {
+    struct stat st;
+    return find_in_app(SPEAKA_APP_ID, SPEAKA_CARRIED_DEB, out) && lstat(out, &st) == 0 && S_ISREG(st.st_mode);
 }
 
 // ---------------------------------------------------------------- running things
@@ -257,12 +275,68 @@ static int install_deb(const char *path) {
     char *argv[] = { "dpkg", "-i", (char *)path, NULL };
     int code = run_and_wait(dpkg, argv, k_dpkg_env, 0);
     unlink(path);
+    if (code == -1) {
+        // The jailbreak's programs only run while it's active: after a reboot, until it's run again.
+        emit("ERR\tdpkg couldn't start (%s). Is the jailbreak active? Run it again, then try once more.", strerror(errno));
+        return 8;
+    }
     if (code != 0) {
         emit("ERR\tThe tweak didn't install (dpkg exited with %d). Nothing else was changed.", code);
         return 8;
     }
     emit("LOG\tTweak installed; Bluetooth restarted");
     return 0;
+}
+
+// Copies a file into a new one, which must not exist yet.
+static int copy_file(const char *from, const char *to) {
+    int in = open(from, O_RDONLY);
+    if (in < 0) return -1;
+    int out = open(to, O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (out < 0) { int e = errno; close(in); errno = e; return -1; }
+    char buf[65536];
+    ssize_t got;
+    int ok = 1;
+    while (ok && (got = read(in, buf, sizeof buf)) != 0) {
+        if (got < 0) { if (errno == EINTR) continue; ok = 0; break; }
+        for (ssize_t done = 0; done < got; ) {
+            ssize_t put = write(out, buf + done, (size_t)(got - done));
+            if (put < 0) { if (errno == EINTR) continue; ok = 0; break; }
+            done += put;
+        }
+    }
+    int e = errno;
+    close(in);
+    if (close(out) != 0) ok = 0;
+    errno = e;
+    return ok ? 0 : -1;
+}
+
+// The tweak carried in the installed Speaka.app, through dpkg. It's copied into a folder only root can write first:
+// install_deb removes what it installed, and the app's own copy has to stay.
+static int install_carried_tweak(void) {
+    char carried[PATH_MAX];
+    if (!find_carried_tweak(carried)) {
+        emit("ERR\tThe tweak inside Speaka wasn't found");
+        return 4;
+    }
+    char dir[PATH_MAX], copy[PATH_MAX];
+    rp(dir, SPEAKA_TWEAK_TEMP);
+    if (!mkdtemp(dir)) {
+        emit("ERR\tCouldn't make a folder for the tweak: %s", strerror(errno));
+        return 11;
+    }
+    pathf(copy, "%s/Speaka.deb", dir);
+    if (copy_file(carried, copy) != 0) {
+        emit("ERR\tCouldn't copy the tweak out of Speaka: %s", strerror(errno));
+        unlink(copy);
+        rmdir(dir);
+        return 11;
+    }
+    int code = install_deb(copy);
+    unlink(copy);
+    rmdir(dir);
+    return code;
 }
 
 #if defined(__APPLE__) && !defined(SPEAKA_TEST)
@@ -315,12 +389,13 @@ static void respring(void) {
 }
 
 // Starts `speakahelper finish-update ...` in its own session without waiting, its output appended to the update log.
-static int start_finish(const char *tipa) {
-    char *argv[6];
+static int start_finish(const char *tipa, int tweak_from_app) {
+    char *argv[7];
     int n = 0;
     argv[n++] = "speakahelper";
     argv[n++] = "finish-update";
     if (tipa) { argv[n++] = "--tipa"; argv[n++] = (char *)tipa; }
+    if (tweak_from_app) argv[n++] = "--tweak-from-app";
     argv[n++] = "--respring";
     argv[n] = NULL;
 #ifdef SPEAKA_TEST
@@ -354,9 +429,13 @@ static int start_finish(const char *tipa) {
 
 // ---------------------------------------------------------------- commands
 
-static int do_install_update(const char *deb, const char *tipa) {
-    if (!deb && !tipa) {
+static int do_install_update(const char *deb, const char *tipa, int tweak_from_app) {
+    if (!deb && !tipa && !tweak_from_app) {
         emit("ERR\tNothing to install");
+        return 2;
+    }
+    if (deb && tweak_from_app) {
+        emit("ERR\tA downloaded tweak or the app's own, not both");
         return 2;
     }
     if (deb && !update_file_ok(deb, ".deb", NULL)) {
@@ -367,17 +446,25 @@ static int do_install_update(const char *deb, const char *tipa) {
         emit("ERR\tThe downloaded app wasn't found");
         return 4;
     }
-    if (!deb) return install_tipa(tipa);           // Caz's way: Speaka waits, and falls back to TrollStore's link
-    int code = install_deb(deb);
-    if (code != 0) return code;                     // the app is left alone and nothing resprings
-    if (start_finish(tipa) != 0) return 10;
+    if (tipa && tweak_from_app) {
+        // The new tweak comes inside the new app, so everything happens in the last step, which outlives Speaka:
+        // TrollStore's installer, then the tweak from the app it installed, then the respring.
+        if (start_finish(tipa, 1) != 0) return 10;
+        emit("LOG\tInstalling the app, then its tweak, then respringing");
+        return 0;
+    }
+    if (!deb && !tweak_from_app) return install_tipa(tipa);   // Caz's way: Speaka waits, and falls back to its link
+    int code = deb ? install_deb(deb) : install_carried_tweak();
+    if (code != 0) return code;                                // the app is left alone and nothing resprings
+    if (start_finish(tipa, 0) != 0) return 10;
     emit("LOG\t%s", tipa ? "Installing the app, then respringing" : "Respringing");
     return 0;
 }
 
-static int do_finish_update(const char *tipa, int resprings) {
+static int do_finish_update(const char *tipa, int tweak_from_app, int resprings) {
     int code = tipa ? install_tipa(tipa) : 0;
-    if (resprings) respring();                      // the tweak is new either way, so this always happens
+    if (code == 0 && tweak_from_app) code = install_carried_tweak();   // the app TrollStore just installed
+    if (resprings) respring();                      // Speaka has closed either way, so the screen is reset too
     return code;
 }
 
@@ -396,23 +483,25 @@ int main(int argc, char **argv) {
 #endif
     if (!realpath(argv[0], g_self)) snprintf(g_self, sizeof g_self, "%s", argv[0]);
     if (argc < 2) {
-        emit("ERR\tusage: speakahelper install-update [--deb <path>] [--tipa <path>] | finish-update [--tipa <path>] [--respring] | version");
+        emit("ERR\tusage: speakahelper install-update [--deb <path> | --tweak-from-app] [--tipa <path>] | "
+             "finish-update [--tipa <path>] [--tweak-from-app] [--respring] | version");
         return 2;
     }
     const char *deb = NULL, *tipa = NULL;
-    int resprings = 0;
+    int resprings = 0, tweak_from_app = 0;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--deb") == 0 && i + 1 < argc) deb = argv[++i];
         else if (strcmp(argv[i], "--tipa") == 0 && i + 1 < argc) tipa = argv[++i];
         else if (strcmp(argv[i], "--respring") == 0) resprings = 1;
+        else if (strcmp(argv[i], "--tweak-from-app") == 0) tweak_from_app = 1;
         else {
             emit("ERR\tUnknown option %s", argv[i]);
             return 2;
         }
     }
     if (strcmp(argv[1], "version") == 0) { emit("LOG\tspeakahelper %s", SPEAKA_HELPER_VERSION); return 0; }
-    if (strcmp(argv[1], "install-update") == 0) return do_install_update(deb, tipa);
-    if (strcmp(argv[1], "finish-update") == 0) return do_finish_update(tipa, resprings);
+    if (strcmp(argv[1], "install-update") == 0) return do_install_update(deb, tipa, tweak_from_app);
+    if (strcmp(argv[1], "finish-update") == 0) return do_finish_update(tipa, tweak_from_app, resprings);
     emit("ERR\tUnknown command %s", argv[1]);
     return 2;
 }

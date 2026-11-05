@@ -88,6 +88,9 @@ final class SpeakaModel: ObservableObject {
     private var active = false
     private var problemSession: SPSession? = nil
     private var computerNameDate: Date? = nil
+    /// Whether dpkg doesn't list the tweak, read at most every 2 s while the tweak isn't running.
+    @Published private(set) var tweakPackageMissing = false
+    private var packageCheckDate: Date? = nil
     private var outputChangeDate: Date? = nil
 
     init() {
@@ -137,6 +140,15 @@ final class SpeakaModel: ObservableObject {
         }
         switch snapshot.session {
         case .noTweak:
+            // v9.5: the app carries the tweak, so a missing one is a tap away (Install Tweak, by the button).
+            if tweakPackageMissing {
+                if !FileManager.default.fileExists(atPath: SpeakaUpdater.dpkgPath) {
+                    return "Speaka's tweak needs a Dopamine jailbreak, and this iPhone isn't jailbroken."
+                }
+                if SpeakaUpdater.carriedTweak != nil {
+                    return "The tweak isn't installed yet. Tap Install Tweak."
+                }
+            }
             return "The Speaka tweak isn't running. Install its package, then open Speaka again."
         case .oldTweak:
             return "Bluetooth still runs the old Speaka tweak. Reinstall the package to restart it."
@@ -245,6 +257,17 @@ final class SpeakaModel: ObservableObject {
         }
         if next != snapshot {
             snapshot = next
+        }
+        // No tweak running: is it installed at all? (dpkg's database, so not every poll.)
+        if next.session == .noTweak {
+            let stale = packageCheckDate.map { Date().timeIntervalSince($0) > 2.0 } ?? true
+            if stale {
+                packageCheckDate = Date()
+                let missing = SpeakaUpdater.installedPackageVersion() == nil
+                if missing != tweakPackageMissing {
+                    tweakPackageMissing = missing
+                }
+            }
         }
         // A problem stays in the header until the speaker's state moves on.
         if let problemSession, problemSession != next.session {

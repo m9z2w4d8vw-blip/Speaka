@@ -40,7 +40,7 @@ struct ContentView: View {
         .animation(.spring(response: 0.75, dampingFraction: 0.9), value: model.sheetVisible)
         .animation(.spring(response: 0.6, dampingFraction: 0.9), value: window)
         // Update Available and the connection line come and go like Caz's Update Available: up 25 pt as they fade in.
-        .animation(.spring(response: 0.5, dampingFraction: 0.9), value: updater.isAvailable)
+        .animation(.spring(response: 0.5, dampingFraction: 0.9), value: updater.showsLink)
         .animation(.spring(response: 0.5, dampingFraction: 0.9), value: model.statusLine != nil)
         // A light tap as each step finishes and a success buzz at the end, as in Caz. UIKit's generators,
         // because sensoryFeedback needs iOS 17.
@@ -52,6 +52,9 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { phase in
             model.setActive(phase == .active)
+            if phase == .active {
+                updater.refreshTweak()   // installed from Sileo meanwhile, say
+            }
         }
         .onAppear {
             model.setActive(true)
@@ -100,8 +103,14 @@ struct ContentView: View {
                 // Caz's Update Available: 30 pt tall, 20 pt above the big button (10 on home-button phones), sliding
                 // up 25 pt as it fades in, and hidden while the big button is open. The connection line takes the same
                 // place, or the line above it, 10 pt higher, while Update Available is showing.
-                if updater.isAvailable {
-                    UpdateLinkButton(title: "Update Available", symbol: "arrow.down.circle") {
+                // v9.5: with no tweak installed it's Install Tweak, which installs the one this app carries; with a
+                // tweak installed, of whatever version, it's Update Available as before.
+                if updater.showsLink {
+                    UpdateLinkButton(title: updater.tweakMissing ? "Install Tweak" : "Update Available",
+                                     symbol: "arrow.down.circle") {
+                        if updater.tweakMissing {
+                            updater.installTweak()
+                        }
                         window = .update
                     }
                     .frame(height: 30)
@@ -113,7 +122,7 @@ struct ContentView: View {
                 if let line = model.statusLine {
                     StatusLineView(line: line)
                         .frame(height: 30)
-                        .offset(y: -(30 + linkGap) - (updater.isAvailable ? 40 : 0))
+                        .offset(y: -(30 + linkGap) - (updater.showsLink ? 40 : 0))
                         .opacity(expanded ? 0 : 1)
                         .transition(.offset(y: 25).combined(with: .opacity))
                 }

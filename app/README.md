@@ -79,20 +79,27 @@ Once per launch the app reads Speaka's releases from GitHub, ignoring drafts and
 too). A release carries the tweak's `.deb` and the app's `.tipa` with the same version number. The app compares it with
 its own version and with the tweak's, which it reads from dpkg's database (`/var/jb/var/lib/dpkg/status`).
 
+**Install Tweak** (v9.5) takes Update Available's place while dpkg doesn't list the tweak, the app carries one
+(`Speaka.app/Speaka.deb`, put there by `scripts/package.sh` from CI's `Speaka-deb` artifact; the same version as the
+app), and `/var/jb/usr/bin/dpkg` exists. It runs `speakahelper install-update --tweak-from-app`: the helper finds the
+installed Speaka.app by its bundle id, copies its `Speaka.deb` into a folder only root can write, installs it with dpkg
+(which restarts Bluetooth), and resprings. With the tweak installed, of whatever version, the button doesn't show.
+
 **Update Available** shows when either is behind. The changelog lists every newer release's notes, which are its commit
 messages, and **Update** then:
 
-1. downloads the `.deb`, then the `.tipa`, whichever are newer, behind Caz's progress ring, and saves them in
+1. if the app is behind, downloads only the new `.tipa` behind Caz's progress ring and saves it in
    `/var/mobile/Library/Caches/Speaka`, or `/tmp/FTABHarvest` if that can't be written. Each file is fetched into
    memory and written out by the app: a download task's temporary file goes inside the app's own data folder, which an
    unsandboxed TrollStore app can't write without `com.apple.private.security.storage.AppDataContainers`, and that
    entitlement would also move the app's view of `com.apple.bluetooth`'s preferences, which the tweak reads, into that
    folder. A failure names the step, the file and the error's domain and code;
-2. hands both to the update helper, `speakahelper`, which runs as root (TrollStore's persona spawn, as in Caz);
-3. the helper installs the `.deb` with dpkg and waits. Its install script restarts Bluetooth. If dpkg fails, the
-   window says so and nothing else happens;
-4. then, in its own session so it outlives the app, the helper installs the `.tipa` with TrollStore's installer, which
-   closes Speaka, and resprings.
+2. hands it to the update helper, `speakahelper`, which runs as root (TrollStore's persona spawn, as in Caz), with
+   `--tweak-from-app` if the tweak is behind too;
+3. in its own session so it outlives the app, the helper installs the `.tipa` with TrollStore's installer, which closes
+   Speaka, then the tweak carried by the app it just installed, then resprings;
+4. with only the tweak behind, the helper installs the tweak this app already carries, which is at least as new as the
+   release's, with nothing to download. A build that carries no tweak downloads the release's `.deb` instead.
 
 With only a newer app, it works exactly like Caz: TrollStore's installer, no respring, and if that fails, TrollStore's
 own link (`apple-magnifier://install?url=`), then the releases page.
@@ -180,7 +187,7 @@ and commercial use. Only the picture is shipped, not the font.
 | `Speaka/UpdateViews.swift` | `UpdateViews.swift` | Update Available, the changelog, the progress ring |
 | `Speaka/Model/SPTweakClient`, `SPConnectedDevice` | | The tweak's protocol and the PC's name, in Objective-C |
 | `Speaka/Model/SPRootSpawn` | `RootSpawn` | Starts the update helper as root |
-| `RootHelper/` | `RootHelper/` (much smaller) | `speakahelper`: dpkg, TrollStore's installer and the respring |
+| `RootHelper/` | `RootHelper/` (much smaller) | `speakahelper`: dpkg (a downloaded tweak, or the one the app carries), TrollStore's installer and the respring |
 | `Resources/` | | `Info.plist`, the icons (unchanged) and `LICENSE-Dopamine.txt` |
 | `Artwork/` | | The 1024 px icon and `make_icon.py`, which draws it |
 | `project.yml`, `Makefile`, `scripts/package.sh` | `project.yml`, `scripts/package.sh` | The build |

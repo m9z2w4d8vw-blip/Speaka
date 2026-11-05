@@ -221,6 +221,9 @@ jobs:
   # ---------------------------------------------------------------------------------------------
   app:
     name: Build the Speaka app (.tipa for TrollStore)
+    # v9.5: the app carries the tweak's .deb, so it's built after the tweak, from the tweak's own artifact. The release
+    # still never waits on the app.
+    needs: build
     runs-on: macos-15
     timeout-minutes: 30
     env:
@@ -247,8 +250,17 @@ jobs:
         id: version
         run: echo "version=$(bash tools/release_version.sh)" >> "$GITHUB_OUTPUT"
 
+      - name: Get the tweak the app carries
+        uses: actions/download-artifact@v8
+        with:
+          name: Speaka-deb
+          path: carried
+
       - name: Build Speaka.tipa
-        run: make -C app clean tipa VERSION="${{ steps.version.outputs.version }}" BUILD="$GITHUB_RUN_NUMBER"
+        run: |
+          set -euo pipefail
+          deb="$(ls carried/*.deb | head -n 1)"
+          make -C app clean tipa VERSION="${{ steps.version.outputs.version }}" BUILD="$GITHUB_RUN_NUMBER" DEB="$PWD/$deb"
 
       - name: Check the package
         run: |
@@ -262,6 +274,13 @@ jobs:
             test -s "$bundle/$f" || { echo "::error::$f is missing from Speaka.app"; exit 1; }
           done
           test -x "$bundle/speakahelper" || { echo "::error::speakahelper is not executable"; exit 1; }
+          # One .tipa installs both: the app carries exactly this release's .deb.
+          carried="$(ls carried/*.deb | head -n 1)"
+          cmp "$bundle/Speaka.deb" "$carried" || { echo "::error::Speaka.app doesn't carry this release's tweak"; exit 1; }
+          case "$(basename "$carried")" in
+            *"_${{ steps.version.outputs.version }}_"*) echo "Carries the tweak: $(basename "$carried")" ;;
+            *) echo "::error::the carried tweak $(basename "$carried") isn't ${{ steps.version.outputs.version }}"; exit 1 ;;
+          esac
           echo "Slices: Speaka $(lipo -archs "$bundle/Speaka"), speakahelper $(lipo -archs "$bundle/speakahelper")"
           ldid -e "$bundle/Speaka" > entitlements.plist
           grep -q 'com.apple.private.security.no-sandbox' entitlements.plist \

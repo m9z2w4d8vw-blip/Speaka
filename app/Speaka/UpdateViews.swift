@@ -171,9 +171,9 @@ struct DownloadView: View {
 
     private var title: String {
         switch updater.stage {
-        case .installing: return "Installing update..."
+        case .installing: return updater.installingTweak ? "Installing the tweak..." : "Installing update..."
         case .installed: return "Update installed"
-        case .failed: return "Update failed"
+        case .failed: return updater.installingTweak ? "Tweak not installed" : "Update failed"
         case .changelog, .downloading: return "Downloading update..."
         }
     }

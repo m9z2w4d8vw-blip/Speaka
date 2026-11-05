@@ -77,12 +77,13 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
 
 ## Quick start
 
-1. **Download** `Speaka_<version>_iphoneos-arm64.deb` and `Speaka.tipa` from the
-   [**latest release**](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest). `SHA256SUMS` lets you verify the
-   files. After this first install, the app updates both itself and the tweak ([Updates](#updates)).
-2. **Install the tweak.** Open the `.deb` with Sileo or Zebra, or run `sudo dpkg -i Speaka_*.deb` over SSH. Bluetooth
-   restarts once, and Settings gains a **Speaka** page.
-3. **Install the app.** Open `Speaka.tipa` with TrollStore. `Speaka.ipa` is the same file under another name.
+1. **Download** `Speaka.tipa` from the [**latest release**](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest).
+   It carries the tweak too. `SHA256SUMS` lets you verify it. After this first install, the app updates itself and the
+   tweak ([Updates](#updates)).
+2. **Install it.** Open `Speaka.tipa` with TrollStore. `Speaka.ipa` is the same file under another name.
+3. **Install the tweak.** Open Speaka and tap **Install Tweak**, above the big button. Bluetooth restarts, the iPhone
+   resprings, and Settings gains a **Speaka** page. (Or install the release's `Speaka_<version>_iphoneos-arm64.deb`
+   yourself, with Sileo or Zebra or `sudo dpkg -i`; with the tweak installed, the button doesn't show.)
 4. **Start.** Open Speaka, or Settings > Speaka, and tap **Start**. Bluetooth restarts once more.
 5. **Connect.** On the PC, pair with the iPhone (Windows: Settings > Bluetooth & devices > Add device > Bluetooth) and
    choose it as the sound output.
@@ -93,7 +94,7 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
 
 > [!NOTE]
 > The app needs TrollStore. Sideloading it with AltStore or Sideloadly installs it, but strips the permissions it needs
-> to reach the tweak. The app only controls the tweak, so the `.deb` is always required.
+> to reach the tweak and to install it. The app only controls the tweak, so the tweak is always required.
 
 <details>
 <summary><b>What the install script does, and how to uninstall</b></summary>
@@ -141,18 +142,22 @@ The app and **Settings > Speaka** read and write the same settings, so they alwa
 
 ### Updates
 
+Since v9.5, `Speaka.tipa` carries the tweak's `.deb`, so one file installs both. While the tweak isn't installed,
+**Install Tweak** sits above the big button and installs the one the app carries, with nothing to download. Once the
+tweak is installed, of whatever version, the app works as before.
+
 Once per launch, the app asks GitHub for Speaka's releases. When one is newer than the installed app or tweak,
 **Update Available** slides up above the button, as in Caz. Tapping it opens the changelog (the commit messages of
 each release), and **Update** installs it:
 
-1. it downloads what's newer: the tweak's `.deb`, the app's `.tipa`, or both, into `/var/mobile/Library/Caches/Speaka`
-   (or the tweak's `/tmp/FTABHarvest` if that can't be written);
-2. it installs the `.deb` with dpkg, whose install script restarts Bluetooth, so a running speaker stops;
-3. it installs the `.tipa` with TrollStore, which closes Speaka;
-4. if the tweak was updated, it resprings, so Settings and the app open in their new versions.
+1. if the app is behind, it downloads only the new `.tipa`, into `/var/mobile/Library/Caches/Speaka` (or the tweak's
+   `/tmp/FTABHarvest` if that can't be written), and installs it with TrollStore, which closes Speaka;
+2. if the tweak is behind, it installs the tweak carried by the newest app (the new one, or this one if only the tweak
+   was behind) with dpkg, whose install script restarts Bluetooth, so a running speaker stops;
+3. if the tweak was updated, it resprings, so Settings and the app open in their new versions.
 
-If the `.deb` doesn't install, nothing else changes, and the window says what dpkg reported. If only the app is newer,
-nothing resprings, and if TrollStore can't install it, TrollStore is asked to download it from the release instead.
+With only the app behind, nothing resprings, and if TrollStore can't install it, TrollStore is asked to download it from
+the release instead. If the tweak doesn't install after a new app did, the app offers it again when it next opens.
 Installing needs the app's update helper, which runs as root through TrollStore, so update by hand if you sideloaded
 the app some other way.
 
@@ -405,7 +410,7 @@ copies can't drift apart. `tests/test_repo_layout.py` fails CI with an explanati
 ```mermaid
 flowchart LR
     push["Push to GitHub"] --> tests["Run tests"] --> deb["Build the .deb"] --> check["Check the package"] --> rel["A release for<br/>every push"]
-    push --> app["Build the app<br/>.tipa and .ipa"] -.->|"attached if it built"| rel
+    deb --> app["Build the app<br/>.tipa and .ipa,<br/>carrying the .deb"] -.->|"attached if it built"| rel
 ```
 
 Every push runs `.github/workflows/build.yml` on macOS with Xcode and Theos. The tweak job does four things:
@@ -415,7 +420,9 @@ Every push runs `.github/workflows/build.yml` on macOS with Xcode and Theos. The
 3. builds and checks the `.deb`;
 4. uploads it as the `Speaka-deb` artifact, trying once more 30 s later if GitHub's artifact service times out.
 
-A separate job builds the app the way Caz is built, with XcodeGen and `xcodebuild`, as the `Speaka-app` artifact.
+A second job, after the first, builds the app the way Caz is built, with XcodeGen and `xcodebuild`, puts the
+`Speaka-deb` artifact inside it as `Speaka.app/Speaka.deb`, checks it carries exactly that file, and uploads the
+`Speaka-app` artifact.
 
 Each push to `main` publishes a full release named after its version (`9.3.57`, tag `v9.3.57`) with the `.deb`,
 `Speaka.tipa`, `Speaka.ipa` and `SHA256SUMS`, marked latest. Its notes are the push's commit messages, which the app's
@@ -532,6 +539,7 @@ notes.
 | v9.2 | The app takes Caz's look: one Start/Stop button that opens into a live log | [TESTING-v9.2](docs/history/TESTING-v9.2.md) |
 | v9.3 | Speaka's own background again; the app updates itself and the tweak; numbered releases | [TESTING-v9.3](docs/history/TESTING-v9.3.md) |
 | v9.4 | Updates that install; Start shows every step and which one failed | [TESTING-v9.4](docs/history/TESTING-v9.4.md) |
+| v9.5 | One `.tipa` installs the app and the tweak; Install Tweak; one-download updates | [TESTING-v9.5](docs/history/TESTING-v9.5.md) |
 
 | Research note | Topic |
 | --- | --- |
