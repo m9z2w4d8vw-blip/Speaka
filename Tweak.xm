@@ -84,7 +84,7 @@
 #define BTPS_BUILD_TAG "v8.8-continuous-sbc-ring"
 /* v8.9 keeps the v8.8 build label, as v8.8.1 and v8.8.2 did; this separate tag identifies the one-tap
  * Start/Stop build in the status block (diag.v89.build) and the log. */
-#define BTPS_V89_BUILD_TAG "v9.1.0-one-tap-output-select"
+#define BTPS_V89_BUILD_TAG "v9.4.0-one-tap-output-select"
 
 /* AVDTP constants, used for native Source registration diagnostics */
 #define BTPS_AVDTP_TSEP_SRC 0u
@@ -998,7 +998,11 @@ static uint64_t btps_v88_media_callback(uint64_t handle,uint64_t sequence,
 }
 static int btps_v88_install_callback(uint64_t context)
 {
-    if(!g_v88_ready || !g_v78_exact_uuid || !g_v87_media_hook_ok) return 0;
+    if(!g_v88_ready || !g_v78_exact_uuid || !g_v87_media_hook_ok) {
+        BTPSSetStatus("diag.audio_receive","REFUSED: %s",!g_v88_ready?"the shared audio ring is not ready":
+            !g_v78_exact_uuid?"this is not the analysed bluetoothd":"the audio hook is missing");
+        return 0;
+    }
     const uint32_t offsets[27]={
         0x384f94,0x385044,0x385104,0x3851c4,0x385274,0x38532c,0x3853f4,
         0x38549c,0x38554c,0x3855f4,0x385684,0x385714,0x3857ac,0x385844,
@@ -1011,11 +1015,13 @@ static int btps_v88_install_callback(uint64_t context)
        !btps_peek(g_v78_base+0xd8fa4u,&branch,4) || branch!=0xd61f091fu ||
        !btps_peek(g_v78_base+0xd8f28u,&load,4) || load!=0xf9405900u ||
        !btps_peek(g_v78_base+0xce3d4u,&store,4) || store!=0xf9000d16u) {
+        BTPSSetStatus("diag.audio_receive","REFUSED: callback table, stub or call site differs");
         BTPSLogNow("V88_CALLBACK refused: exact table/stub/callsite mismatch");return 0;
     }
     for(unsigned i=0;i<27;i++) {
         uintptr_t pointer=(uintptr_t)ptrauth_strip((void *)(uintptr_t)g_v88_callbacks[i],ptrauth_key_function_pointer);
         if(pointer!=g_v78_base+offsets[i]) {
+            BTPSSetStatus("diag.audio_receive","REFUSED: callback table entry %u differs",i);
             BTPSLogNow("V88_CALLBACK refused: table entry %u differs",i);return 0;
         }
     }
@@ -1023,7 +1029,10 @@ static int btps_v88_install_callback(uint64_t context)
     g_v88_callbacks[22]=(uint64_t)(uintptr_t)ptrauth_sign_unauthenticated(raw,ptrauth_key_function_pointer,0);
     uint64_t expected=table;
     if(!__atomic_compare_exchange_n((uint64_t *)(uintptr_t)(context+0x18u),&expected,
-          (uint64_t)(uintptr_t)g_v88_callbacks,0,__ATOMIC_RELEASE,__ATOMIC_RELAXED)) return 0;
+          (uint64_t)(uintptr_t)g_v88_callbacks,0,__ATOMIC_RELEASE,__ATOMIC_RELAXED)) {
+        BTPSSetStatus("diag.audio_receive","REFUSED: the callback table changed while it was being replaced");
+        return 0;
+    }
     BTPSLogNow("V88_CALLBACK installed table_copy=27 slot=+0xb0 original=+0x385dfc IA=0; stub code untouched");
     BTPSSetStatus("diag.audio_receive","v8.8 callback ready; shared ring -> helper after accepted START");
     return 1;
@@ -1035,21 +1044,39 @@ static int btps_v88_install_callback(uint64_t context)
  * Only the obsolete 192-byte parent table is deliberately leaked. */
 static void btps_v83_attempt_post_source(uint64_t audio_context)
 {
-    if (!g_v82_armed || !g_v81_shadow_returned || !g_v82_caps_ready ||
-        !g_v83_source_reg_hook_ok || !g_orig[BTPS_H_REGISTER] ||
-        !g_v82_signal_hook_ok || !g_v82_sdp_hook_ok || !g_v82_tx_hook_ok ||
-        !g_v87_media_hook_ok ||
-        !g_sdp_orig || g_native_source_success != 6 ||
-        !__sync_bool_compare_and_swap(&g_v82_sink_attempted, 0, 1)) return;
+    if (!g_v82_armed || g_v82_sink_attempted) return;
+    /* v9.4: the same prerequisites as before, but a missing one is named in the status, not only the debug log, so
+       Speaka's Start shows which step stalled. WAITING, not REFUSED: nothing is consumed and the next Bluetooth
+       power-on tries again, so neither the app nor Settings counts it as a failure. */
+    const char *missing =
+        !g_v81_shadow_returned ? "the seven-slot endpoint table was never applied" :
+        !g_v82_caps_ready ? "the speaker's SBC capabilities were never captured" :
+        (!g_v83_source_reg_hook_ok || !g_orig[BTPS_H_REGISTER]) ? "the registration hooks are missing" :
+        (!g_v82_signal_hook_ok || !g_v82_sdp_hook_ok || !g_v82_tx_hook_ok || !g_sdp_orig) ?
+            ((!g_v82_sdp_hook_ok || !g_sdp_orig) ? "the advertising hook is missing" : "the signaling hooks are missing") :
+        !g_v87_media_hook_ok ? "the audio hook is missing" :
+        g_native_source_success != 6 ? "Bluetooth did not register all six of its own endpoints" : NULL;
+    if (missing) {
+        BTPSSetStatus("diag.v83.audio_table", "WAITING: %s", missing);
+        BTPSLogNow("V83 WAITING: %s", missing);
+        return;
+    }
+    if (!__sync_bool_compare_and_swap(&g_v82_sink_attempted, 0, 1)) return;
+    /* From here the one attempt is used up, so every refusal below is final for this Bluetooth session. */
     uint64_t avdtp_context = 0;
     uint8_t avdtp_slots = 0;
     if (!btps_peek((uint64_t)(g_v78_base + 0x9768b0u), &avdtp_context, sizeof avdtp_context) ||
         !avdtp_context || !btps_peek(avdtp_context + 0x60u, &avdtp_slots, 1) ||
         avdtp_slots != 7u) {
+        BTPSSetStatus("diag.v83.audio_table", "REFUSED: low-level AVDTP allocation is not 7 slots");
         BTPSLogNow("V83 REFUSED: low-level AVDTP allocation is not 7 slots"); return;
     }
-    if (!btps_v88_install_callback(avdtp_context)) return;
+    if (!btps_v88_install_callback(avdtp_context)) {
+        BTPSSetStatus("diag.v83.audio_table", "REFUSED: the audio callback was not installed");
+        return;
+    }
     if (!audio_context) {
+        BTPSSetStatus("diag.v83.audio_table", "REFUSED: audio context pointer is null");
         BTPSLogNow("V83 REFUSED: audio context pointer is null"); return;
     }
     struct {
@@ -1061,6 +1088,8 @@ static void btps_v83_attempt_post_source(uint64_t audio_context)
         !btps_peek(audio_context + 0x6cu, &meta.second, sizeof meta.second) ||
         !btps_peek(audio_context + 0x78u, &meta.table, sizeof meta.table) ||
         meta.used != 6u || meta.second != 6u || !meta.table) {
+        BTPSSetStatus("diag.v83.audio_table", "REFUSED: audio table metadata expected (6,6,nonzero) observed (%u,%u)",
+            meta.used, meta.second);
         BTPSLogNow("V83 REFUSED: audio table metadata expected (6,6,nonzero) observed (%u,%u,%#llx)",
             meta.used, meta.second, (unsigned long long)meta.table); return;
     }
@@ -1070,6 +1099,7 @@ static void btps_v83_attempt_post_source(uint64_t audio_context)
     uint8_t *new_table = (uint8_t *)calloc(7u, 32u);
     uint8_t *new_caps = (uint8_t *)calloc(1u, 3u * 16u + 4u);
     if (!new_table || !new_caps) {
+        BTPSSetStatus("diag.v83.audio_table", "REFUSED: calloc failed");
         BTPSLogNow("V83 REFUSED: calloc failed"); free(new_caps); free(new_table); return;
     }
     uint8_t *e7 = new_table + 6u * 32u;

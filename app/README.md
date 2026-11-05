@@ -28,18 +28,32 @@ It follows the tweak's state, with the same rules as Settings > Speaka:
 There is no confirmation, as with Caz's Clean button: the button's word says what it will do. Tapping it opens the
 button into the log (spring 0.75 s, damping 0.9) while the menu shrinks away and the header rises 25 pt:
 
-| Step | While it runs | When it's done |
-| --- | --- | --- |
-| 1 | Restarting Bluetooth | Bluetooth restarted |
-| 2, Start only | Adding the speaker | Speaker added |
-| Last line | | Ready for your PC, or Bluetooth back to normal |
+Each step is read from a status the tweak publishes from inside `bluetoothd` (`Speaka/SessionSteps.swift`), in the order
+the tweak goes through them:
+
+| Step | While it runs | When it's done | If it fails | Read from |
+| --- | --- | --- | --- | --- |
+| 1 | Restarting Bluetooth | Bluetooth restarted | Bluetooth didn't restart | the request's nonce in `diag.v89.session` |
+| 2, Start | Arming the speaker | Speaker armed | Speaker not armed | `diag.v82.trial` |
+| 3, Start | Installing the hooks | Hooks installed | A hook wasn't installed | each hook's own status |
+| 4, Start | Registering Bluetooth's endpoints | Bluetooth's endpoints registered | Bluetooth's endpoints failed | `diag.native_source_ok` (6) |
+| 5, Start | Making room for the speaker | Room made for the speaker | No room for the speaker | `diag.v81_seven_slots` (7 slots) |
+| 6, Start | Preparing the audio path | Audio path ready | Audio path not ready | `diag.audio_receive` |
+| 7, Start | Adding the speaker | Speaker added | Speaker not added | `diag.v82.sep` (SEID 7) |
+| 8, Start | Advertising the speaker | Speaker advertised | Speaker not advertised | `diag.v82.sdp` |
+| 2, Stop | Switching the speaker off | Speaker switched off | Speaker still on | `result=` in `diag.v89.session` |
+| Last line | | Ready for your PC, or Bluetooth back to normal | | |
+
+Bluetooth arms the speaker and installs the hooks as it launches, so steps 2 and 3 finish right after the restart;
+steps 4 to 8 follow once Bluetooth is powered on and registers its endpoints. The log moves on one step per poll
+(0.5 s), so it reads one line at a time even when Bluetooth reports several at once. The whole request has 45 s, as in
+Settings > Speaka; a step still waiting then fails with its own message (step 4's says to check that Bluetooth is on).
 
 The title beside the dot helix reads *Starting* or *Stopping*, then *Done*, or *Stopped* if a step fails. Each finished
 line gives a light tap and the last one a success buzz. 1.6 s later the log folds back into the button, which now reads
-the other word.
-
-A step that fails says what went wrong (*Bluetooth didn't restart*, *The speaker wasn't added*), and the header keeps the
-reason in Caz's warning colour until the speaker's state changes.
+the other word. After a failure the log stays up for 6 s, so you can see which step it was, and the header keeps the
+step and the tweak's reason in Caz's warning colour until the speaker's state changes, for example
+*Speaker not added: ROLLED BACK: Sink registration returned 0x68; 6 entries restored*.
 
 ## The screen
 
@@ -64,7 +78,12 @@ its own version and with the tweak's, which it reads from dpkg's database (`/var
 **Update Available** shows when either is behind. The changelog lists every newer release's notes, which are its commit
 messages, and **Update** then:
 
-1. downloads the `.deb`, then the `.tipa`, whichever are newer, behind Caz's progress ring;
+1. downloads the `.deb`, then the `.tipa`, whichever are newer, behind Caz's progress ring, and saves them in
+   `/var/mobile/Library/Caches/Speaka`, or `/tmp/FTABHarvest` if that can't be written. Each file is fetched into
+   memory and written out by the app: a download task's temporary file goes inside the app's own data folder, which an
+   unsandboxed TrollStore app can't write without `com.apple.private.security.storage.AppDataContainers`, and that
+   entitlement would also move the app's view of `com.apple.bluetooth`'s preferences, which the tweak reads, into that
+   folder. A failure names the step, the file and the error's domain and code;
 2. hands both to the update helper, `speakahelper`, which runs as root (TrollStore's persona spawn, as in Caz);
 3. the helper installs the `.deb` with dpkg and waits. Its install script restarts Bluetooth. If dpkg fails, the
    window says so and nothing else happens;
@@ -152,6 +171,7 @@ and commercial use. Only the picture is shipped, not the font.
 | `Speaka/Theme.swift` | `Theme.swift` | Colours and metrics (Caz's, with Speaka's teal), Speaka's background, the title's font |
 | `Speaka/Windows.swift` | `Windows.swift` (the window card) | The Audio Output and Credits windows |
 | `Speaka/SpeakaModel.swift` | after `CleanerModel.swift` | State, polling, and Start or Stop as log lines |
+| `Speaka/SessionSteps.swift` | | The steps after Bluetooth restarts, each read from a status the tweak publishes |
 | `Speaka/SpeakaUpdater.swift` | `UpdateModel.swift` | Releases, versions, downloads and the hand-off to the helper |
 | `Speaka/UpdateViews.swift` | `UpdateViews.swift` | Update Available, the changelog, the progress ring |
 | `Speaka/Model/SPTweakClient`, `SPConnectedDevice` | | The tweak's protocol and the PC's name, in Objective-C |

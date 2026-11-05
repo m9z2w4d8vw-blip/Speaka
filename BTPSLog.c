@@ -141,6 +141,23 @@ static void publish_state(void)
 
 /* ------------------------------------------------------------------------------------------------- status */
 
+static void flush_cb(void *ctx)
+{
+    (void)ctx;
+    g_flush_pending = 0;
+    if (g_dirty) { g_dirty = 0; (void)prefs_flush(); }
+}
+
+/* Any change, a status or a log line, reaches the preferences copy within a second, coalesced across daemon threads.
+   Speaka's Start shows each step of an armed launch as the tweak reports it, so a status can't wait for an unrelated
+   log line or the 60 s heartbeat. Only setup and connection events change statuses; the media path never does. */
+static void schedule_flush(void)
+{
+    if (!g_queue) return;   /* inside BTPSLogInit, before the queue exists: the 2 s self-test flushes it */
+    if (!__sync_lock_test_and_set(&g_flush_pending, 1))
+        dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 1LL * NSEC_PER_SEC), g_queue, NULL, flush_cb);
+}
+
 void BTPSSetStatus(const char *key, const char *fmt, ...)
 {
     char val[160];
@@ -159,6 +176,7 @@ void BTPSSetStatus(const char *key, const char *fmt, ...)
     }
     g_dirty = 1;
     pthread_mutex_unlock(&g_lock);
+    schedule_flush();
 }
 
 void BTPSSetSummary(unsigned loaded, unsigned uuid_ok, unsigned hooks_ok, unsigned hooks_bad)
@@ -172,13 +190,6 @@ void BTPSSetSummary(unsigned loaded, unsigned uuid_ok, unsigned hooks_ok, unsign
 int BTPSExperimentsEnabled(void) { return g_experiments; }
 
 /* ----------------------------------------------------------------------------------------------- logging */
-
-static void flush_cb(void *ctx)
-{
-    (void)ctx;
-    g_flush_pending = 0;
-    if (g_dirty) { g_dirty = 0; (void)prefs_flush(); }
-}
 
 static void log_common(int sync, const char *fmt, va_list ap)
 {
@@ -201,10 +212,8 @@ static void log_common(int sync, const char *fmt, va_list ap)
     } else {
         char *copy = strdup(line);
         if (copy) dispatch_async_f(g_queue, copy, async_write_line);
-        if (!__sync_lock_test_and_set(&g_flush_pending, 1)) {  /* coalesce across daemon threads */
-            dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 1LL * NSEC_PER_SEC), g_queue, NULL, flush_cb);
-        }
     }
+    if (inited) schedule_flush();   /* BTPSLogNow too: it used to reach the preferences only on the next BTPSLog */
 }
 
 void BTPSLog(const char *fmt, ...)

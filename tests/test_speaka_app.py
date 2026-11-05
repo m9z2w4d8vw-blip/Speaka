@@ -29,6 +29,7 @@ PARTS = APP / "Speaka/MainComponents.swift"
 WINDOWS = APP / "Speaka/Windows.swift"
 UPDATER = APP / "Speaka/SpeakaUpdater.swift"
 UPDATE_VIEWS = APP / "Speaka/UpdateViews.swift"
+STEPS = APP / "Speaka/SessionSteps.swift"
 HELPER = APP / "RootHelper/main.c"
 CLIENT_H = APP / "Speaka/Model/SPTweakClient.h"
 CLIENT_M = APP / "Speaka/Model/SPTweakClient.m"
@@ -186,7 +187,7 @@ class SpeakaApp(unittest.TestCase):
             for name in re.findall(rf"\b{receiver}\.(\w+)\(", code):
                 self.assertIn(name, pinned, f"Swift calls {receiver}.{name}(), which no NS_SWIFT_NAME declares")
         # Properties read from SPStatus (status.) and SPRequest (pending.) exist in the header.
-        properties = set(re.findall(r"@property \([^)]*\) [\w <>*]+?\*?(\w+);", read(CLIENT_H)))
+        properties = set(re.findall(r"@property \([^)]*\) [\w <>*,]+?\*?(\w+);", read(CLIENT_H)))
         for owner in ("status", "pending"):
             names = set(re.findall(rf"\b{owner}\.(\w+)\b(?!\()", code))
             self.assertTrue(names, owner)
@@ -236,18 +237,120 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn('startLyric("Restarting Bluetooth")', toggle)
         relaunched = block(model, "private func relaunched(_ pending: SPRequest) {")
         self.assertIn('finishLyric("Bluetooth restarted")', relaunched)
-        self.assertIn('startLyric("Adding the speaker")', relaunched)
-        finish = block(model, "private func finish(_ pending: SPRequest) {")
-        self.assertLess(finish.index('finishLyric("Speaker added")'), finish.index('finishLyrics(success: "Ready for your PC"'))
-        self.assertIn('finishLyrics(success: "Bluetooth back to normal"', finish)
-        self.assertIn("collapseSoon()", finish)
-        self.assertIn("relaunched(pending)", block(model, "private func tick() {"))
-        # A failure is told apart by SPTweakClient's own result titles.
-        failure = block(model, "static func failure(for pending: SPRequest) -> (line: String, problem: String?) {")
-        titles = set(re.findall(r'title == "([^"]+)"', failure))
+        self.assertIn('steps = pending.action == "start" ? SessionStep.start : SessionStep.stop', relaunched)
+        self.assertIn("startLyric(steps[0].running)", relaunched)
+        # After the restart the model reads the tweak's statuses itself, one step per poll.
+        tick = block(model, "private func tick() {")
+        self.assertLess(tick.index("refresh()"), tick.index("advance(pending)"))
+        self.assertLess(tick.index("advance(pending)"), tick.index("client.pollRequest(pending)"))
+        self.assertIn("relaunched(pending)", tick)
+        self.assertIn("self.status = status.diagnostics.compactMapValues { $0 as? String }", model)
+        advance = block(model, "private func advance(_ pending: SPRequest) {")
+        for line in ("switch step.check(status) {", "finishLyric(step.done)", "startLyric(steps[stepIndex].running)",
+                     "complete(pending)", 'stop(line: step.failed, problem: "\\(step.failed): \\(reason)")',
+                     "Date().timeIntervalSince(pending.started) > SessionStep.timeout"):
+            self.assertIn(line, advance)
+        self.assertEqual(advance.count("stepIndex += 1"), 1)   # at most one step per poll
+        complete = block(model, "private func complete(_ pending: SPRequest) {")
+        self.assertIn('finishLyrics(success: "Ready for your PC", symbol: "hifispeaker")', complete)
+        self.assertIn('finishLyrics(success: "Bluetooth back to normal"', complete)
+        self.assertIn("collapseSoon()", complete)
+        # A failed log stays up long enough to read which step failed.
+        self.assertIn("collapseSoon(after: Self.failedLogSeconds)", block(model, "private func stop(line: String, problem: String) {"))
+        self.assertIn("static let failedLogSeconds: TimeInterval = 6", model)
+        # Before the restart, a failure is told apart by SPTweakClient's own result titles.
+        failure = block(model, "static func failure(for pending: SPRequest) -> (line: String, problem: String) {")
+        titles = set(re.findall(r'resultTitle == "([^"]+)"', failure))
         self.assertEqual(titles, {"Still waiting"})
         for title in titles:
             self.assertIn(f'title:@"{title}"', read(CLIENT_M))
+        self.assertEqual(re.search(r"static let timeout: TimeInterval = (\d+)", read(STEPS)).group(1), "45")
+        self.assertIn("elapsed > (request.relaunched ? 45.0 : 25.0)", read(CLIENT_M))
+
+    def test_start_steps_read_what_the_tweak_publishes(self):
+        """Every status key and prefix a step reads is one the tweak really writes, so the log can't drift from it."""
+        steps = read(STEPS)
+        start = re.search(r"static let start: \[SessionStep\] = \[([^\]]+)\]", steps).group(1)
+        self.assertEqual([n.strip() for n in start.split(",")],
+                         ["arm", "hooks", "endpoints", "room", "audioPath", "speaker", "advertising"])
+        self.assertIn("static let stop: [SessionStep] = [switchOff]", steps)
+        tweak = read(ROOT / "Tweak.xm") + read(ROOT / "BTPSV89Session.c")
+        # Statuses as the tweak writes them: the key, and the format's fixed text before its first conversion.
+        written = {}
+        for call in re.finditer(r'BTPSSetStatus\(\s*"([\w.]+)"\s*,(.*?)\);', tweak, re.S):
+            written.setdefault(call.group(1), []).extend(re.findall(r'"([^"]*)"', call.group(2)))
+        written.setdefault("diag.v89.session", []).append("%s nonce=%s pid=%d result=%s")
+        keys = set(re.findall(r'status\["([\w.]+)"', steps)) | set(re.findall(r'\("(diag\.[\w.]+)", \[', steps))
+        self.assertGreaterEqual(len(keys), 12)
+        for key in keys:
+            self.assertIn(key, written, f"no BTPSSetStatus writes {key}")
+
+        def matches(prefix, key):
+            for fmt in written[key]:
+                fixed = fmt.split("%", 1)[0]
+                if fixed.startswith(prefix) or (prefix.startswith(fixed) and "%" in fmt):
+                    return True
+            return False
+
+        # Prefixes each step checks, by key.
+        checks = {
+            "diag.v82.trial": ["ARMED", "REFUSED", "OFF"],
+            "diag.v81_seven_slots": ["ONE SHOT result: live_slots=", "ONE SHOT result:", "REFUSED"],
+            "diag.v80_config_lookup": ["ARMED", "OBSERVED", "NO_INDEX3"],
+            "diag.v82.rx": ["installed"], "diag.v82.tx": ["installed", "TX capture active"],
+            "diag.v86.media": ["V87 ARMED"], "diag.v882.idle_guard": ["v8.8.2"], "diag.sdp_probe": ["installed"],
+            "diag.audio_receive": ["v8.8 callback ready", "REFUSED"],
+            "diag.v83.audio_table": ["WAITING", "REFUSED", "ROLLED BACK", "UNSAFE", "FAILED", "SDP publish failed",
+                                     "REFUSED: required", "REFUSED: registration-loop", "FAILED: registration-loop"],
+            "diag.v82.sep": ["LOCAL register=0 SEID=", "LOST"],
+            "diag.v82.sdp": ["LOCAL add="],
+        }
+        for key, prefixes in checks.items():
+            for prefix in prefixes:
+                self.assertTrue(matches(prefix, key), f"the tweak never writes {key} starting {prefix!r}")
+            for prefix in prefixes:
+                self.assertIn(f'"{prefix}', steps.replace("live_slots=7 ", "live_slots=").replace("SEID=7", "SEID="),
+                              f"{prefix!r} is listed here but no step checks it")
+        # The results the steps read from the session line are the ones BTPSV89SessionReport writes.
+        report = read(ROOT / "BTPSV89Session.c")
+        for result in ("ARMED", "REFUSED", "OFF", "STILL_ARMED"):
+            self.assertIn(f'"{result}"', report)
+        for result in ("result=REFUSED", "result=OFF", "result=STILL_ARMED"):
+            self.assertIn(f'"{result}"', steps)
+        # A zero SDP result prints as "0" (%#llx), and SEID 7 is the speaker's.
+        self.assertIn('BTPSSetStatus("diag.v82.sdp", "LOCAL add=%#llx handle=%#x;', read(ROOT / "Tweak.xm"))
+        self.assertIn('sdp.hasPrefix("LOCAL add=0 ")', steps)
+        self.assertIn('sep.hasPrefix("LOCAL register=0 SEID=7")', steps)
+        # Six native Sources: the step accepts the count the tweak writes as "%u".
+        self.assertIn('BTPSSetStatus("diag.native_source_ok", "%u", sources);', read(ROOT / "Tweak.xm"))
+
+    def test_the_tweak_reports_every_step_promptly(self):
+        """Every final refusal on the way to the speaker sets a status, and statuses reach the app within a second."""
+        tweak = read(ROOT / "Tweak.xm")
+        attempt = block(tweak, "static void btps_v83_attempt_post_source(uint64_t audio_context)\n{")
+        claim = attempt.index("__sync_bool_compare_and_swap(&g_v82_sink_attempted, 0, 1)")
+        # Before the one attempt is claimed, a missing prerequisite is WAITING: the next power-on tries again.
+        self.assertIn('BTPSSetStatus("diag.v83.audio_table", "WAITING: %s", missing);', attempt[:claim])
+        self.assertNotRegex(attempt[:claim], r'BTPSSetStatus\([^;]*"REFUSED')
+        # After it (its own line returns quietly: someone else made the attempt), every return says why.
+        after = attempt[attempt.index("return;", claim) + len("return;"):].split("reject_before_swap:", 1)[0]
+        stretches = after.split("return;")[:-1]
+        self.assertGreaterEqual(len(stretches), 7)
+        for stretch in stretches:
+            self.assertIn("BTPSSetStatus(", stretch, "a return without a status, after: " + stretch[-200:])
+        callback = block(tweak, "static int btps_v88_install_callback(uint64_t context)\n{")
+        self.assertEqual(callback.count("return 0;"), callback.count('BTPSSetStatus("diag.audio_receive","REFUSED'))
+        self.assertRegex(tweak, r'#define BTPS_V89_BUILD_TAG "v9\.4\.0-one-tap-output-select"')
+        log = read(ROOT / "BTPSLog.c")
+        flush = block(log, "static void schedule_flush(void)\n{")
+        self.assertIn("if (!g_queue) return;", flush)
+        self.assertIn("if (!__sync_lock_test_and_set(&g_flush_pending, 1))", flush)
+        self.assertIn("1LL * NSEC_PER_SEC", flush)
+        status = block(log, "void BTPSSetStatus(const char *key, const char *fmt, ...)\n{")
+        self.assertLess(status.index("pthread_mutex_unlock(&g_lock);"), status.index("schedule_flush();"))
+        common = block(log, "static void log_common(int sync, const char *fmt, va_list ap)\n{")
+        self.assertIn("if (inited) schedule_flush();", common)   # BTPSLogNow too, not only BTPSLog
+        self.assertEqual(log.count("dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 1LL * NSEC_PER_SEC)"), 1)
 
     # ------------------------------------------------------------------ updates
     def test_updater_installs_the_tweak_then_the_app_then_resprings(self):
@@ -272,6 +375,27 @@ class SpeakaApp(unittest.TestCase):
         self.assertLess(start.index('"Speaka-update.deb"'), start.index('"Speaka-update.tipa"'))
         self.assertIn('var args = ["install-update"]', updater)
         self.assertIn('args += [file.pathExtension.lowercased() == "deb" ? "--deb" : "--tipa", file.path]', updater)
+        # v9.4: no download task (its temporary file goes in the app's data folder, which v9.3 couldn't write) and no
+        # cache; each file is fetched into memory and written to a folder outside it, the tweak's own as a fallback.
+        self.assertIn("private static let session = URLSession(configuration: .ephemeral)", updater)
+        self.assertIn("Self.session.dataTask(with: part.url)", updater)
+        for gone in (r"\bdownloadTask\b", r"\bmoveItem\b", r"\.cachesDirectory\b",
+                     r"URLSession\.shared\.dataTask\(with: part\.url\)"):
+            self.assertNotRegex(strip_comments_and_strings(updater), gone)
+        self.assertIn('static let downloadFolders = ["/var/mobile/Library/Caches/Speaka", "/tmp/FTABHarvest"]', updater)
+        self.assertRegex(read(ROOT / "BTPSShared.h"), r'#define BTPS_LOG_DIR_TMP\s+"/tmp/FTABHarvest"')
+        helper = read(HELPER)
+        for folder in ("/var/mobile/", "/tmp/FTABHarvest/", "/private/var/tmp/FTABHarvest/"):
+            self.assertIn(f'"{folder}"', helper)
+        # Every failure says which step and which file, and the error's domain and code.
+        self.assertIn('problem = "Downloading \\(part.label): \\(Self.describe(error))"', updater)
+        self.assertIn('if file == nil { problem = "Saving \\(part.label): \\(saving.problem)" }', updater)
+        self.assertIn('var text = "\\(ns.localizedDescription) (\\(ns.domain) \\(ns.code)"', updater)
+        self.assertIn('Part(url: url, name: "Speaka-update.deb", label: "the tweak")', updater)
+        self.assertIn('Part(url: url, name: "Speaka-update.tipa", label: "the app")', updater)
+        self.assertIn('"Downloading \\(part.label), \\(partsDone + 1) of \\(partCount)"', updater)
+        self.assertIn('updater.activity.isEmpty ? "Please wait while files finish downloading" : updater.activity',
+                      read(UPDATE_VIEWS))
         # Only an app-only update falls back to TrollStore's link; a failed .deb is reported and nothing else happens.
         done = block(updater, "private func installed(status: Int32, errors: [String], withTweak: Bool) {")
         self.assertLess(done.index("if withTweak {"), done.index("openInTrollStore()"))
@@ -354,8 +478,18 @@ class SpeakaApp(unittest.TestCase):
             self.assertNotIn("trollstorehelper", out)
             # TrollStore's installer fails: code 7, so the app falls back to TrollStore's link.
             self.assertEqual(run("install-update", "--tipa", str(tipa), fail="trollstorehelper")[0], 7)
-            # Update files must be regular files inside /var/mobile, with the right extension.
-            for bad in ("/tmp/elsewhere.deb", str(caches) + "/../../../../etc/x.deb", str(caches / "Speaka-update.txt")):
+            # The app's fallback folder, the tweak's own /tmp/FTABHarvest, is accepted too.
+            harvest = phone / "tmp/FTABHarvest"
+            harvest.mkdir(parents=True)
+            (harvest / "Speaka-update.deb").write_text("deb")
+            code, out = run("install-update", "--deb", str(harvest / "Speaka-update.deb"))
+            self.assertEqual(code, 0, out)
+            self.assertEqual(arguments(out.split("would start", 1)[0]), ["-i", str(harvest / "Speaka-update.deb")])
+            # Update files must be regular files inside those folders, with the right extension.
+            (phone / "tmp/elsewhere").mkdir(parents=True)
+            (phone / "tmp/elsewhere/x.deb").write_text("deb")
+            for bad in ("/tmp/elsewhere.deb", str(phone / "tmp/elsewhere/x.deb"), str(caches) + "/../../../../etc/x.deb",
+                        str(caches / "Speaka-update.txt")):
                 self.assertEqual(run("install-update", "--deb", bad)[0], 4, bad)
             (caches / "link.deb").symlink_to(deb)
             self.assertEqual(run("install-update", "--deb", str(caches / "link.deb"))[0], 4)
@@ -407,7 +541,8 @@ class SpeakaApp(unittest.TestCase):
                      ".transition(.scale(scale: 0.7).combined(with: .opacity))"):
             self.assertIn(line, content)
         model = read(MODEL)
-        self.assertIn("DispatchQueue.main.asyncAfter(deadline: .now() + 1.6)", model)
+        self.assertIn("private func collapseSoon(after seconds: TimeInterval = 1.6) {\n"
+                      "        DispatchQueue.main.asyncAfter(deadline: .now() + seconds)", model)
         self.assertIn('var headerSubtitle: String { "iOS \\(UIDevice.current.systemVersion)" }', model)
         self.assertIn('var headerDetail: String { headerWarning ?? "by Parv" }', model)
         self.assertIn(".background(Theme.window, in: RoundedRectangle(cornerRadius: 16, style: .continuous))", read(WINDOWS))
@@ -748,8 +883,8 @@ class SpeakaApp(unittest.TestCase):
             # Swift and Foundation
             "Bool", "CGFloat", "CGRect", "CGSize", "Date", "Double", "Int", "String", "UUID", "URL", "Array", "Self", "Void",
             "Int32", "UInt32", "Equatable", "Identifiable", "Decodable", "NSString", "Data", "AttributedString", "Bundle",
-            "FileManager", "Timer", "RunLoop", "DispatchQueue", "URLRequest", "URLSession", "URLSessionDownloadTask",
-            "HTTPURLResponse", "JSONDecoder",
+            "FileManager", "Timer", "RunLoop", "DispatchQueue", "URLRequest", "URLSession", "URLSessionTask",
+            "HTTPURLResponse", "JSONDecoder", "Error", "NSError", "NSUnderlyingErrorKey", "TimeInterval",
             # CoreGraphics
             "CGPoint", "CGContext", "CGColorSpace", "CGGradient", "CGColorSpaceCreateDeviceRGB",
             # SwiftUI and Combine

@@ -184,7 +184,9 @@ struct DownloadView: View {
                                                    : "Speaka will close when it's done"
         case .installed: return "Close Speaka and open it again"
         case .failed(let message): return message
-        case .changelog, .downloading: return "Please wait while files finish downloading"
+        // Caz's line, or which file is downloading when there are two: "Downloading the tweak, 1 of 2".
+        case .changelog, .downloading:
+            return updater.activity.isEmpty ? "Please wait while files finish downloading" : updater.activity
         }
     }
 }

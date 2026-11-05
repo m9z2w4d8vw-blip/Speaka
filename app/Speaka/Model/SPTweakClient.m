@@ -86,6 +86,7 @@ static NSString *SPOutputsDescription(id outputs)
         _outputMode = @"speaker";
         _playingOn = @"";
         _waitingReason = @"";
+        _diagnostics = @{};
     }
     return self;
 }
@@ -146,6 +147,7 @@ static NSString *SPOutputsDescription(id outputs)
     SPSynchronize();
     SPStatus *s = [[SPStatus alloc] init];
     NSDictionary *status = SPDaemonStatus();
+    s.diagnostics = status ?: @{};   // the app's Start and Stop steps read the tweak's own statuses
     s.build = SPString(status[@"diag.v89.build"]);
 
     // The same rules, in the same order, as BTPSSessionSummary() in the Settings page.

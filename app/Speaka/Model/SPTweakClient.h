@@ -36,6 +36,7 @@ typedef NS_ENUM(NSInteger, SPSession) {
 @property (nonatomic, copy) NSString *playingOn;     // e.g. "iPhone speaker", "Headphones (wired)"
 @property (nonatomic, copy) NSString *waitingReason; // e.g. "no wired headphones plugged in"
 @property (nonatomic) BOOL volumeZero;
+@property (nonatomic, copy) NSDictionary<NSString *, id> *diagnostics; // the tweak's whole status block, as published
 @property (nonatomic, readonly) BOOL canStart;
 @property (nonatomic, readonly) BOOL canStop;
 @end

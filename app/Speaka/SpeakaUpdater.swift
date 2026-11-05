@@ -45,14 +45,29 @@ final class SpeakaUpdater: ObservableObject {
     /// What the circle shows. It eases toward the real progress like Caz's (25% of the gap per frame).
     @Published private(set) var progress: Double = 0
 
+    /// What the update window says while it works: "Downloading the tweak, 1 of 2".
+    @Published private(set) var activity = ""
+
     private struct Part {
         let url: URL
         let name: String
+        let label: String   // "the tweak" or "the app", for the window and for errors
     }
+
+    /// Where downloads are saved, tried in order: outside the app's own data folder, which an unsandboxed TrollStore
+    /// app can't write without com.apple.private.security.storage.AppDataContainers. That entitlement would also move
+    /// the app's view of com.apple.bluetooth's preferences, which the tweak reads, into that folder, so Speaka goes
+    /// without it. The update helper takes files from both places (app/RootHelper/main.c).
+    static let downloadFolders = ["/var/mobile/Library/Caches/Speaka", "/tmp/FTABHarvest"]
+
+    /// Each file is downloaded into memory (they're under 1 MB) and written out here, because a download task first
+    /// writes a temporary file inside that same data folder, which is what failed in v9.3 with "Operation not
+    /// permitted". No cache either, so nothing else is written there.
+    private static let session = URLSession(configuration: .ephemeral)
 
     private var target: Double = 0
     private var timer: Timer?
-    private var task: URLSessionDownloadTask?
+    private var task: URLSessionTask?
     private var partCount = 1
     private var partsDone = 0
     private var checking = false
@@ -191,8 +206,8 @@ final class SpeakaUpdater: ObservableObject {
     func startDownload() {
         guard isAvailable, !isBusy else { return }
         var parts: [Part] = []
-        if let url = deb?.debURL { parts.append(Part(url: url, name: "Speaka-update.deb")) }
-        if let url = tipa?.tipaURL { parts.append(Part(url: url, name: "Speaka-update.tipa")) }
+        if let url = deb?.debURL { parts.append(Part(url: url, name: "Speaka-update.deb", label: "the tweak")) }
+        if let url = tipa?.tipaURL { parts.append(Part(url: url, name: "Speaka-update.tipa", label: "the app")) }
         stage = .downloading
         progress = 0
         target = 0
@@ -207,23 +222,21 @@ final class SpeakaUpdater: ObservableObject {
             install(saved)
             return
         }
-        let downloadTask = URLSession.shared.downloadTask(with: part.url) { [weak self] location, response, error in
+        activity = partCount > 1
+            ? "Downloading \(part.label), \(partsDone + 1) of \(partCount)" : "Downloading \(part.label)"
+        let dataTask = Self.session.dataTask(with: part.url) { [weak self] data, response, error in
             var file: URL? = nil
-            var problem = error?.localizedDescription
-            if let location = location, error == nil {
-                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                    problem = "GitHub answered with error \(http.statusCode)."
-                } else {
-                    let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                    let destination = folder.appendingPathComponent(part.name)
-                    try? FileManager.default.removeItem(at: destination)
-                    do {
-                        try FileManager.default.moveItem(at: location, to: destination)
-                        file = destination
-                    } catch {
-                        problem = error.localizedDescription
-                    }
-                }
+            var problem: String? = nil
+            if let error = error {
+                problem = "Downloading \(part.label): \(Self.describe(error))"
+            } else if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                problem = "Downloading \(part.label): GitHub answered with error \(http.statusCode)."
+            } else if let data = data, !data.isEmpty {
+                let saving = Self.save(data, as: part.name)
+                file = saving.file
+                if file == nil { problem = "Saving \(part.label): \(saving.problem)" }
+            } else {
+                problem = "Downloading \(part.label): GitHub sent an empty file."
             }
             let finished = file
             let reason = problem
@@ -237,13 +250,40 @@ final class SpeakaUpdater: ObservableObject {
                 self.download(Array(parts.dropFirst()), saved: saved + [finished])
             }
         }
-        task = downloadTask
-        downloadTask.resume()
+        task = dataTask
+        dataTask.resume()
     }
 
-    /// The helper installs the .deb first; if that fails, nothing else changes. Then come the .tipa and the respring,
-    /// which close Speaka, so they run on in the helper after Speaka is gone.
+    /// Writes a download into the first of `downloadFolders` that takes it. The problem names every folder tried.
+    static func save(_ data: Data, as name: String) -> (file: URL?, problem: String) {
+        var problems: [String] = []
+        for folder in downloadFolders {
+            let directory = URL(fileURLWithPath: folder, isDirectory: true)
+            let file = directory.appendingPathComponent(name)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try? FileManager.default.removeItem(at: file)
+                try data.write(to: file)
+                return (file, "")
+            } catch {
+                problems.append("\(folder): \(describe(error))")
+            }
+        }
+        return (nil, problems.joined(separator: "; "))
+    }
+
+    /// An error as text, with its domain and code (and the POSIX error under it, if any), so a report pins it down.
+    static func describe(_ error: Error) -> String {
+        let ns = error as NSError
+        var text = "\(ns.localizedDescription) (\(ns.domain) \(ns.code)"
+        if let under = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            text += ", \(under.domain) \(under.code)"
+        }
+        return text + ")"
+    }
+
     private func install(_ files: [URL]) {
+        activity = ""
         target = 1
         stage = .installing
         var args = ["install-update"]

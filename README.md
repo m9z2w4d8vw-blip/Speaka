@@ -120,8 +120,11 @@ The app looks and moves like Caz, from Caz's own code: the same panels, type and
 background.
 
 - **One button** at the bottom reads **Start**, or **Stop** while the speaker is on. Tapping it opens it into a log,
-  as Caz's Clean button does: *Restarting Bluetooth*, *Adding the speaker*, then *Ready for your PC*. About 1.6 s after
-  the last line it folds back, now reading the other word.
+  as Caz's Clean button does, with a line for each step Bluetooth goes through: restarting, arming the speaker,
+  installing its hooks, registering Bluetooth's own endpoints, making room for the speaker, preparing the audio path,
+  adding the speaker and advertising it, then *Ready for your PC*. If a step fails, its line says so and the header
+  keeps the tweak's own reason. The log folds back 1.6 s after the last line, or 6 s after a failure, and the button
+  then reads the other word.
 - **The connection line** above the button says what's happening, for example *LAPTOP-XXXX · iPhone speaker*, or
   *Connect from your PC* while the speaker waits.
 - **The header** reads *by Parv*, or, when something needs your attention, says what in the warning colour: for
@@ -140,7 +143,8 @@ Once per launch, the app asks GitHub for Speaka's releases. When one is newer th
 **Update Available** slides up above the button, as in Caz. Tapping it opens the changelog (the commit messages of
 each release), and **Update** installs it:
 
-1. it downloads what's newer: the tweak's `.deb`, the app's `.tipa`, or both;
+1. it downloads what's newer: the tweak's `.deb`, the app's `.tipa`, or both, into `/var/mobile/Library/Caches/Speaka`
+   (or the tweak's `/tmp/FTABHarvest` if that can't be written);
 2. it installs the `.deb` with dpkg, whose install script restarts Bluetooth, so a running speaker stops;
 3. it installs the `.tipa` with TrollStore, which closes Speaka;
 4. if the tweak was updated, it resprings, so Settings and the app open in their new versions.
@@ -231,7 +235,7 @@ scp mobile@<iphone-ip>:/tmp/FTABHarvest/BTPSAudioHelper-v88.log "$env:USERPROFIL
 
 | Line | Meaning |
 | --- | --- |
-| `diag.v89.build: v9.1.0-one-tap-output-select` | The tweak build running inside `bluetoothd` |
+| `diag.v89.build: v9.4.0-one-tap-output-select` | The tweak build running inside `bluetoothd` |
 | `diag.v89.session: start nonce=... result=ARMED` | Start restarted Bluetooth and armed the speaker |
 | `diag.v82.sep: LOCAL register=0 SEID=7 role=SNK ...` | The speaker endpoint is registered |
 | `V88_CONFIG handle=1 local_seid=7 remote_seid=...` | The PC configured a stream |
@@ -525,6 +529,7 @@ notes.
 | v9.1 | No more Headphones / PC flicker: the helper keeps its output through stream changes | [TESTING-v9.1](docs/history/TESTING-v9.1.md) |
 | v9.2 | The app takes Caz's look: one Start/Stop button that opens into a live log | [TESTING-v9.2](docs/history/TESTING-v9.2.md) |
 | v9.3 | Speaka's own background again; the app updates itself and the tweak; numbered releases | [TESTING-v9.3](docs/history/TESTING-v9.3.md) |
+| v9.4 | Updates that install; Start shows every step and which one failed | [TESTING-v9.4](docs/history/TESTING-v9.4.md) |
 
 | Research note | Topic |
 | --- | --- |

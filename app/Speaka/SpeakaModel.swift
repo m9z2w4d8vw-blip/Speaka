@@ -67,6 +67,11 @@ final class SpeakaModel: ObservableObject {
     @Published private(set) var computerName: String? = nil
 
     private let client = SPTweakClient()
+    /// The tweak's own status block, which the steps of a Start or a Stop are read from.
+    private var status: [String: String] = [:]
+    /// The steps still to come after Bluetooth restarts (SessionSteps.swift), and the one running now.
+    private var steps: [SessionStep] = []
+    private var stepIndex = 0
     private var timer: Timer? = nil
     private var active = false
     private var problemSession: SPSession? = nil
@@ -189,21 +194,24 @@ final class SpeakaModel: ObservableObject {
     }
 
     private func tick() {
-        if let pending = request {
-            let wasRelaunched = pending.relaunched
-            let state = client.pollRequest(pending)
-            if !wasRelaunched && pending.relaunched {
-                relaunched(pending)
-            }
-            if state == .finished {
-                finish(pending)
-            }
+        refresh()   // first, so the steps read this poll's status
+        guard let pending = request else { return }
+        if pending.relaunched {
+            advance(pending)
+            return
         }
-        refresh()
+        // Until Bluetooth restarts, SPTweakClient follows the request, as for Settings > Speaka.
+        let state = client.pollRequest(pending)
+        if pending.relaunched {
+            relaunched(pending)
+        } else if state == .finished {
+            finish(pending)
+        }
     }
 
     func refresh() {
         let status = client.readStatus()
+        self.status = status.diagnostics.compactMapValues { $0 as? String }
         var next = Snapshot()
         next.session = status.session
         next.build = status.build
@@ -255,7 +263,7 @@ final class SpeakaModel: ObservableObject {
         guard let pending = client.sendAction(action, error: &error) else {
             let reason = error.map { $0 as String } ?? "The request could not be sent."
             fail("Couldn't reach Bluetooth", problem: reason)
-            collapseSoon()
+            collapseSoon(after: Self.failedLogSeconds)
             return
         }
         request = pending
@@ -264,46 +272,79 @@ final class SpeakaModel: ObservableObject {
 
     private func relaunched(_ pending: SPRequest) {
         finishLyric("Bluetooth restarted")
-        if pending.action == "start" {
-            startLyric("Adding the speaker")
+        steps = pending.action == "start" ? SessionStep.start : SessionStep.stop
+        stepIndex = 0
+        startLyric(steps[0].running)
+    }
+
+    /// One step per poll, so the log reads one line at a time even when Bluetooth reports several at once. The step
+    /// running now finishes, fails with the tweak's reason, or keeps waiting until the request runs out of time.
+    private func advance(_ pending: SPRequest) {
+        guard stepIndex < steps.count else { return }
+        let step = steps[stepIndex]
+        switch step.check(status) {
+        case .done:
+            finishLyric(step.done)
+            stepIndex += 1
+            if stepIndex < steps.count {
+                startLyric(steps[stepIndex].running)
+            } else {
+                complete(pending)
+            }
+        case .failed(let reason):
+            stop(line: step.failed, problem: "\(step.failed): \(reason)")
+        case .waiting(let reason):
+            if Date().timeIntervalSince(pending.started) > SessionStep.timeout {
+                stop(line: step.failed, problem: reason.map { "\(step.failed): \($0)" } ?? step.stalled)
+            }
         }
     }
 
-    private func finish(_ pending: SPRequest) {
-        request = nil
-        if pending.succeeded {
-            if pending.action == "start" {
-                finishLyric("Speaker added")
-                finishLyrics(success: "Ready for your PC", symbol: "hifispeaker")
-            } else {
-                finishLyrics(success: "Bluetooth back to normal", symbol: "checkmark.circle")
-            }
+    private func complete(_ pending: SPRequest) {
+        end()
+        if pending.action == "start" {
+            finishLyrics(success: "Ready for your PC", symbol: "hifispeaker")
         } else {
-            let failure = Self.failure(for: pending)
-            fail(failure.line, problem: failure.problem)
+            finishLyrics(success: "Bluetooth back to normal", symbol: "checkmark.circle")
         }
         collapseSoon()
+    }
+
+    /// The step that was running fails, and its reason stays in the header after the log folds away.
+    private func stop(line: String, problem: String) {
+        end()
+        fail(line, problem: problem)
+        collapseSoon(after: Self.failedLogSeconds)
+    }
+
+    /// A request that ends before Bluetooth restarts: SPTweakClient's verdict.
+    private func finish(_ pending: SPRequest) {
+        end()
+        let failure = Self.failure(for: pending)
+        fail(failure.line, problem: failure.problem)
+        collapseSoon(after: Self.failedLogSeconds)
+    }
+
+    private func end() {
+        request = nil
+        steps = []
+        stepIndex = 0
         if !active {
             stopPolling()
         }
     }
 
-    /// What a failed request's line says, and what the header says afterwards (nil: the tweak's own status explains
-    /// it). The titles are SPTweakClient's, which Settings > Speaka shares.
-    static func failure(for pending: SPRequest) -> (line: String, problem: String?) {
-        let title = pending.resultTitle ?? ""
-        let message = pending.resultMessage ?? ""
-        if !pending.relaunched {
-            if title == "Still waiting" {
-                return ("Bluetooth didn't restart",
-                        "Bluetooth didn't restart. If devices don't reconnect, run killall -9 bluetoothd.")
-            }
-            return ("Bluetooth wasn't restarted", "Bluetooth wasn't restarted: \(reason(in: message))")
+    /// A failed log stays up long enough to read which step failed (a finished one folds after Caz's 1.6 s).
+    static let failedLogSeconds: TimeInterval = 6
+
+    /// What the line says when a request ends before Bluetooth restarts, and what the header says afterwards. The
+    /// titles are SPTweakClient's, which Settings > Speaka shares.
+    static func failure(for pending: SPRequest) -> (line: String, problem: String) {
+        if pending.resultTitle == "Still waiting" {
+            return ("Bluetooth didn't restart",
+                    "Bluetooth didn't restart. If devices don't reconnect, run killall -9 bluetoothd.")
         }
-        if title == "Still waiting" {
-            return ("No speaker yet", "The speaker hasn't been added yet. Check that Bluetooth is on.")
-        }
-        return ("The speaker wasn't added", nil)
+        return ("Bluetooth wasn't restarted", "Bluetooth wasn't restarted: \(reason(in: pending.resultMessage ?? ""))")
     }
 
     /// "REFUSED nonce=… reason=stale request; Bluetooth not restarted" becomes "stale request".
@@ -371,8 +412,8 @@ final class SpeakaModel: ObservableObject {
     }
 
     /// Keep the finished log on screen for a moment, then fold the button back (1.6 s, as in Caz).
-    private func collapseSoon() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+    private func collapseSoon(after seconds: TimeInterval = 1.6) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             self?.sheetVisible = false
         }
     }

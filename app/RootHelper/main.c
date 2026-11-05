@@ -16,7 +16,7 @@
 // installer for the .tipa, then a respring. With only a .tipa it works like Caz's helper: TrollStore's installer runs in
 // its own session, and its result comes back, so Speaka can fall back to TrollStore's link if it fails.
 //
-// Exit codes: 0 done, 2 usage, 3 not root, 4 an update file is missing or outside /var/mobile, 5 TrollStore's installer
+// Exit codes: 0 done, 2 usage, 3 not root, 4 an update file is missing or outside its folders, 5 TrollStore's installer
 // wasn't found, 6 it couldn't be started, 7 it failed, 8 dpkg failed, 9 dpkg wasn't found, 10 the last step couldn't be
 // started.
 //
@@ -103,12 +103,22 @@ static int is_dir(const char *p) {
 }
 
 // An update file: a regular file (not a link) inside /var/mobile, with the expected extension.
+// The app saves updates in /var/mobile/Library/Caches/Speaka, or failing that in the tweak's own /tmp/FTABHarvest
+// (SpeakaUpdater.downloadFolders), so those are the two places a file may come from. /tmp is /private/var/tmp.
+static const char *const k_update_dirs[] = {
+    "/private/var/mobile/", "/var/mobile/",
+    "/tmp/FTABHarvest/", "/private/tmp/FTABHarvest/", "/var/tmp/FTABHarvest/", "/private/var/tmp/FTABHarvest/",
+};
+
 static int update_file_ok(const char *path, const char *ext, const char *alt_ext) {
-    char mobile[PATH_MAX], mobile2[PATH_MAX];
-    rp(mobile, "/private/var/mobile/");
-    rp(mobile2, "/var/mobile/");
+    int inside = 0;
+    for (size_t i = 0; i < sizeof k_update_dirs / sizeof k_update_dirs[0] && !inside; i++) {
+        char dir[PATH_MAX];
+        rp(dir, k_update_dirs[i]);
+        inside = starts_with(path, dir);
+    }
     struct stat st;
-    if (!(starts_with(path, mobile) || starts_with(path, mobile2))) return 0;
+    if (!inside) return 0;
     if (strstr(path, "/../")) return 0;
     if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode)) return 0;
     return ends_with_ci(path, ext) || (alt_ext && ends_with_ci(path, alt_ext));
