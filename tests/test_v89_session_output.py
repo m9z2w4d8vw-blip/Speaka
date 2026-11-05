@@ -141,7 +141,7 @@ int main(void) {
         self.assertLess(ctor.index("BTPSV89SessionStart();"), ctor.index("find_main_image(&index, &mh)"))
         final = ctor.rindex("BTPSV89SessionReport(g_v82_armed, btps_v89_receive_ready());")
         self.assertLess(ctor.index("btps_v83_install_native_registration((uintptr_t)mh, uuid_ok);"), final)
-        self.assertLess(ctor.index("BTPSDaemonProbeStartV75();"), final)
+        self.assertNotIn("BTPSDaemonProbeStart", tweak)                     # v9.8: the v7.4/v7.5 probes are gone
         early = ctor.split("if (!find_main_image(&index, &mh)) {", 1)[1].split("return;", 1)[0]
         self.assertIn("BTPSV89SessionReport(0, 0);", early)
         self.assertIn("BTPSV89Session.c", read("Makefile").split("Speaka_FILES", 1)[1].split("\n", 1)[0])
@@ -336,36 +336,22 @@ int main(void) {
             self.assertIn(name, client)
         modes = client.split("+ (NSArray<NSDictionary<NSString *, NSString *> *> *)outputModes", 1)[1].split("];", 1)[0]
         self.assertEqual(re.findall(r'@"key": @"([^"]+)"', modes), ["speaker", "headphones", "any"])
-        # The manual switches stay available as an alternative.
-        keys = {item.get("key") for item in items}
-        self.assertTrue({"SpeakaV81SevenOnce", "SpeakaV82DecisiveOnce"} <= keys)
-        # Settings only writes the request; the tweak arms the switches after validating it.
-        send = controller.split("- (void)sendSession:(NSString *)action", 1)[1].split("- (void)schedulePoll", 1)[0]
-        self.assertLess(send.index("BTPSWritePref(@BTPS_KEY_V89_REQUEST, request)"),
-                        send.index("notify_post(BTPS_NOTIFY_V89_SESSION)"))
-        for key in ("BTPS_KEY_V81_SEVEN_ONCE", "BTPS_KEY_V82_DECISIVE_ONCE", "SpeakaV81SevenOnce",
-                    "SpeakaV82DecisiveOnce"):
-            self.assertNotIn(key, controller)
-        self.assertIn('[@"nonce=" stringByAppendingString:self.pendingNonce]', controller)
-        self.assertIn("AVKit", read("speakaprefs/Makefile"))
-        self.assertIn("- (void)reloadSpecifierID:(NSString *)specifierID;", read("speakaprefs/BTPSRootListController.h"))
+        # v9.8: the page only reads. It never writes a request or arms a switch, and has no switches to arm.
+        self.assertEqual([item for item in items if item.get("cell") == "PSSwitchCell"], [])
+        for name in ("BTPS_KEY_V89_REQUEST", "BTPS_NOTIFY_V89_SESSION", "notify_post", "CFPreferencesSetAppValue",
+                     "BTPS_KEY_V81_SEVEN_ONCE", "BTPS_KEY_V82_DECISIVE_ONCE", "SpeakaV81SevenOnce", "SpeakaV82DecisiveOnce"):
+            self.assertNotIn(name, controller)
+        self.assertNotIn("AVKit", read("speakaprefs/Makefile"))
 
-    def test_settings_gates_start_on_daemon_version_and_never_advises_toggling(self):
-        controller = read("speakaprefs/BTPSRootListController.m")
-        # Start/Stop is only offered to a bluetoothd that actually contains the listener.
-        confirm = controller.split("- (void)confirmSession:(NSString *)action", 1)[1].split("- (void)sendSession:", 1)[0]
-        self.assertLess(confirm.index("daemonHasSessionListener"), confirm.index("presentViewController:alert"))
-        gate = controller.split("- (BOOL)daemonHasSessionListener", 1)[1].split("- (void)confirmSession:", 1)[0]
-        self.assertIn('@"diag.v89.build"', gate)
-        self.assertIn('status[@"diag.v89.build"]', controller.split("static NSString *BTPSSessionSummary", 1)[1])
-        summary = controller.split("static NSString *BTPSSessionSummary", 1)[1].split("\n}\n", 1)[0]
-        self.assertLess(summary.index('hasPrefix:@"LOST"'), summary.index('hasPrefix:@"ARMED"'))
+    def test_the_app_never_advises_toggling_bluetooth(self):
         # Turning Bluetooth off and on does not restart bluetoothd and drops a live Sink: never recommend it.
+        # (v9.8: this was a check on the Settings page's Start; the app is the only place with Start now.)
+        texts = "".join(read(f) for f in ("app/Speaka/SpeakaModel.swift", "app/Speaka/SessionSteps.swift",
+                                          "app/Speaka/Model/SPTweakClient.m"))
         for advice in ("turn Bluetooth off and on", "Turn Bluetooth off and on", "toggle Bluetooth", "Airplane Mode off/on",
                        "auto-restart unavailable"):
-            self.assertNotIn(advice, controller)
-        # The page has no footers now; the Session row itself says to tap Start after a toggle.
-        self.assertIn('@"Off - Bluetooth was turned off and on; tap Start"', controller)
+            self.assertNotIn(advice, texts)
+        self.assertIn('"Bluetooth was turned off and on, which removed the speaker. Tap Start."', texts)
 
     def test_sink_loss_after_bluetooth_toggle_is_reported(self):
         tweak = read("Tweak.xm")

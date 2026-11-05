@@ -41,22 +41,6 @@ const char *btps_ring_at(const btps_ring_t *r, unsigned i)
 
 unsigned long long btps_ring_seq(const btps_ring_t *r) { return r->seq; }
 
-size_t btps_ring_join(const btps_ring_t *r, char *out, size_t cap)
-{
-    size_t used = 0;
-    if (cap == 0) return 0;
-    for (unsigned i = 0; i < r->count; i++) {
-        const char *s = btps_ring_at(r, i);
-        size_t n = strlen(s);
-        if (used + n + 1 >= cap) break;        /* keep room for the NUL */
-        memcpy(out + used, s, n);
-        used += n;
-        out[used++] = '\n';
-    }
-    out[used] = '\0';
-    return used;
-}
-
 void btps_fmt_time(char *out, size_t cap)
 {
     struct timeval tv;

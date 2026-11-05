@@ -1,7 +1,7 @@
-"""Settings > Speaka (v9.7): Status, Debug log and one Experiments section with every switch. Start, Stop, the
-session and the audio output moved to the app, which speaks the same protocol; the page's code behind them stays,
-unused. Earlier: the sections carry no footer text, and the Playing on and never-play rows were removed together
-with the code behind them."""
+"""Settings > Speaka: Status and Debug log, read-only. Start, Stop, the session and the audio output moved to the app
+in v9.7, and the code behind them went in v9.8, with the Experiments switches (three did nothing useful; Start sets
+the other two itself) and the log screen's v7 test buttons. Earlier: the sections carry no footer text, and the
+Playing on and never-play rows were removed together with the code behind them."""
 import pathlib
 import plistlib
 import unittest
@@ -9,11 +9,14 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 REMOVED_ROWS = ("Playing on", "Never play to current device", "Never play to", "Clear never-play list",
                 "Bluetooth speaker", "Start", "Stop and restore normal Bluetooth", "Session",
-                "Audio output", "Play audio on", "Choose output device...")
+                "Audio output", "Play audio on", "Choose output device...", "Experiments")
 REMOVED_CODE = ("playingValue:", "neverValue:", "neverList", "neverPlayCurrent:", "clearNeverPlay:",
-                "currentExternalOutputs", "BTPSOutputName", "BTPSOutputsDescription", "BTPSTypeLabel", "BTPSIsBuiltIn")
-SWITCHES = ["SpeakaExperiments", "SpeakaSDPProbe", "SpeakaV80ConfigLookupObserver", "SpeakaV81SevenOnce",
-            "SpeakaV82DecisiveOnce"]
+                "currentExternalOutputs", "BTPSOutputName", "BTPSOutputsDescription", "BTPSTypeLabel", "BTPSIsBuiltIn",
+                "startSink:", "stopSink:", "sendSession", "pollSession", "confirmSession", "sessionValue:",
+                "BTPSSessionSummary", "chooseOutput:", "AVRoutePickerView", "reloadSpecifierID", "refreshTimer",
+                "BTPSWritePref", "notify_post")
+REMOVED_TESTS = ("Verify Test Checklist", "Test iOS Audio Output", "Send PCM", "Send SBC", "BTPSAudioProbe",
+                 "BTPSIPCSender", "showChecklist", "promptIPCTest", "promptDaemonIPCTest", "promptSBCIPCTest")
 
 
 class SettingsPage(unittest.TestCase):
@@ -23,7 +26,7 @@ class SettingsPage(unittest.TestCase):
 
     def test_three_sections_without_footer_text(self):
         groups = [item for item in self.items if item.get("cell") == "PSGroupCell"]
-        self.assertEqual([group.get("label") for group in groups], ["Status", "Debug log", "Experiments"])
+        self.assertEqual([group.get("label") for group in groups], ["Status", "Debug log"])
         for group in groups:
             self.assertNotIn("footerText", group, group.get("label"))
 
@@ -34,12 +37,11 @@ class SettingsPage(unittest.TestCase):
         actions = [item.get("action") for item in self.items[5:8]]
         self.assertEqual(actions, ["showLog:", "copyLog:", "clearLog:"])
 
-    def test_every_switch_is_under_experiments(self):
-        labels = [item.get("label") for item in self.items]
-        experiments = self.items[labels.index("Experiments") + 1:]
-        self.assertEqual([item.get("cell") for item in experiments], ["PSSwitchCell"] * len(SWITCHES))
-        self.assertEqual([item.get("key") for item in experiments], SWITCHES)
-        self.assertEqual([item for item in self.items if item.get("cell") == "PSSwitchCell"], experiments)
+    def test_no_switches(self):
+        # The page only reads: nothing on it can arm the speaker, or block Start (SpeakaExperiments did).
+        self.assertEqual(len(self.items), 8)
+        self.assertEqual([item for item in self.items if item.get("cell") == "PSSwitchCell"], [])
+        self.assertEqual([item for item in self.items if "key" in item], [])
 
     def test_the_apps_rows_are_gone(self):
         labels = [item.get("label") for item in self.items]
@@ -49,8 +51,20 @@ class SettingsPage(unittest.TestCase):
     def test_the_code_behind_the_removed_rows_is_gone(self):
         for name in REMOVED_CODE:
             self.assertNotIn(name, self.controller, name)
-        # The live refresh still asks for the Session row; with the row gone, it finds nothing and does nothing.
-        self.assertIn('[self reloadSpecifierID:@"session"];', self.controller)
+        self.assertNotIn("reloadSpecifierID", (ROOT / "speakaprefs/BTPSRootListController.h").read_text())
+
+    def test_the_log_screen_only_shows_and_saves_the_log(self):
+        viewer = (ROOT / "speakaprefs/BTPSLogViewController.m").read_text()
+        reader = (ROOT / "speakaprefs/BTPSLogReader.m").read_text()
+        for name in REMOVED_TESTS:
+            self.assertNotIn(name, viewer, name)
+        for name in ("BTPSAudioTestLastResult", "BTPSIPCPlaybackLastResult", "BTPSV75SBCRequestLastResult",
+                     "BTPSDaemonIPCRequestLastResult", "diag.v74_ipc", "diag.v75_sbc"):
+            self.assertNotIn(name, reader, name)
+        self.assertIn("Save Log to iCloud Drive", viewer)
+        make = (ROOT / "speakaprefs/Makefile").read_text()
+        self.assertIn("SpeakaPrefs_FILES      = BTPSRootListController.m BTPSLogViewController.m BTPSLogReader.m\n", make)
+        self.assertIn("SpeakaPrefs_FRAMEWORKS = UIKit Foundation CoreFoundation\n", make)
 
 
 if __name__ == "__main__":

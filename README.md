@@ -205,9 +205,8 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 | --- | --- |
 | Status | Loaded in daemon, Last event, Log channels |
 | Debug log | View debug log, Copy log to clipboard, Clear log |
-| Experiments | All five research switches, leftovers from the research stages. **Start** sets the two one-shot switches for you, so leave these alone. |
-
-Start, Stop, the session and the audio output were here until v9.7; they're in the app now.
+Start, Stop, the session and the audio output were here until v9.7; they're in the app now. The Experiments switches
+went in v9.8: **Start** sets the two it needs by itself.
 
 ## Troubleshooting
 
@@ -277,10 +276,7 @@ Offline helpers in `tools/`:
 | Script | Purpose |
 | --- | --- |
 | `fetch_google_sbc.sh` | Fetches Google libsbc at the pinned commit (CI runs it) |
-| `decode_rtp_sbc.py` | Decodes captured A2DP RTP/SBC packets |
-| `sdp_record.py` | Builds and decodes the Audio Sink SDP record (used by the tests) |
 | `inspect_bluetoothd.py` | Read-only evidence collector for a `bluetoothd` binary |
-| `triage_log.py` | Interprets logs from the early (v5/v6) builds |
 | `windows_bluetooth_snapshot.ps1` | Read-only snapshot of the PC's Bluetooth state |
 
 </details>
@@ -398,7 +394,6 @@ agree.
 │   ├── BTPSV88*.c/.h              shared ring, stream control, worker, health lease
 │   ├── BTPSV89Session.c/.h        Start and Stop
 │   └── BTPSShared.h               names shared by the tweak, the helper, Settings and the app
-├── SBCSink.mm, sbc_decode.c   the original in-daemon decoder (inactive; see Known limitations)
 ├── Makefile, control, Speaka.plist
 ├── btpsaudiohelper/           the audio helper: decoding and playback
 ├── speakaprefs/               the Settings page
@@ -461,8 +456,7 @@ make clean package FINALPACKAGE=1    # packages/com.parv.speaka_*.deb (rootless,
 make -C app tipa                     # app/packages/Speaka.tipa and Speaka.ipa (XcodeGen + xcodebuild)
 ```
 
-The build is rootless only. `BTPS_WITH_PREFS=0` skips the Settings bundle; `BTPS_WITH_IPC_HELPER=0` skips the audio
-helper, which leaves you without audio.
+The build is rootless only. `BTPS_WITH_PREFS=0` skips the Settings bundle.
 
 ```sh
 python3 -m unittest discover -s tests -v
@@ -506,8 +500,6 @@ Three design choices limit what can go wrong:
   and sending audio at the same time hasn't been tested on a device.
 - **iOS lists the PC as an output.** That comes from bluetoothd and is not fixed. If the phone suspends the stream
   as playback starts, the sound begins once Windows reopens the stream, about 6 s later.
-- **Inactive legacy code** (the first design's in-daemon decoder and the v7 self-tests) is still compiled into the
-  tweak.
 
 ## Version history
 
@@ -580,6 +572,5 @@ notes.
 - The app's title is a picture of "Speaka" drawn in [Fonarto](https://www.fontspace.com/fonarto-2-font-f104632)
   Regular, the same way as Caz's (`app/scripts/make_wordmark.py`). Fonarto is by Locomotype and free for personal and
   commercial use; only the picture ships, not the font.
-- `sbc_decode.c` is the project's own SBC decoder, written from the Bluetooth specification and used by the tests.
 - The tweak is built with [**Theos**](https://theos.dev) and the app with [**XcodeGen**](https://github.com/yonaskolb/XcodeGen).
   It runs on Dopamine with ElleKit and PreferenceLoader.

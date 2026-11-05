@@ -137,20 +137,16 @@ class SpeakaApp(unittest.TestCase):
             for call in ("CFPreferences", "notify_post", "UserDefaults"):
                 self.assertNotIn(call, code, f"{source.name} calls {call}; go through SPTweakClient")
 
-    def test_session_rules_match_the_settings_page(self):
+    def test_session_rules(self):
+        # v9.8: the app is the only place that reads the session; these were compared with the Settings page's copy.
         client = read(CLIENT_M)
-        settings = read(ROOT / "speakaprefs/BTPSRootListController.m")
-        bad = r'@\[ (@"REFUSED", @"ROLLED BACK", @"UNSAFE", @"FAILED", @"SDP publish failed") \]'
-        self.assertEqual(re.search(bad, client).group(1), re.search(bad, settings).group(1))
+        self.assertIn('@[ @"REFUSED", @"ROLLED BACK", @"UNSAFE", @"FAILED", @"SDP publish failed" ]', client)
         for rule in ('[sep hasPrefix:@"LOST"]', '[trial hasPrefix:@"ARMED"]', '[trial hasPrefix:@"REFUSED"]',
                      '[sep containsString:@"register=0"]', '[sep containsString:@"SEID=7"]',
                      'status[@"diag.v89.build"]', '[session containsString:@"result=REFUSED"]'):
             self.assertIn(rule, client)
-            self.assertIn(rule, settings)
-        self.assertIn("> 20.0)", client)                       # helper freshness, BTPSHelperStatus(20.0)
-        self.assertIn("BTPSHelperStatus(20.0)", settings)
+        self.assertIn("> 20.0)", client)                       # the helper's report counts for 20 s
         self.assertIn("request.relaunched ? 45.0 : 25.0", client)
-        self.assertIn("self.pendingRelaunched ? 45.0 : 25.0", settings)
 
     def test_output_modes_match_the_helper(self):
         """The app's three outputs are the ones the helper understands (Settings no longer lists them, v9.7)."""

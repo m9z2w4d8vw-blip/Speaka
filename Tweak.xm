@@ -69,7 +69,6 @@
 #include "BTPSBuild.h"
 #include "BTPSLog.h"
 #include "BTPSShared.h"
-#include "BTPSDaemonProbe.h"
 #include "BTPSV78Capacity.h"
 #include "BTPSV79Geometry.h"
 #include "BTPSV81Config.h"
@@ -1760,13 +1759,5 @@ static int btps_v89_receive_ready(void)
     if(g_v88_ready) btps_v882_install_idle_guard((uintptr_t)mh, uuid_ok);
     install_optional_sdp_probe((uintptr_t)mh, uuid_ok);
     btps_v83_install_native_registration((uintptr_t)mh, uuid_ok);
-    /* Explicit user request only; no sockets or audio on Bluetooth callback threads. */
-    if (uuid_ok && g_orig[BTPS_H_REGISTER] && g_orig[BTPS_H_ADVERTISE]) {
-        BTPSDaemonProbeStart();
-        BTPSDaemonProbeStartV75();
-    } else {
-        BTPSSetStatus("diag.v74_ipc", "DISABLED: exact daemon UUID and baseline hooks required");
-        BTPSSetStatus("diag.v75_sbc", "DISABLED: exact daemon UUID and baseline hooks required");
-    }
     BTPSV89SessionReport(g_v82_armed, btps_v89_receive_ready());
 }

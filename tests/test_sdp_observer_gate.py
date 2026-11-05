@@ -10,11 +10,9 @@ OBSERVER=SRC.split(MARKER,1)[1].split('/* --------------------------------------
 
 class OptionalSDPProbeTests(unittest.TestCase):
     def test_optional_and_off_by_default(self):
+        # v9.8: no switch for it in Settings; without the preference the probe stays off.
         d=plistlib.loads((ROOT/'speakaprefs/Resources/Root.plist').read_bytes())
-        toggles=[x for x in d['items'] if x.get('key')=='SpeakaSDPProbe']
-        self.assertEqual(len(toggles),1)
-        self.assertFalse(toggles[0]['default'])
-        self.assertEqual(toggles[0]['cell'],'PSSwitchCell')
+        self.assertEqual([x for x in d['items'] if x.get('key')=='SpeakaSDPProbe'],[])
         self.assertIn('if (!btps_sdp_probe_requested() && !g_v82_armed)',OBSERVER)
         self.assertIn('BTPSSetStatus("diag.sdp_probe", "OFF (default); no SDP hook installed")',OBSERVER)
     def test_exact_build_and_prologue_signature_gated(self):
@@ -46,8 +44,8 @@ class OptionalSDPProbeTests(unittest.TestCase):
         self.assertIn('BTPS_H_PUBLISH, BTPS_N_HOOKS',sig)
         self.assertIn('install_hooks((uintptr_t)mh, uuid_ok);',SRC)
         self.assertIn('install_optional_sdp_probe((uintptr_t)mh, uuid_ok);',SRC)
-    def test_ui_plist_valid_and_no_altered_legacy_switch(self):
+    def test_ui_plist_valid_without_switches(self):
         d=plistlib.loads((ROOT/'speakaprefs/Resources/Root.plist').read_bytes())
-        self.assertIn('SpeakaExperiments',[x.get('key') for x in d['items']])
+        self.assertEqual([x for x in d['items'] if x.get('cell')=='PSSwitchCell'],[])
 
 if __name__ == '__main__': unittest.main()

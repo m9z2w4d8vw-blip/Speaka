@@ -16,7 +16,6 @@
 #define BTPS_PREFS_DOMAIN     "com.apple.bluetooth"
 #define BTPS_KEY_LOG          "SpeakaLog"           /* array of strings: the newest log lines            */
 #define BTPS_KEY_STATUS       "SpeakaStatus"        /* dictionary string -> string: self-test + hook state */
-#define BTPS_KEY_V77_SINK_TRIAL "SpeakaV77SinkTrial" /* OFF by default; one attempt after native Sources */
 #define BTPS_KEY_SDP_PROBE    "SpeakaSDPProbe"   /* OFF by default; optional read-only hook */
 #define BTPS_KEY_V81_SEVEN_ONCE "SpeakaV81SevenOnce" /* OFF by default, consumed before use */
 #define BTPS_KEY_V80_CFG_OBSERVER "SpeakaV80ConfigLookupObserver" /* OFF: pass-through getter timing observer */
@@ -29,9 +28,7 @@
 
 #define BTPS_NOTIFY_STATE     "com.parv.speaka.state"
 #define BTPS_NOTIFY_DAEMON_PROBE "com.parv.speaka.v74.ipc.request"
-#define BTPS_KEY_DAEMON_PROBE "SpeakaV74IPCRequest"
 #define BTPS_NOTIFY_V75_SBC "com.parv.speaka.v75.sbc.request"
-#define BTPS_KEY_V75_SBC "SpeakaV75SBCRequest"
 
 /* ---- v8.9: one-tap Start/Stop and audio output selection ---------------------------------------------------
  * Start/Stop: Settings writes BTPS_KEY_V89_REQUEST and posts BTPS_NOTIFY_V89_SESSION. The tweak inside bluetoothd

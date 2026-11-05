@@ -22,7 +22,6 @@ void               btps_ring_push(btps_ring_t *r, const char *text);   /* newlin
 unsigned           btps_ring_count(const btps_ring_t *r);
 const char        *btps_ring_at(const btps_ring_t *r, unsigned i);     /* 0 = oldest; NULL if out of range     */
 unsigned long long btps_ring_seq(const btps_ring_t *r);
-size_t             btps_ring_join(const btps_ring_t *r, char *out, size_t cap);   /* newline-joined, always NUL-terminated */
 
 /* "HH:MM:SS.mmm" in local time. `out` must hold at least 16 bytes. */
 void               btps_fmt_time(char *out, size_t cap);

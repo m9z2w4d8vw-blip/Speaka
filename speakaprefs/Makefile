@@ -10,8 +10,8 @@ include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = SpeakaPrefs
 
-SpeakaPrefs_FILES      = BTPSRootListController.m BTPSLogViewController.m BTPSLogReader.m BTPSAudioProbe.m BTPSIPCSender.m BTPSIPCProtocol.c
-SpeakaPrefs_FRAMEWORKS = UIKit Foundation CoreFoundation AVFoundation AVKit
+SpeakaPrefs_FILES      = BTPSRootListController.m BTPSLogViewController.m BTPSLogReader.m
+SpeakaPrefs_FRAMEWORKS = UIKit Foundation CoreFoundation
 SpeakaPrefs_CFLAGS     = -fobjc-arc -I..
 # Preferences.framework is private and not in the Xcode SDK: resolve PSListController at runtime instead of link time.
 SpeakaPrefs_LDFLAGS    = -Wl,-undefined,dynamic_lookup

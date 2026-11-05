@@ -44,11 +44,11 @@ class TrialTest(unittest.TestCase):
         for mode,length in ((2,32),(-1,32),(1,3),(1,31)):
             self.assertNotEqual(self.call(arm=mode,length=length)[0],0)
     def test_default_off_and_registration_requires_separate_one_shot_arm(self):
+        # v9.8: only Start arms it (BTPSV89Session.c), so Settings has no switch for it.
         plist=plistlib.loads((ROOT/'speakaprefs/Resources/Root.plist').read_bytes())
-        switches=[x for x in plist['items'] if x.get('key')=='SpeakaV81SevenOnce']
-        self.assertEqual(len(switches),1)
-        self.assertIs(switches[0]['default'],False)
-        self.assertEqual(switches[0]['defaults'],'com.apple.bluetooth')
+        self.assertEqual([x for x in plist['items'] if x.get('key')=='SpeakaV81SevenOnce'],[])
+        self.assertIn('CFPreferencesSetAppValue(CFSTR(BTPS_KEY_V81_SEVEN_ONCE), arm, V89_DOMAIN);',
+                      (ROOT/'BTPSV89Session.c').read_text())
         self.assertIn('decisive_requested && g_v81_seven_armed && !BTPSExperimentsEnabled()',SRC)
         self.assertIn('!g_v82_signal_hook_ok || !g_v82_sdp_hook_ok',SRC)
         self.assertIn('g_native_source_success != 6',SRC)

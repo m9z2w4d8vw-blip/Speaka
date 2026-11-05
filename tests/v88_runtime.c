@@ -1,7 +1,6 @@
 #include "BTPSV88Shared.h"
 #include "BTPSV88Control.h"
 #include "btpsaudiohelper/BTPSV88Decode.h"
-#include "btpsaudiohelper/BTPSV76Decode.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +8,43 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+/* The reference: all 258 recorded frames decoded in one go with libsbc, to compare the streamed decode against.
+ * (This was btpsaudiohelper/BTPSV76Decode.c, which only the helper's removed --sbc-play test mode used.) */
+#define BTPS_V76_MAX_FRAMES 300u
+#define BTPS_V76_MAX_PER_CHANNEL (300u * SBC_MAX_SAMPLES)
+static int btps_v76_decode_sbc(const uint8_t *src,size_t src_bytes,int16_t *pcm,size_t pcm_slots,
+                        size_t *frames_out,size_t *samples_out,unsigned *rate_out,unsigned *channels_out) {
+    if(frames_out)*frames_out=0;
+    if(samples_out)*samples_out=0;
+    if(rate_out)*rate_out=0;
+    if(channels_out)*channels_out=0;
+    if(!src||!pcm||!frames_out||!samples_out||!rate_out||!channels_out||
+       src_bytes==0||src_bytes>20000u||pcm_slots>BTPS_V76_MAX_PER_CHANNEL*2u)return -1;
+    sbc_t decoder;
+    memset(&decoder,0,sizeof decoder);sbc_reset(&decoder);
+    size_t offset=0,frames=0,per_channel=0;
+    while(offset<src_bytes){
+        struct sbc_frame frame;
+        if(src_bytes-offset < SBC_HEADER_SIZE || sbc_probe(src+offset,&frame)!=0)return -2;
+        unsigned frame_len=sbc_get_frame_size(&frame);
+        unsigned channels=frame.mode==SBC_MODE_MONO?1u:2u;
+        unsigned sr=(unsigned)sbc_get_freq_hz(frame.freq);
+        size_t n=(size_t)frame.nblocks*(size_t)frame.nsubbands;
+        if(frame_len<SBC_HEADER_SIZE || frame_len>src_bytes-offset ||
+           channels!=2u||sr!=44100u||n==0||n>SBC_MAX_SAMPLES)return -3;
+        if(frames>=BTPS_V76_MAX_FRAMES || per_channel > BTPS_V76_MAX_PER_CHANNEL-n ||
+           n>pcm_slots/2u || per_channel > (pcm_slots/2u)-n) return -4;
+        /* SBC API accepts output pitch for channel-interleaved PCM. */
+        if(sbc_decode(&decoder,src+offset,frame_len,&frame,
+                      pcm+per_channel*2u,2,pcm+per_channel*2u+1u,2)!=0)return -5;
+        offset+=frame_len;per_channel+=n;frames++;
+    }
+    if(frames!=258u || per_channel!=33024u || offset!=src_bytes)return -6;
+    *frames_out=frames;*samples_out=per_channel;*rate_out=44100u;*channels_out=2u;
+    return 0;
+}
+
 
 static void queues(void) {
     BTPSV88Shared *s=mmap(NULL,sizeof *s,PROT_READ|PROT_WRITE,MAP_ANON|MAP_SHARED,-1,0);
@@ -75,7 +111,7 @@ static void control(void) {
     }
     puts("START correlation, reject, direction, CID, suspend, 500 restarts: PASS");
 }
-static void decode(const char *path) {
+static void decode(const char *path, const char *pcm_out) {
     FILE *f=fopen(path,"rb");assert(f);uint8_t src[20000];size_t size=fread(src,1,sizeof src,f);fclose(f);
     int16_t *reference=calloc(33024*2,2),*actual=calloc(33024*2,2);assert(reference && actual);
     size_t total_frames=0,total_samples=0;unsigned rate=0,channels=0;
@@ -94,6 +130,9 @@ static void decode(const char *path) {
         assert(hz==44100);memcpy(actual+written*2,pcm,ns*4);written+=ns;frames+=nf;p.sequence++;
     }
     assert(frames==258 && written==33024);assert(!memcmp(actual,reference,written*4));
+    if(pcm_out) {   /* the live decoder's output, which test_v88_runtime.py compares with ffmpeg's decode */
+        FILE *o=fopen(pcm_out,"wb");assert(o);assert(fwrite(actual,4,written,o)==written);fclose(o);
+    }
     /* Fragmented frame, sequence gap, truncated frame and bad CRC. */
     struct sbc_frame first;assert(!sbc_probe(src,&first));unsigned len=sbc_get_frame_size(&first);
     btps_v88_decoder_reset(&d);p.sequence=65535;p.data[0]=0xc0;p.length=1+len/2;
@@ -129,4 +168,4 @@ static void decode(const char *path) {
     }
     free(reference);free(actual);puts("continuous reference PCM, fragments, gaps, CRC, 48k mono/stereo, malformed corpus: PASS");
 }
-int main(int argc,char **argv) {assert(argc==2);queues();control();decode(argv[1]);return 0;}
+int main(int argc,char **argv) {assert(argc==2||argc==3);queues();control();decode(argv[1],argc==3?argv[2]:NULL);return 0;}

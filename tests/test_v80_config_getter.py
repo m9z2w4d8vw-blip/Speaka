@@ -15,11 +15,9 @@ class V80ConfigGetterObserver(unittest.TestCase):
         self.assertIn('memcmp(observed, BTPS_V80_GET_CONFIG_SIG, sizeof observed)', SRC)
         self.assertIn('!uuid_ok',SRC)
     def test_opt_in_default_off(self):
+        # v9.8: no switch for it in Settings; without the preference the observer stays off.
         prefs=plistlib.loads((ROOT/'speakaprefs/Resources/Root.plist').read_bytes())
-        spec=[e for e in prefs['items'] if e.get('key')=='SpeakaV80ConfigLookupObserver']
-        self.assertEqual(len(spec),1)
-        self.assertIs(spec[0]['default'],False)
-        self.assertEqual(spec[0]['defaults'],'com.apple.bluetooth')
+        self.assertEqual([e for e in prefs['items'] if e.get('key')=='SpeakaV80ConfigLookupObserver'],[])
         self.assertIn('BTPS_KEY_V80_CFG_OBSERVER', (ROOT/'BTPSShared.h').read_text())
         self.assertIn('if (!btps_v80_requested() && !g_v81_seven_armed)',SRC)
     def test_observer_does_not_change_input_output_or_register_sink(self):

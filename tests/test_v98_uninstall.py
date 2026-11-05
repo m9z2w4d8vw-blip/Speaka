@@ -155,12 +155,13 @@ class Uninstall(unittest.TestCase):
                      "CFPreferencesSynchronize(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);",
                      "removePersistentDomainForName:app"):
             self.assertIn(part, impl)
-        # The prefix finds every key: the tweak's, the helper's and the Settings pane's all start with "Speaka".
+        # The prefix finds every key: the tweak's and the helper's all start with "Speaka", and the Settings page
+        # (since v9.8) stores none.
         keys = re.findall(r'#define BTPS_KEY_\w+\s+"([^"]+)"', read(ROOT / "BTPSShared.h"))
         self.assertGreater(len(keys), 10)
         pane = re.findall(r"<key>key</key>\s*<string>([^<]+)</string>", read(ROOT / "speakaprefs/Resources/Root.plist"))
-        self.assertTrue(pane)
-        for key in keys + pane:
+        self.assertEqual(pane, [])
+        for key in keys:
             self.assertTrue(key.startswith("Speaka"), key)
 
     def test_helper(self):

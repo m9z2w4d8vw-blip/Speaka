@@ -49,6 +49,27 @@ Helper 1.3. Files: `app/RootHelper/main.c`, `app/Speaka/{MainComponents,ContentV
   disabled look, with the spinner and *Uninstalling...*. One animatable shape draws the fill and cuts the row's two
   copies (white and dimmed), so the three never drift apart.
 
+## Cleanup, step 1: dead code removed
+
+Nothing that runs changed. What went:
+
+- **The pre-libsbc audio chain:** `SBCSink.mm`, `sbc_decode.c`, `BTPSMedia.c`, `BTPSV75RTP.c` and the 100 KB
+  `BTPSV75Fixture.c`. Nothing called `SBCSink.mm`; the rest only fed the v7.5 test. Playback has used libsbc in the
+  helper since v8.8.
+- **The v7.3-v7.6 manual tests:** `BTPSV74Tone.c`, `BTPSIPCProtocol.c`, the probes in `BTPSDaemonProbe.c` (it keeps
+  only the loopback connect the audio relay uses), the helper's `--daemon`, `--sbc` and `--sbc-play` modes and
+  `BTPSV76Decode.c`. They needed the helper started by hand over SSH, which the package never does.
+- **In Settings > Speaka:** the Experiments switches, the debug log's five test buttons (with `BTPSAudioProbe` and
+  `BTPSIPCSender`), the log export's sections about those tests, and the controller's Start, Stop, Session and
+  output code, unused since v9.7. The page now has Status and Debug log only.
+- **Loaded into bluetoothd:** AVFoundation, AudioToolbox and CoreAudio no longer are; only the removed decoder used
+  them.
+- **Tools and tests:** `decode_rtp_sbc.py`, `triage_log.py` and `sdp_record.py`, the tests for everything above, and
+  one fixture. The ffmpeg comparison moved onto the live decoder (`tests/test_v88_runtime.py`), which is stricter than
+  before: it now checks the decoder that plays.
+
+The phone's own names didn't change: preference and status keys, `/tmp/FTABHarvest`, the helper's path and port.
+
 ## On the phone
 
 1. **The menu.** Four rows; Uninstall has a trash icon and no chevron. Compare with Caz side by side: the panel's top
