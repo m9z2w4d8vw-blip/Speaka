@@ -176,7 +176,7 @@ class SpeakaApp(unittest.TestCase):
         headers = read(CLIENT_H) + read(DEVICE_H)
         pinned = set(re.findall(r"NS_SWIFT_NAME\((\w+)\(", headers))
         self.assertEqual(pinned, {"outputModes", "readStatus", "setOutputMode", "sendAction", "pollRequest",
-                                  "connectedComputerName"})
+                                  "connectedComputerName", "lookupSummary"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -351,6 +351,70 @@ class SpeakaApp(unittest.TestCase):
         common = block(log, "static void log_common(int sync, const char *fmt, va_list ap)\n{")
         self.assertIn("if (inited) schedule_flush();", common)   # BTPSLogNow too, not only BTPSLog
         self.assertEqual(log.count("dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 1LL * NSEC_PER_SEC)"), 1)
+
+    def test_the_log_never_moves_sideways(self):
+        """The log's column is sized to every line it could show before its first, so no line shifts when a longer one
+        appears or a running line shrinks (it did while "Registering Bluetooth's endpoints" ran)."""
+        components = read(ROOT / "app/Speaka/MainComponents.swift")
+        log = block(components, "struct LyricsLog: View {")
+        self.assertIn("let texts: [LyricText]", log)
+        body = block(log, "var body: some View {")
+        self.assertTrue(body.lstrip().startswith("ZStack(alignment: .bottomLeading) {"), body[:80])
+        hidden = body.split("ZStack(alignment: .leading) {", 1)[1].split(".hidden()", 1)[0]
+        self.assertIn("ForEach(texts, id: \\.self) { text in", hidden)
+        self.assertIn("LyricRow.measure(text)", hidden)
+        self.assertIn("VStack(alignment: .leading, spacing: 0) {", body)
+        self.assertIn("LyricsLog(lines: model.lyrics, texts: model.logTexts,", components)
+        # The measuring row has the real row's geometry exactly.
+        row = block(components, "struct LyricRow: View {")
+        measure = block(components, "static func measure(_ text: LyricText) -> some View {")
+        for shared in ("HStack(spacing: 15) {", ".frame(width: 30, height: 30)", ".lineLimit(1)", ".minimumScaleFactor(0.6)"):
+            self.assertIn(shared, row)
+            self.assertIn(shared, measure)
+        self.assertIn(".font(.system(size: line.status == .running ? 20 : 18))", row)
+        self.assertIn(".font(.system(size: text.running ? 20 : 18))", measure)
+        # The model sets the lines before the log opens, and every line it writes is one of them.
+        model = read(MODEL)
+        toggle = block(model, "func toggle() {")
+        self.assertLess(toggle.index("logTexts = Self.possibleLines(for: action)"), toggle.index("sheetVisible = true"))
+        possible = block(model, "static func possibleLines(for action: String) -> [LyricText] {")
+        self.assertIn("for step in (action == \"start\" ? SessionStep.start : SessionStep.stop) {", possible)
+        for kind in ("running", "done", "failed"):
+            self.assertIn(f"step.{kind}", possible)
+        written = set(re.findall(r'(?:startLyric|finishLyric)\("([^"]+)"\)', model))
+        written |= set(re.findall(r'fail\("([^"]+)",', model))
+        written |= set(re.findall(r'finishLyrics\(success: "([^"]+)"', model))
+        failure = block(model, "static func failure(for pending: SPRequest) -> (line: String, problem: String) {")
+        written |= set(re.findall(r'return \("([^"]+)",', failure))
+        written |= set(re.findall(r'^\s+return \("([^"]+)",$', failure, re.M))
+        self.assertGreaterEqual(len(written), 7, written)
+        for text in written:
+            self.assertIn(f'"{text}"', possible, f"the log can show {text!r}, but its column isn't sized for it")
+
+    def test_the_pcs_name_comes_from_the_paired_devices_too(self):
+        """iOS doesn't always count Speaka's connection as one of its own, so a lone paired computer names the PC."""
+        source = read(ROOT / "app/Speaka/Model/SPConnectedDevice.m")
+        for selector in ("sharedInstance", "available", "connectedDevices", "pairedDevices", "name", "address",
+                         "majorClass", "connected"):
+            self.assertIn(f"@selector({selector})", source)
+        self.assertEqual(source.count("objc_msgSend)"), 3)          # every private call goes through these three
+        self.assertIn("if (!target || ![target respondsToSelector:selector])", source)
+        lookup = block(source, "+ (NSString *)connectedComputerName\n{")
+        connected = lookup.index("if (device.computer && device.connected)")
+        paired = lookup.index("if (computers == 1)")
+        phone = lookup.index("return phones == 1 ? phone.name : nil;")
+        self.assertLess(connected, paired)
+        self.assertLess(paired, phone)
+        self.assertIn("@catch (NSException *exception)", lookup)
+        self.assertIn("SPMajorClassComputerMasked = 0x100", source)
+        self.assertIn("SPMajorClassPhoneMasked = 0x200", source)
+        # Credits says what Bluetooth reports, so a missing name can be explained from a screenshot.
+        self.assertIn("Text(SPConnectedDevice.lookupSummary())", read(WINDOWS))
+        self.assertIn('@"Bluetooth knows %lu devices. Connected: %@. Computers: %@."', source)
+        # The main screen still says "Your PC" when nothing is certain, and asks again every 5 s.
+        model = read(MODEL)
+        self.assertIn('let who = computerName ?? "Your PC"', model)
+        self.assertIn("Date().timeIntervalSince($0) > 5.0", model)
 
     # ------------------------------------------------------------------ updates
     def test_updater_installs_the_tweak_then_the_app_then_resprings(self):
@@ -904,7 +968,8 @@ class SpeakaApp(unittest.TestCase):
             "Bool", "CGFloat", "CGRect", "CGSize", "Date", "Double", "Int", "String", "UUID", "URL", "Array", "Self", "Void",
             "Int32", "UInt32", "Equatable", "Identifiable", "Decodable", "NSString", "Data", "AttributedString", "Bundle",
             "FileManager", "Timer", "RunLoop", "DispatchQueue", "URLRequest", "URLSession", "URLSessionTask",
-            "HTTPURLResponse", "JSONDecoder", "Error", "NSError", "NSUnderlyingErrorKey", "TimeInterval",
+            "HTTPURLResponse", "JSONDecoder", "Error", "NSError", "NSUnderlyingErrorKey", "TimeInterval", "Set",
+            "Hashable",
             # CoreGraphics
             "CGPoint", "CGContext", "CGColorSpace", "CGGradient", "CGColorSpaceCreateDeviceRGB",
             # SwiftUI and Combine

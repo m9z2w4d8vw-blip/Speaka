@@ -77,6 +77,27 @@ needed to be:
 | A failed upload | Failed the job at once | Is tried once more, 30 s later, and only a second failure fails the job (both jobs) |
 | Re-running a run whose release exists | Replaced the files but kept the notes, which said the app was missing | Replaces the notes too, since the updater shows them as the changelog |
 
+## After the first device test
+
+The steps worked on the phone. Two things to fix:
+
+- **The connection line said *Your PC*.** The app read the PC's name only from iOS's list of connected devices, and
+  only took it when the device said it was a computer or was the only one connected. iOS doesn't always count Speaka's
+  connection as one of its own, so now, if no computer is reported as connected, the app takes the only computer
+  paired with the iPhone (a PC has to be paired to stream), and then the only phone connected. The old rule, the
+  only device of any kind, is gone: it could have named a watch. **Credits** now has a line on what the list
+  reports, for example *Bluetooth knows 4 devices. Connected: LAPTOP-ABC. Computers: LAPTOP-ABC.*, so if the name is
+  still missing, a screenshot of that line says why.
+- **The log moved sideways.** Its lines sat in a column as wide as the widest line so far, centered, and the running
+  line is drawn larger (20 pt) than a finished one (18 pt). So while *Registering Bluetooth's endpoints*, the longest
+  running line, was showing, the column widened and every line moved left, then moved back when it finished. Now the
+  column is sized before the first line, to the widest line this Start or Stop could show, so it never moves; it's
+  still centered.
+
+Both are in the app only (`SPConnectedDevice`, `MainComponents.swift`, `SpeakaModel.swift`, `Windows.swift`); the
+tweak didn't change. This is also the first update the app can install for itself: the next release's Update
+Available installs the `.deb` and the `.tipa`, then resprings.
+
 ## Apply and build
 
 Copy the zip's contents over your clone. Nothing needs deleting. The changed files:
@@ -109,10 +130,13 @@ README.md, app/README.md, docs/history/TESTING-v9.4.md
    the tap, fails with *Check that Bluetooth is on*, and the log stays up for 6 s. Turn Bluetooth back on: the speaker
    should then be added, and the header's message clears once it is.
 6. Tap **Stop**: *Restarting Bluetooth*, *Switching the speaker off*, *Bluetooth back to normal*.
+7. After the fixes above: Start again and watch the lines; none should move sideways. While the PC plays, the
+   connection line should name it. If it still says *Your PC*, open **Credits** and send a screenshot of the line
+   under the versions.
 
 ## Host run
 
-224 tests. Here: 219 pass, 3 skipped (no libsbc, no `bluetoothd` binary, no idle-guard binary), 1 expected failure
+226 tests. Here: 221 pass, 3 skipped (no libsbc, no `bluetoothd` binary, no idle-guard binary), 1 expected failure
 (decoder fidelity), and `test_v88_runtime` fails without the libsbc download that CI does. The new tests check that every
 status key and prefix a step reads is one the tweak really writes, that every final refusal on the way to the speaker
 sets a status, and that statuses are flushed within a second.

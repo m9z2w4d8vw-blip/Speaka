@@ -22,6 +22,13 @@ struct LyricLine: Identifiable, Equatable {
     var symbol: String = "checkmark.circle"
 }
 
+/// A line the log could show, for sizing its column: its text, and whether it would be the running line, which is
+/// drawn larger.
+struct LyricText: Hashable {
+    let text: String
+    let running: Bool
+}
+
 /// One of the three places the audio can play, from SPTweakClient: the same list as Settings > Speaka.
 struct OutputMode: Identifiable, Equatable {
     let key: String
@@ -59,6 +66,8 @@ final class SpeakaModel: ObservableObject {
     @Published private(set) var snapshot = Snapshot()
     @Published private(set) var request: SPRequest? = nil
     @Published private(set) var lyrics: [LyricLine] = []
+    /// Every line this Start's or Stop's log could show, so the log keeps one column width throughout.
+    @Published private(set) var logTexts: [LyricText] = []
     @Published private(set) var sheetVisible = false
     @Published private(set) var sheetTitle = "Starting"
     @Published private(set) var completedSteps = 0
@@ -256,6 +265,7 @@ final class SpeakaModel: ObservableObject {
         problem = nil
         problemSession = nil
         lyrics.removeAll()
+        logTexts = Self.possibleLines(for: action)
         sheetTitle = action == "start" ? "Starting" : "Stopping"
         sheetVisible = true
         startLyric("Restarting Bluetooth")
@@ -345,6 +355,23 @@ final class SpeakaModel: ObservableObject {
                     "Bluetooth didn't restart. If devices don't reconnect, run killall -9 bluetoothd.")
         }
         return ("Bluetooth wasn't restarted", "Bluetooth wasn't restarted: \(reason(in: pending.resultMessage ?? ""))")
+    }
+
+    /// Every line a Start's or a Stop's log can show, each once, so the log can size its column to the widest of them
+    /// before its first line (LyricsLog). tests/test_speaka_app.py checks that every line this model writes is here.
+    static func possibleLines(for action: String) -> [LyricText] {
+        var lines = [LyricText(text: "Restarting Bluetooth", running: true)]
+        for text in ["Bluetooth restarted", "Bluetooth didn't restart", "Bluetooth wasn't restarted",
+                     "Couldn't reach Bluetooth", action == "start" ? "Ready for your PC" : "Bluetooth back to normal"] {
+            lines.append(LyricText(text: text, running: false))
+        }
+        for step in (action == "start" ? SessionStep.start : SessionStep.stop) {
+            lines.append(LyricText(text: step.running, running: true))
+            lines.append(LyricText(text: step.done, running: false))
+            lines.append(LyricText(text: step.failed, running: false))
+        }
+        var seen = Set<LyricText>()
+        return lines.filter { seen.insert($0).inserted }
     }
 
     /// "REFUSED nonce=… reason=stale request; Bluetooth not restarted" becomes "stale request".

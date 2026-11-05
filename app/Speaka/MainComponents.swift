@@ -211,7 +211,8 @@ struct LogSheet: View {
                         .foregroundStyle(.white)
                 }
                 .padding(.top, 20)
-                LyricsLog(lines: model.lyrics, bottomInset: Metrics.isHomeButtonDevice ? 50 : 80)
+                LyricsLog(lines: model.lyrics, texts: model.logTexts,
+                          bottomInset: Metrics.isHomeButtonDevice ? 50 : 80)
             }
             .frame(height: visibleHeight, alignment: .top)
         }
@@ -221,18 +222,31 @@ struct LogSheet: View {
 /// New lines appear at the bottom and push older ones up, where they fade out.
 struct LyricsLog: View {
     let lines: [LyricLine]
+    /// Every line this log could show (SpeakaModel.possibleLines). The column is as wide as the widest of them from the
+    /// first line on, so no line moves sideways when a longer one appears or shrinks: it stays centered, as in Caz, but
+    /// never re-centers.
+    let texts: [LyricText]
     let bottomInset: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Spacer(minLength: 0)
-            ForEach(lines.suffix(14)) { line in
-                LyricRow(line: line)
-                    .frame(height: 40)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .offset(y: 8)),
-                        removal: .opacity
-                    ))
+        ZStack(alignment: .bottomLeading) {
+            // Invisible and one row tall: only its width counts.
+            ZStack(alignment: .leading) {
+                ForEach(texts, id: \.self) { text in
+                    LyricRow.measure(text)
+                }
+            }
+            .hidden()
+            VStack(alignment: .leading, spacing: 0) {
+                Spacer(minLength: 0)
+                ForEach(lines.suffix(14)) { line in
+                    LyricRow(line: line)
+                        .frame(height: 40)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 8)),
+                            removal: .opacity
+                        ))
+                }
             }
         }
         .padding(.horizontal, 25)
@@ -279,6 +293,21 @@ struct LyricRow: View {
         .foregroundStyle(.white)
         .opacity(line.status == .running ? 0.9 : 0.5)
         .animation(.easeOut(duration: 0.2), value: line.status)
+    }
+}
+
+extension LyricRow {
+    /// A row's size with `text` in it, for the log's column: the same 30 pt icon slot, 15 pt gap and type as the row
+    /// itself (20 pt while running, 18 pt after), without the icon.
+    static func measure(_ text: LyricText) -> some View {
+        HStack(spacing: 15) {
+            Color.clear
+                .frame(width: 30, height: 30)
+            Text(text.text)
+                .font(.system(size: text.running ? 20 : 18))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
     }
 }
 

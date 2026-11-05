@@ -227,6 +227,10 @@ struct CreditsWindow: View {
                     Text(versions)
                         .font(.system(size: 12))
                         .foregroundStyle(Color.white.opacity(0.5))
+                    // What iOS's Bluetooth list says, which is where the PC's name on the main screen comes from.
+                    Text(SPConnectedDevice.lookupSummary())
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.white.opacity(0.5))
                         .padding(.bottom, 16)
                     Text("Interface")
                         .font(.system(size: 17, weight: .medium))
