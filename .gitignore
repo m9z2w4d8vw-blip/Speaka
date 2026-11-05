@@ -4,6 +4,11 @@ packages/
 obj/
 *.deb
 
+# The app's build output (XcodeGen + xcodebuild, see app/Makefile)
+app/build/
+app/Speaka.xcodeproj/
+xcuserdata/
+
 # Python caches from running the tests
 __pycache__/
 *.pyc

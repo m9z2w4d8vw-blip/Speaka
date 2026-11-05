@@ -206,8 +206,8 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------------------------------
-  # The Speaka companion app (app/) as a TrollStore package. Separate from the tweak on purpose:
-  # if the app fails to build, the .deb and its release are not affected.
+  # The Speaka companion app (app/) as a TrollStore package, built like Caz: SwiftUI, XcodeGen and xcodebuild.
+  # Separate from the tweak on purpose: if the app fails to build, the .deb and its release are not affected.
   # ---------------------------------------------------------------------------------------------
   app:
     name: Build the Speaka app (.tipa for TrollStore)
@@ -230,18 +230,11 @@ jobs:
           fi
           xcodebuild -version
 
-      - name: Install build tools (GNU make, ldid)
-        run: |
-          brew install make ldid
-          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
-
-      - name: Install Theos
-        run: |
-          git clone --quiet --recursive --depth=1 --shallow-submodules https://github.com/theos/theos.git "$HOME/theos"
-          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+      - name: Install build tools (XcodeGen, ldid)
+        run: brew install xcodegen ldid
 
       - name: Build Speaka.tipa
-        run: make -C app clean tipa FINALPACKAGE=1
+        run: make -C app clean tipa
 
       - name: Check the package
         run: |
@@ -251,7 +244,7 @@ jobs:
           cmp "$tipa" app/packages/Speaka.ipa || { echo "::error::Speaka.ipa is missing or differs from Speaka.tipa"; exit 1; }
           rm -rf tipacheck && mkdir tipacheck && unzip -q "$tipa" -d tipacheck
           bundle=tipacheck/Payload/Speaka.app
-          for f in Speaka Info.plist AppIcon60x60@2x.png AppIcon60x60@3x.png LICENSE-Dopamine.txt; do
+          for f in Speaka Info.plist Assets.car AppIcon60x60@2x.png AppIcon60x60@3x.png LICENSE-Dopamine.txt; do
             test -s "$bundle/$f" || { echo "::error::$f is missing from Speaka.app"; exit 1; }
           done
           echo "Slices: $(lipo -archs "$bundle/Speaka")"

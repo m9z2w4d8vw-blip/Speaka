@@ -1,0 +1,53 @@
+# Speaka.app, built the same way as Caz: XcodeGen makes the Xcode project from this file, xcodebuild compiles it, and
+# scripts/package.sh signs it with Speaka.entitlements and zips Speaka.tipa. `make -C app tipa` runs all three.
+name: Speaka
+options:
+  bundleIdPrefix: com.parv
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CLANG_ENABLE_OBJC_ARC: "YES"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+targets:
+  Speaka:
+    type: application
+    platform: iOS
+    sources:
+      - path: Speaka
+        # The UIKit app that v9.2 replaced. Copying a new version over a clone doesn't delete these, and its main.m
+        # would clash with SwiftUI's @main, so they're never built even if they linger (tests/test_speaka_app.py
+        # names them so they get deleted).
+        excludes:
+          - "UI/**"
+          - main.m
+          - "SPAppDelegate.*"
+          - "SPSceneDelegate.*"
+      # The icons (unchanged, named in Info.plist) and Dopamine's license, copied into the app as they are.
+      - path: Resources
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: Speaka
+        PRODUCT_BUNDLE_IDENTIFIER: com.parv.speaka
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        SWIFT_OBJC_BRIDGING_HEADER: Speaka/Speaka-Bridging-Header.h
+        # BTPSShared.h at the repository root: the same preference keys and notification names as the tweak.
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/.."
+        # The icon comes from Resources/, not from the asset catalog, so actool must not look for an AppIcon set.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ENABLE_PREVIEWS: "NO"
+schemes:
+  Speaka:
+    build:
+      targets:
+        Speaka: all

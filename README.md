@@ -43,9 +43,9 @@ changing songs; switching outputs during playback; and wired earbuds without rep
 
 | | |
 | --- | --- |
-| 🔊 **One-tap Start and Stop** | From the Speaka app or Settings. Bluetooth restarts itself; your other devices reconnect on their own. |
+| 🔊 **One-tap Start and Stop** | One button in the Speaka app, or Settings. It opens into a live log while Bluetooth restarts; your other devices reconnect on their own. |
 | 🎧 **Your choice of output** | iPhone speaker, wired or USB headphones, or any iOS output, switchable mid-song. |
-| 💻 **Live connection banner** | The app shows when your PC is connected and where the audio is playing. |
+| 💻 **Live connection line** | The app shows when your PC is connected and where the audio is playing. |
 | 🛡️ **Safe by design** | Checks the exact Bluetooth build before hooking anything; every session ends at the next Bluetooth restart. |
 | 🩺 **Built-in diagnostics** | One tap exports everything needed to diagnose a problem. |
 
@@ -116,11 +116,18 @@ sudo killall -9 bluetoothd
 
 ### The app
 
-- **The connection banner** scrolls to the right and says what's happening, for example
-  *LAPTOP-XXXX connected · playing on iPhone speaker*. It also warns when the output's volume is at zero.
-- **Audio output** unfolds into the three outputs; the current one has a checkmark.
-- **Start** and **Stop** sit at the bottom. While Bluetooth restarts, the button shows that it's working.
-- **Credits** lists the app's credits and the license of its Dopamine-based user interface.
+The app looks and moves like Caz: the same backdrop, panels, type and animations, from Caz's own code.
+
+- **One button** at the bottom reads **Start**, or **Stop** while the speaker is on. Tapping it opens it into a log,
+  as Caz's Clean button does: *Restarting Bluetooth*, *Adding the speaker*, then *Ready for your PC*. About 1.6 s after
+  the last line it folds back, now reading the other word.
+- **The connection line** above the button says what's happening, for example *LAPTOP-XXXX · iPhone speaker*, or
+  *Connect from your PC* while the speaker waits.
+- **The header** reads *by Parv*, or, when something needs your attention, says what in the warning colour: for
+  example that the volume is at zero, or that Bluetooth was turned off and on.
+- **Audio Output** opens a window with the three outputs; the current one has a checkmark. **Choose Output Device**
+  under them opens iOS's own picker.
+- **Credits** shows the app's and the tweak's versions and the license of the interface, which Caz and Speaka share.
 
 The app and **Settings > Speaka** read and write the same settings, so they always agree. More detail is in
 [app/README.md](app/README.md).
@@ -137,7 +144,7 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 
 ### Where the audio plays
 
-**Audio output** in the app, or **Play audio on** in Settings, takes effect immediately, even mid-song:
+**Audio Output** in the app, or **Play audio on** in Settings, takes effect immediately, even mid-song:
 
 | Mode | Plays on | Good to know |
 | --- | --- | --- |
@@ -146,9 +153,10 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 | **Any device (follow iOS)** | Wherever iOS is playing | The mode for Bluetooth earbuds |
 
 > [!TIP]
-> For **Bluetooth earbuds**, choose *Any device* and pick the earbuds with **Choose output device...** or in Control
-> Center. Your PC is itself a Bluetooth audio device to iOS, and since it connects last, iOS may send the sound back to
-> it. If the banner shows your PC, pick the earbuds again.
+> For **Bluetooth earbuds**, choose *Any device* and pick the earbuds with **Choose Output Device** (the app) or
+> **Choose output device...** (Settings), or in Control Center. Your PC is itself a Bluetooth audio device to iOS, and
+> since it connects last, iOS may send the sound back to it. If the connection line shows your PC, pick the earbuds
+> again.
 
 ### The Settings page
 
@@ -167,12 +175,12 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 | Start ends with *Still waiting* | Bluetooth still runs an older tweak build without the Start handler | Reinstall the package (its install script restarts Bluetooth), or run `sudo killall -9 bluetoothd`. Then Start again. |
 | *Off - Bluetooth was turned off and on; tap Start* | Toggling Bluetooth rebuilt Apple's endpoints without the speaker | Tap **Start**. |
 | The PC connects and drops at once, or finds no speaker | No speaker registered since the last Bluetooth restart | Tap **Start**, then reconnect from the PC. |
-| The PC plays, the iPhone is silent, and the banner shows your PC | *Any device* is sending the sound back to the PC | Choose *iPhone speaker* or *Wired headphones*, or pick your earbuds with **Choose output device...**. |
+| The PC plays, the iPhone is silent, and the connection line shows your PC | *Any device* is sending the sound back to the PC | Choose *iPhone speaker* or *Wired headphones*, or pick your earbuds with **Choose output device...**. |
 | Control Center keeps switching between *Headphones* and your PC, and nothing plays | Builds before v9.1 restarted their audio on every stream change, and each restart re-routed iOS ([TESTING-v9.1](docs/history/TESTING-v9.1.md)) | Update to v9.1. If it still happens, save the log right away. |
-| The banner says the volume is at 0% | That output's volume is at zero | Raise the iPhone volume while audio plays. |
-| Wired mode is silent and the banner says it's waiting | Nothing is plugged in | Plug the headset in; playback starts by itself. |
+| The app says the volume is at 0% | That output's volume is at zero | Raise the iPhone volume while audio plays. |
+| Wired mode is silent and the connection line says it's waiting | Nothing is plugged in | Plug the headset in; playback starts by itself. |
 | The sound stopped after a call, Siri or another app | iOS interrupted playback | Pause and play on the PC, or change any audio setting. |
-| Bluetooth misbehaves in general | | Tap **Stop**. Without the app or Settings: `sudo killall -9 bluetoothd`. To remove everything, uninstall. |
+| Bluetooth misbehaves in general | | Tap **Stop** (the app's button reads Stop while the speaker is on), or **Stop and restore normal Bluetooth** in Settings. Without either: `sudo killall -9 bluetoothd`. To remove everything, uninstall. |
 
 When something goes wrong, open **View debug log** right away and use **Save Log to iCloud Drive**.
 
@@ -350,7 +358,7 @@ agree.
 ├── Makefile, control, Speaka.plist
 ├── btpsaudiohelper/           the audio helper: decoding and playback
 ├── speakaprefs/               the Settings page
-├── app/                       the Speaka app, packaged as Speaka.tipa / Speaka.ipa
+├── app/                       the Speaka app (SwiftUI, Caz's design), packaged as Speaka.tipa / Speaka.ipa
 ├── layout/                    install scripts, the helper's launchd job, the Settings entry
 ├── tests/                     the test suite (many tests compile the real C sources)
 ├── tools/                     offline scripts
@@ -381,7 +389,8 @@ Every push runs `.github/workflows/build.yml` on macOS with Xcode and Theos. The
 3. builds and checks the `.deb`;
 4. uploads it as the `Speaka-deb` artifact.
 
-A separate job builds the app as the `Speaka-app` artifact. Pushes to `main` republish the **nightly** release with
+A separate job builds the app the way Caz is built, with XcodeGen and `xcodebuild`, as the `Speaka-app` artifact.
+Pushes to `main` republish the **nightly** release with
 all three files and `SHA256SUMS`. If the app fails to build, the release still goes out with the `.deb`. A tag such as
 `v0.2.0` publishes a versioned release. Package versions are `control`'s version plus the run number, so every build
 is newer than the last.
@@ -391,13 +400,14 @@ is newer than the last.
 
 <br>
 
-You need macOS with Xcode and [Theos](https://theos.dev):
+You need macOS with Xcode and [Theos](https://theos.dev) for the tweak, and XcodeGen and ldid for the app
+(`brew install xcodegen ldid`):
 
 ```sh
 export THEOS=~/theos
 bash tools/fetch_google_sbc.sh       # Google libsbc at the pinned commit
 make clean package FINALPACKAGE=1    # packages/com.parv.speaka_*.deb (rootless, arm64 + arm64e)
-make -C app tipa FINALPACKAGE=1      # app/packages/Speaka.tipa and Speaka.ipa
+make -C app tipa                     # app/packages/Speaka.tipa and Speaka.ipa (XcodeGen + xcodebuild)
 ```
 
 The build is rootless only. `BTPS_WITH_PREFS=0` skips the Settings bundle; `BTPS_WITH_IPC_HELPER=0` skips the audio
@@ -489,6 +499,7 @@ notes.
 | v8.9.4 | Wired earbuds without replugging; switching outputs without reconnecting | [TESTING-v8.9.4](docs/history/TESTING-v8.9.4.md) |
 | v9.0 | **Renamed to Speaka** throughout: package `com.parv.speaka` and new internal names | [TESTING-v9.0](docs/history/TESTING-v9.0.md) |
 | v9.1 | No more Headphones / PC flicker: the helper keeps its output through stream changes | [TESTING-v9.1](docs/history/TESTING-v9.1.md) |
+| v9.2 | The app takes Caz's look: one Start/Stop button that opens into a live log | [TESTING-v9.2](docs/history/TESTING-v9.2.md) |
 
 | Research note | Topic |
 | --- | --- |
@@ -506,7 +517,11 @@ notes.
 
 - [**Google libsbc**](https://github.com/google/libsbc) (Apache-2.0) decodes the audio. It's fetched at build time at
   commit `6e505650145c9973d08a0bdd5e5f5e1914305e40` and isn't committed.
-- The app's user interface is adapted from [**Dopamine**](https://github.com/opa334/Dopamine) by Lars Fröder (opa334)
-  and its contributors, under the MIT License, which ships in the app under **Credits**.
+- The app's interface is [**Caz**](https://github.com/m9z2w4d8vw-blip/Caz)'s, backdrop included, which is adapted from
+  [**Dopamine**](https://github.com/opa334/Dopamine) by Lars Fröder (opa334) and its contributors under the MIT License.
+  The license ships in the app under **Credits**.
+- The app's title is meant to be a picture of "Speaka" drawn in Fonarto, like Caz's (`app/scripts/make_wordmark.py`).
+  Until it's drawn, the app writes it in SF Rounded Bold.
 - `sbc_decode.c` is the project's own SBC decoder, written from the Bluetooth specification and used by the tests.
-- Built with [**Theos**](https://theos.dev). It runs on Dopamine with ElleKit and PreferenceLoader.
+- The tweak is built with [**Theos**](https://theos.dev) and the app with [**XcodeGen**](https://github.com/yonaskolb/XcodeGen).
+  It runs on Dopamine with ElleKit and PreferenceLoader.

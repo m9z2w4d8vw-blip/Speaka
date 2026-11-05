@@ -5,6 +5,10 @@
 //  Talks to the Speaka tweak exactly like Settings > Speaka does: through the com.apple.bluetooth
 //  preferences and the Darwin notifications defined in BTPSShared.h at the repository root.
 //
+//  The SwiftUI screens call it through Speaka-Bridging-Header.h. Every method they use has its Swift name spelled
+//  out (NS_SWIFT_NAME), so Swift's automatic renaming can never change it: pollRequest: would otherwise arrive
+//  in Swift as poll(_:).
+//
 
 #import <Foundation/Foundation.h>
 
@@ -55,11 +59,12 @@ typedef NS_ENUM(NSInteger, SPRequestState) {
 @interface SPTweakClient : NSObject
 + (instancetype)sharedClient;
 /// The three output modes, in Settings order: key, title, shortTitle, symbol, detail.
-+ (NSArray<NSDictionary<NSString *, NSString *> *> *)outputModes;
-- (SPStatus *)readStatus;
-- (BOOL)setOutputMode:(NSString *)mode;
-- (nullable SPRequest *)sendAction:(NSString *)action error:(NSString *_Nullable *_Nullable)error;
-- (SPRequestState)pollRequest:(SPRequest *)request;
++ (NSArray<NSDictionary<NSString *, NSString *> *> *)outputModes NS_SWIFT_NAME(outputModes());
+- (SPStatus *)readStatus NS_SWIFT_NAME(readStatus());
+- (BOOL)setOutputMode:(NSString *)mode NS_SWIFT_NAME(setOutputMode(_:));
+- (nullable SPRequest *)sendAction:(NSString *)action error:(NSString *_Nullable *_Nullable)error
+    NS_SWIFT_NAME(sendAction(_:error:));
+- (SPRequestState)pollRequest:(SPRequest *)request NS_SWIFT_NAME(pollRequest(_:));
 @end
 
 NS_ASSUME_NONNULL_END
