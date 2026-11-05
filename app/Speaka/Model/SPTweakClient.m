@@ -65,6 +65,38 @@ static NSString *SPOutputName(NSDictionary *output)
     return label ? [NSString stringWithFormat:@"%@ (%@)", name, label] : name;
 }
 
+/// v9.6: the name of a Bluetooth output in an audio route ({name, type} dictionaries, as the helper publishes them).
+/// iOS publishes the streaming PC as a Bluetooth audio device and, while the speaker is idle, routes the phone's audio
+/// to it: that's where the PC's name shows (outputs=LAPTOP-UGIVBIA5 [BluetoothA2DPOutput] in the 10:22 log). A Windows
+/// default name (DESKTOP-..., LAPTOP-...) wins over other Bluetooth outputs.
+static NSString *SPBluetoothOutputName(id outputs)
+{
+    if (![outputs isKindOfClass:[NSArray class]]) return @"";
+    NSString *first = nil;
+    for (id output in (NSArray *)outputs) {
+        if (![output isKindOfClass:[NSDictionary class]]) continue;
+        NSString *type = SPString(output[@"type"]);
+        if (![type isEqualToString:AVAudioSessionPortBluetoothA2DP] && ![type isEqualToString:AVAudioSessionPortBluetoothHFP] &&
+            ![type isEqualToString:AVAudioSessionPortBluetoothLE])
+            continue;
+        NSString *name = SPString(output[@"name"]);
+        if (name.length == 0) continue;
+        NSString *upper = name.uppercaseString;
+        if ([upper hasPrefix:@"DESKTOP-"] || [upper hasPrefix:@"LAPTOP-"]) return name;
+        if (!first) first = name;
+    }
+    return first ?: @"";
+}
+
+/// This app's own audio route, in the helper's shape. Reading it plays nothing and changes nothing.
+static NSArray *SPOwnRouteOutputs(void)
+{
+    NSMutableArray *outputs = [NSMutableArray array];
+    for (AVAudioSessionPortDescription *port in [AVAudioSession sharedInstance].currentRoute.outputs)
+        [outputs addObject:@{ @"name": port.portName ?: @"", @"type": port.portType ?: @"" }];
+    return outputs;
+}
+
 static NSString *SPOutputsDescription(id outputs)
 {
     if (![outputs isKindOfClass:[NSArray class]]) return @"";
@@ -87,6 +119,7 @@ static NSString *SPOutputsDescription(id outputs)
         _playingOn = @"";
         _waitingReason = @"";
         _diagnostics = @{};
+        _routeName = @"";
     }
     return self;
 }
@@ -190,6 +223,19 @@ static NSString *SPOutputsDescription(id outputs)
     s.receiving = s.session == SPSessionOn && (s.playing || [state isEqualToString:@"waiting"]);
     s.waitingReason = [state isEqualToString:@"waiting"] ? SPString(helper[@"reason"]) : @"";
     s.playingOn = s.playing ? SPOutputsDescription(helper[@"outputs"]) : @"";
+
+    // v9.6: a PC is connected while it streams, while it's paused (the helper idles, still attached), and from when it
+    // sets the stream up (the tweak's diag.v95.peer), until it closes the stream or the helper's session ends.
+    NSString *peer = SPString(status[@"diag.v95.peer"]);
+    BOOL helperAttached = helper && ([state isEqualToString:@"playing"] || [state isEqualToString:@"waiting"] ||
+                                     [state isEqualToString:@"idle"]);
+    BOOL helperEnded = helper && [state isEqualToString:@"stopped"];
+    BOOL peerUp = [peer hasPrefix:@"configured"] || [peer hasPrefix:@"streaming"] || [peer hasPrefix:@"paused"];
+    s.connected = s.session == SPSessionOn && (helperAttached || (peerUp && !helperEnded));
+    NSString *routeName = SPBluetoothOutputName(helper[@"outputs"]);
+    if (routeName.length == 0 && s.session == SPSessionOn)
+        routeName = SPBluetoothOutputName(SPOwnRouteOutputs());
+    s.routeName = routeName;
     id volume = helper[@"volume"];
     s.volumeZero = s.playing && [volume isKindOfClass:[NSNumber class]] && [volume doubleValue] < 0.05;
 

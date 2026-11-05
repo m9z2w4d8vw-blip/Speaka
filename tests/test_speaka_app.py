@@ -340,7 +340,7 @@ class SpeakaApp(unittest.TestCase):
             self.assertIn("BTPSSetStatus(", stretch, "a return without a status, after: " + stretch[-200:])
         callback = block(tweak, "static int btps_v88_install_callback(uint64_t context)\n{")
         self.assertEqual(callback.count("return 0;"), callback.count('BTPSSetStatus("diag.audio_receive","REFUSED'))
-        self.assertRegex(tweak, r'#define BTPS_V89_BUILD_TAG "v9\.4\.0-one-tap-output-select"')
+        self.assertRegex(tweak, r'#define BTPS_V89_BUILD_TAG "v9\.6\.0-one-tap-output-select"')
         log = read(ROOT / "BTPSLog.c")
         flush = block(log, "static void schedule_flush(void)\n{")
         self.assertIn("if (!g_queue) return;", flush)
@@ -434,8 +434,9 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn("SPConnectedDevice.connectedComputerName()", lookup)
         self.assertIn("SPConnectedDevice.pairedComputerName()", lookup)
         line = block(model, "var statusLine: StatusLine? {")
-        self.assertLess(line.index('text: "\\(name) · connected"'), line.index('text: "Connect from your PC"'))
-        self.assertIn('let who = computerName ?? pairedName ?? "Your PC"', line)
+        self.assertLess(line.index('text: "\\(who) · connected"'), line.index('text: "Connect from your PC"'))
+        self.assertIn("let name = computerName ?? routePCName ?? (snapshot.receiving ? pairedName : nil)", line)
+        self.assertLess(line.index('let who = name ?? "Your PC"'), line.index("guard snapshot.receiving else {"))
 
     # ------------------------------------------------------------------ updates
     def test_updater_installs_the_tweak_then_the_app_then_resprings(self):
@@ -506,6 +507,70 @@ class SpeakaApp(unittest.TestCase):
         # Update Available keeps Caz's place; the connection line moves up a line while it shows, so they never overlap.
         self.assertIn(".offset(y: -(30 + linkGap))\n", content)
         self.assertIn(".offset(y: -(30 + linkGap) - (updater.showsLink ? 40 : 0))", content)
+
+    def test_a_paused_pc_stays_connected_and_named(self):
+        """v9.6: pausing is still connected, and the PC is named from the audio route, where iOS shows it."""
+        tweak = read(ROOT / "Tweak.xm")
+        config = block(tweak, "static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,\n"
+                              "    uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7)\n{")
+        self.assertIn('BTPSSetStatus("diag.v95.peer","configured: the PC set up the speaker\'s stream");', config)
+        signal = block(tweak, "static void btps_v88_note_signal(unsigned direction,uint64_t cid,const uint8_t *p,size_t size)\n{")
+        self.assertIn('BTPSSetStatus("diag.v95.peer","%s",change==1?"streaming":(p[1]&63u)==9u?"paused":"closed");',
+                      signal)
+        self.assertLess(signal.index("if(change>=0) {"), signal.index('"diag.v95.peer"'))   # only our stream's
+        # The parser it relies on: SUSPEND (9), CLOSE (8) and ABORT (10) give 0, an accepted START gives 1.
+        parser = read(ROOT / "BTPSV88Control.c")
+        self.assertIn("if(sig!=7 && sig!=8 && sig!=9 && sig!=10) return -1;", parser)
+        self.assertIn("return sig==7?-1:0;", parser)
+        self.assertIn("if(msg==2 && length==2) return sig==7?1:0;", parser)
+        # The client: attached helper (playing, waiting or idle, i.e. paused) or the tweak's status, unless the helper's
+        # session ended; the name from the helper's route, else the app's own, a Windows default name first.
+        client = read(CLIENT_M)
+        read_status = block(client, "- (SPStatus *)readStatus\n{")
+        for text in ('[state isEqualToString:@"idle"]', '[state isEqualToString:@"stopped"]',
+                     '[peer hasPrefix:@"paused"]', "s.connected = s.session == SPSessionOn && (helperAttached || (peerUp && !helperEnded));",
+                     'SPBluetoothOutputName(helper[@"outputs"])', "SPBluetoothOutputName(SPOwnRouteOutputs())"):
+            self.assertIn(text, read_status)
+        name = block(client, "static NSString *SPBluetoothOutputName(id outputs)\n{")
+        for port in ("AVAudioSessionPortBluetoothA2DP", "AVAudioSessionPortBluetoothHFP", "AVAudioSessionPortBluetoothLE"):
+            self.assertIn(port, name)
+        self.assertIn('if ([upper hasPrefix:@"DESKTOP-"] || [upper hasPrefix:@"LAPTOP-"]) return name;', name)
+        header = read(CLIENT_H)
+        self.assertIn("@property (nonatomic) BOOL connected;", header)
+        self.assertIn("@property (nonatomic, copy) NSString *routeName;", header)
+        # The model keeps the route's name while the PC stays connected, and says "connected" while it's paused.
+        model = read(MODEL)
+        keep = model.split("// The PC's name from the audio route, kept while it stays connected.", 1)[1].split("// A problem", 1)[0]
+        self.assertIn("if next.session == .on && next.connected {", keep)
+        self.assertIn("Self.isWindowsName(seen)", keep)
+        self.assertIn("routePCName = nil", keep)
+        line = block(model, "var statusLine: StatusLine? {")
+        self.assertIn("if snapshot.connected || computerName != nil {", line)
+
+    def test_settings_kills_bluetooth(self):
+        """v9.6: Settings, above Audio Output, has Kill Bluetooth: the README's killall -9 bluetoothd, through the helper."""
+        content = read(CONTENT)
+        menu = block(content, "private var menuItems: [MenuItem] {")
+        self.assertLess(menu.index('MenuItem(id: "settings", title: "Settings", symbol: "gearshape",'),
+                        menu.index('MenuItem(id: "output", title: "Audio Output"'))
+        self.assertIn("case settings, output, credits, update", content)
+        self.assertIn("case .settings:\n            SettingsWindow(model: model)", content)
+        windows = read(WINDOWS)
+        settings = block(windows, "struct SettingsWindow: View {")
+        self.assertIn('WindowCard(title: "Settings") {', settings)
+        self.assertIn("model.killBluetooth()", settings)
+        self.assertIn('model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth"', settings)
+        self.assertIn(".disabled(busy)", settings)                 # not during a Start or Stop
+        model = read(MODEL)
+        kill = block(model, "func killBluetooth() {")
+        self.assertIn("guard !killingBluetooth, request == nil else { return }", kill)
+        self.assertIn('SpeakaSpawnRoot(helper, ["kill-bluetooth"])', kill)
+        self.assertIn("killall -9 bluetoothd", read(ROOT / "README.md"))
+        helper = read(HELPER)
+        command = block(helper, "static int do_kill_bluetooth(void) {")
+        self.assertIn('kill_named("bluetoothd")', command)
+        self.assertIn("kill(pid, SIGKILL)", block(helper, "static int kill_named(const char *name) {"))   # as -9 does
+        self.assertIn('if (strcmp(argv[1], "kill-bluetooth") == 0) return do_kill_bluetooth();', helper)
 
     def test_one_tipa_carries_the_tweak(self):
         """v9.5: Speaka.tipa carries the release's .deb, and Install Tweak shows only while the tweak isn't installed."""
@@ -643,6 +708,10 @@ class SpeakaApp(unittest.TestCase):
             self.assertEqual(run("install-update", "--tweak-from-app")[0], 4)
             carried.unlink()
             carried.write_text("the tweak this app carries")
+            # v9.6, Settings > Kill Bluetooth.
+            code, out = run("kill-bluetooth")
+            self.assertEqual(code, 0, out)
+            self.assertIn("(test) would kill bluetoothd", out)
             # dpkg fails: nothing else runs and nothing resprings.
             code, out = run("install-update", "--deb", str(deb), "--tipa", str(tipa), fail="dpkg")
             self.assertEqual(code, 8, out)

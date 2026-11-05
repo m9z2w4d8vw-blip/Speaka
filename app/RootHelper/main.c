@@ -9,6 +9,7 @@
 // Usage:
 //   speakahelper install-update [--deb <path> | --tweak-from-app] [--tipa <path>]
 //   speakahelper finish-update [--tipa <path>] [--tweak-from-app] [--respring]   (started by install-update, own session)
+//   speakahelper kill-bluetooth                                  (Settings > Kill Bluetooth: killall -9 bluetoothd)
 //   speakahelper version
 //
 // install-update installs the tweak's .deb with dpkg first and reports how that went; the package's install script
@@ -22,7 +23,7 @@
 //
 // Exit codes: 0 done, 2 usage, 3 not root, 4 an update file is missing or outside its folders, 5 TrollStore's installer
 // wasn't found, 6 it couldn't be started, 7 it failed, 8 dpkg failed, 9 dpkg wasn't found, 10 the last step couldn't be
-// started, 11 the tweak carried in the app couldn't be copied out.
+// started, 11 the tweak carried in the app couldn't be copied out, 12 bluetoothd wasn't running (kill-bluetooth).
 //
 // Built by app/Makefile. Test builds (-DSPEAKA_TEST, tests/test_speaka_app.py) run nothing: they take every absolute
 // path under $SPEAKA_ROOT and print what they would run.
@@ -48,7 +49,7 @@
 #include <sys/sysctl.h>
 #endif
 
-#define SPEAKA_HELPER_VERSION "1.1"
+#define SPEAKA_HELPER_VERSION "1.2"
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
@@ -461,6 +462,22 @@ static int do_install_update(const char *deb, const char *tipa, int tweak_from_a
     return 0;
 }
 
+// Settings > Kill Bluetooth: what the README's `killall -9 bluetoothd` does, from the app. launchd starts bluetoothd
+// again at once, without the speaker, so devices reconnect and the speaker is off until Start.
+static int do_kill_bluetooth(void) {
+#ifdef SPEAKA_TEST
+    emit("LOG\t(test) would kill bluetoothd");
+    return 0;
+#else
+    if (kill_named("bluetoothd") == 0) {
+        emit("ERR\tBluetooth (bluetoothd) wasn't running");
+        return 12;
+    }
+    emit("LOG\tBluetooth killed; iOS starts it again");
+    return 0;
+#endif
+}
+
 static int do_finish_update(const char *tipa, int tweak_from_app, int resprings) {
     int code = tipa ? install_tipa(tipa) : 0;
     if (code == 0 && tweak_from_app) code = install_carried_tweak();   // the app TrollStore just installed
@@ -500,6 +517,7 @@ int main(int argc, char **argv) {
         }
     }
     if (strcmp(argv[1], "version") == 0) { emit("LOG\tspeakahelper %s", SPEAKA_HELPER_VERSION); return 0; }
+    if (strcmp(argv[1], "kill-bluetooth") == 0) return do_kill_bluetooth();
     if (strcmp(argv[1], "install-update") == 0) return do_install_update(deb, tipa, tweak_from_app);
     if (strcmp(argv[1], "finish-update") == 0) return do_finish_update(tipa, tweak_from_app, resprings);
     emit("ERR\tUnknown command %s", argv[1]);

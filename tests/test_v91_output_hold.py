@@ -288,6 +288,7 @@ static pthread_mutex_t g_v88_control_lock=PTHREAD_MUTEX_INITIALIZER;
 static char line[256];
 static void BTPSV88SetActive(int) {}
 static void BTPSLogNow(const char *fmt,...) {va_list ap;va_start(ap,fmt);vsnprintf(line,sizeof line,fmt,ap);va_end(ap);}
+static void BTPSSetStatus(const char *,const char *,...) {}   /* v9.6: diag.v95.peer, checked in test_v89 */
 static void btps_v88_note_signal(''' + note + r'''
 static void expect(unsigned direction,const uint8_t *p,size_t n,const char *tail) {
     line[0]=0;btps_v88_note_signal(direction,0x108,p,n);

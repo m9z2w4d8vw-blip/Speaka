@@ -12,7 +12,7 @@ import SwiftUI
 import UIKit
 
 enum SpeakaWindow: Equatable {
-    case output, credits, update
+    case settings, output, credits, update
 }
 
 struct ContentView: View {
@@ -170,6 +170,8 @@ struct ContentView: View {
     @ViewBuilder
     private func windowView(_ window: SpeakaWindow, size: CGSize) -> some View {
         switch window {
+        case .settings:
+            SettingsWindow(model: model)
         case .output:
             OutputWindow(model: model)
         case .credits:
@@ -183,6 +185,8 @@ struct ContentView: View {
 
     private var menuItems: [MenuItem] {
         [
+            MenuItem(id: "settings", title: "Settings", symbol: "gearshape",
+                     chevron: true) { window = .settings },
             MenuItem(id: "output", title: "Audio Output", symbol: "speaker.wave.2",
                      chevron: true) { window = .output },
             MenuItem(id: "credits", title: "Credits", symbol: "info.circle",

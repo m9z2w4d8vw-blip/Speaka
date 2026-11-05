@@ -212,6 +212,51 @@ struct RoutePickerAnchor: UIViewRepresentable {
 }
 
 /// What Speaka is, which versions are installed, and the license of the interface it shares with Caz.
+/// Settings (v9.6): Kill Bluetooth, the README's `killall -9 bluetoothd`, from the app.
+struct SettingsWindow: View {
+    @ObservedObject var model: SpeakaModel
+
+    private var busy: Bool { model.killingBluetooth || model.request != nil }
+
+    var body: some View {
+        WindowCard(title: "Settings") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Kill Bluetooth")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.white)
+                Text("Stops Bluetooth at once, as killall -9 bluetoothd does, and iOS starts it again. Use it when devices won't reconnect. Everything connected drops for a moment, and the speaker is off until you tap Start.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    model.killBluetooth()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text(model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth")
+                    }
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(Theme.menu, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(busy)
+                .opacity(busy ? 0.5 : 1)
+                if let result = model.killResult {
+                    Text(result)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+        }
+    }
+}
+
 struct CreditsWindow: View {
 
     var body: some View {

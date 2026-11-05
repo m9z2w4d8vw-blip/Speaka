@@ -5,6 +5,7 @@ SwiftUI code, on Speaka's own background. It offers:
 
 - **one button** that starts or stops the speaker and opens into a log while Bluetooth restarts, like Caz's Clean
   button;
+- a **Settings** window with **Kill Bluetooth** (`killall -9 bluetoothd`, through the root helper);
 - an **Audio Output** window with the three outputs, and iOS's own output picker for Bluetooth earbuds;
 - a **connection line** above the button that says who is connected and where the audio plays;
 - **Credits**, with the app's and the tweak's versions and the license of the interface;
@@ -64,9 +65,10 @@ step and the tweak's reason in Caz's warning colour until the speaker's state ch
 | Part | Shows |
 | --- | --- |
 | Header | *Speaka*, *iOS 17.0*, then *by Parv*, or what needs your attention in the warning colour |
+| Settings | A window with **Kill Bluetooth**: `speakahelper kill-bluetooth` kills bluetoothd as `killall -9` does, and launchd starts it again without the speaker. Greyed out during a Start or Stop |
 | Audio Output | A window with iPhone speaker, Wired headphones or earbuds, and Any device; a gold checkmark on the one in use; then Choose Output Device |
 | Credits | A window with the app's and the tweak's versions, a line on what iOS's Bluetooth list reports, and Dopamine's license |
-| Connection line | *LAPTOP-XXXX · connected* as soon as the PC connects, *LAPTOP-XXXX · iPhone speaker* while it plays, *Waiting: no wired headphones plugged in*, or *Connect from your PC*. The name comes from iOS's Bluetooth list, read every 3 s while the speaker is on: a computer it lists as connected (by its device class in any of the forms iOS uses, or a Windows *DESKTOP-* or *LAPTOP-* name), or, while audio plays, the one computer paired with the iPhone; *Your PC* if neither is certain |
+| Connection line | *LAPTOP-XXXX · connected* once the PC sets up the stream and while it's paused, *LAPTOP-XXXX · iPhone speaker* while it plays, *Waiting: no wired headphones plugged in*, or *Connect from your PC* while nothing is connected. How the app knows it's connected, and the PC's name, are under [How it talks to the tweak](#how-it-talks-to-the-tweak) |
 | The button | Start or Stop, as above |
 
 Update Available sits where Caz has it, 20 pt above the button, and slides up 25 pt as it fades in. The connection line
@@ -132,7 +134,8 @@ header spells out each method's Swift name with `NS_SWIFT_NAME`, because Swift w
 | Start / Stop | Writes `{action, nonce, time}` to `SpeakaV89SessionRequest`, posts `com.parv.speaka.v89.session`, then follows `diag.v89.session` until the tweak answers that nonce |
 | Status | Reads `SpeakaStatus` and `SpeakaV89HelperStatus` every 0.5 s, with the same rules as the Settings page |
 | Audio output | Writes `SpeakaV89OutputMode`, then posts `com.parv.speaka.v89.output`; the helper switches mid-song |
-| PC name | Best effort, from the private BluetoothManager framework; otherwise the line says "Your PC" |
+| Connected | While the PC streams (the helper plays or waits), while it's paused (the helper idles, still attached), or from when it sets the stream up, by the tweak's `diag.v95.peer` (*configured*, *streaming*, *paused*, *closed*), until it closes the stream or the helper's session ends. A link that drops without closing leaves the last state until bluetoothd restarts |
+| PC name | iOS publishes the streaming PC as a Bluetooth audio device, and while the speaker is idle routes the phone's audio to it, so its name is a Bluetooth output in the helper's route, or in the app's own; a Windows *DESKTOP-* or *LAPTOP-* name wins, and the app keeps it while the PC stays connected. Before that, the private BluetoothManager framework; otherwise "Your PC" |
 
 ## Build
 

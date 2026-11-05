@@ -84,7 +84,7 @@
 #define BTPS_BUILD_TAG "v8.8-continuous-sbc-ring"
 /* v8.9 keeps the v8.8 build label, as v8.8.1 and v8.8.2 did; this separate tag identifies the one-tap
  * Start/Stop build in the status block (diag.v89.build) and the log. */
-#define BTPS_V89_BUILD_TAG "v9.4.0-one-tap-output-select"
+#define BTPS_V89_BUILD_TAG "v9.6.0-one-tap-output-select"
 
 /* AVDTP constants, used for native Source registration diagnostics */
 #define BTPS_AVDTP_TSEP_SRC 0u
@@ -328,6 +328,8 @@ static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a
         g_v88_control.local_seid=7;g_v88_control.remote_seid=(unsigned)a4;
         pthread_mutex_unlock(&g_v88_control_lock);
         BTPSLogNow("V88_CONFIG handle=%u local_seid=7 remote_seid=%u",(unsigned)a2,(unsigned)a4);
+        /* v9.6: the PC's side of the speaker's stream, for the app's connection line (diag.v95.peer). */
+        BTPSSetStatus("diag.v95.peer","configured: the PC set up the speaker's stream");
     }
     return hook_setconfigind_observe(a0,a1,a2,a3,a4,a5,a6,a7);
 }
@@ -346,6 +348,9 @@ static void btps_v88_note_signal(unsigned direction,uint64_t cid,const uint8_t *
         BTPSLogNow("V882_CONTROL direction=%s CID=%#llx tx=%u msg=%u sig=%u active=%d by=%s",
             direction?"TX":"RX",(unsigned long long)cid,p[0]>>4,p[0]&3u,p[1]&63u,change,
             ((direction==1u)==((p[0]&3u)==0u))?"phone":"pc");
+        /* v9.6: a START accepted streams; SUSPEND is a pause, and the PC is still connected; CLOSE or ABORT ends it.
+         * (A link that just drops sends none of these, so the last one stays until bluetoothd restarts.) */
+        BTPSSetStatus("diag.v95.peer","%s",change==1?"streaming":(p[1]&63u)==9u?"paused":"closed");
     }
     pthread_mutex_unlock(&g_v88_control_lock);
 }

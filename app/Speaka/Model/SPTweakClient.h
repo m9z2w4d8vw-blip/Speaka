@@ -37,6 +37,8 @@ typedef NS_ENUM(NSInteger, SPSession) {
 @property (nonatomic, copy) NSString *waitingReason; // e.g. "no wired headphones plugged in"
 @property (nonatomic) BOOL volumeZero;
 @property (nonatomic, copy) NSDictionary<NSString *, id> *diagnostics; // the tweak's whole status block, as published
+@property (nonatomic) BOOL connected;                // v9.6: a PC is connected: streaming, paused, or just set up
+@property (nonatomic, copy) NSString *routeName;     // v9.6: a Bluetooth output's name in the audio route, else empty
 @property (nonatomic, readonly) BOOL canStart;
 @property (nonatomic, readonly) BOOL canStop;
 @end

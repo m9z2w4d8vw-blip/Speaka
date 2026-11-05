@@ -127,11 +127,13 @@ background.
   keeps the tweak's own reason. The log folds back 1.6 s after the last line, or 6 s after a failure, and the button
   then reads the other word.
 - **The connection line** above the button says what's happening: *LAPTOP-XXXX · connected* as soon as the PC
-  connects, *LAPTOP-XXXX · iPhone speaker* while it plays, or *Connect from your PC* while the speaker waits. The PC's
-  name comes from iOS's Bluetooth list; when it isn't certain it says *Your PC*, and **Credits** shows what the list
-  reports, device by device.
+  sets up the stream and while it's paused, *LAPTOP-XXXX · iPhone speaker* while it plays, or *Connect from your PC*
+  while nothing is connected. The PC's name comes from the audio route, where iOS shows it as a Bluetooth audio
+  device, or from iOS's Bluetooth list; when neither has it, it says *Your PC*.
 - **The header** reads *by Parv*, or, when something needs your attention, says what in the warning colour: for
   example that the volume is at zero, or that Bluetooth was turned off and on.
+- **Settings** has **Kill Bluetooth**: `killall -9 bluetoothd`, from the app. iOS starts Bluetooth again at once,
+  without the speaker, so use it when devices won't reconnect, then tap **Start**.
 - **Audio Output** opens a window with the three outputs; the current one has a checkmark. **Choose Output Device**
   under them opens iOS's own picker.
 - **Credits** shows the app's and the tweak's versions and the license of the interface, which Caz and Speaka share.
@@ -211,7 +213,7 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 | The sound stopped after a call, Siri or another app | iOS interrupted playback | Pause and play on the PC, or change any audio setting. |
 | **Update Available** never appears | The app checks once per launch; offline, or GitHub's limit of 60 checks an hour was reached | Open the app again later. You can always install from the [latest release](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest) by hand. |
 | *Update failed* after *Installing the tweak* | dpkg reported an error, often because Sileo or Zebra was installing at the same time | Close the package manager and tap **Update** again. Nothing else changed. |
-| Bluetooth misbehaves in general | | Tap **Stop** (the app's button reads Stop while the speaker is on), or **Stop and restore normal Bluetooth** in Settings. Without either: `sudo killall -9 bluetoothd`. To remove everything, uninstall. |
+| Bluetooth misbehaves in general | | Tap **Stop** (the app's button reads Stop while the speaker is on), or **Stop and restore normal Bluetooth** in Settings. Without either: **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`. To remove everything, uninstall. |
 
 When something goes wrong, open **View debug log** right away and use **Save Log to iCloud Drive**.
 
@@ -244,6 +246,7 @@ scp mobile@<iphone-ip>:/tmp/FTABHarvest/BTPSAudioHelper-v88.log "$env:USERPROFIL
 | --- | --- |
 | `diag.v89.build: v9.4.0-one-tap-output-select` | The tweak build running inside `bluetoothd` |
 | `diag.v89.session: start nonce=... result=ARMED` | Start restarted Bluetooth and armed the speaker |
+| `diag.v95.peer: paused` | The PC's side of the stream: *configured* (set up), *streaming*, *paused*, or *closed* |
 | `diag.v82.sep: LOCAL register=0 SEID=7 role=SNK ...` | The speaker endpoint is registered |
 | `V88_CONFIG handle=1 local_seid=7 remote_seid=...` | The PC configured a stream |
 | `V88_STREAM active=1 generation=N` | The stream started (`active=0`: paused or closed) |
@@ -540,6 +543,7 @@ notes.
 | v9.3 | Speaka's own background again; the app updates itself and the tweak; numbered releases | [TESTING-v9.3](docs/history/TESTING-v9.3.md) |
 | v9.4 | Updates that install; Start shows every step and which one failed | [TESTING-v9.4](docs/history/TESTING-v9.4.md) |
 | v9.5 | One `.tipa` installs the app and the tweak; Install Tweak; one-download updates | [TESTING-v9.5](docs/history/TESTING-v9.5.md) |
+| v9.6 | Settings with Kill Bluetooth; the PC's name from the audio route; still connected while paused | [TESTING-v9.6](docs/history/TESTING-v9.6.md) |
 
 | Research note | Topic |
 | --- | --- |

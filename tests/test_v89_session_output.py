@@ -161,11 +161,19 @@ int main(void) {
                         rx.index("btps_v88_note_signal(0,cid,control,(size_t)length)"))
         self.compile_run(r'''
 #include <assert.h>
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <pthread.h>
 #include "BTPSV88Control.c"
 static unsigned g_v88_ready=1,g_v82_sink_accepted=1;
+/* v9.6: the PC's side of the stream, as the app reads it (diag.v95.peer). */
+static char peer[32]="";
+static void BTPSSetStatus(const char *key,const char *fmt,...) {
+    if(strcmp(key,"diag.v95.peer")) return;
+    va_list ap;va_start(ap,fmt);vsnprintf(peer,sizeof peer,fmt,ap);va_end(ap);
+}
 static volatile uint64_t g_v89_sink_sig_cid=0;
 static BTPSV88Control g_v88_control;
 static pthread_mutex_t g_v88_control_lock=PTHREAD_MUTEX_INITIALIZER;
@@ -180,12 +188,14 @@ int main() {
     const uint8_t start_pc[3]={0x30,0x07,0x1c},accept_start_pc[2]={0x32,0x07};
     btps_v88_note_signal(0,0x108,start_pc,3);assert(changes==0);
     btps_v88_note_signal(1,0x108,accept_start_pc,2);assert(changes==1 && last_active==1);
+    assert(!strcmp(peer,"streaming"));
     /* Channel not yet known (old behaviour): an earbud SUSPEND with a colliding SEID would stop forwarding. */
     const uint8_t suspend_buds[3]={0x50,0x09,0xd0};
     btps_v88_note_signal(1,0x140,suspend_buds,3);assert(changes==2 && last_active==0);
     /* Channel known: earbud traffic is ignored; the PC still starts and stops the stream. */
-    g_v89_sink_sig_cid=0x108;changes=0;last_active=-9;
+    g_v89_sink_sig_cid=0x108;changes=0;last_active=-9;strcpy(peer,"streaming");
     btps_v88_note_signal(1,0x140,suspend_buds,3);assert(changes==0);
+    assert(!strcmp(peer,"streaming"));                    /* earbud traffic doesn't touch the PC's status */
     const uint8_t start_buds[3]={0x60,0x07,0xd0},accept_buds[2]={0x62,0x07};
     btps_v88_note_signal(1,0x140,start_buds,3);btps_v88_note_signal(0,0x140,accept_buds,2);assert(changes==0);
     const uint8_t start_pc2[3]={0x40,0x07,0x1c},accept_pc2[2]={0x42,0x07};
@@ -193,6 +203,14 @@ int main() {
     assert(changes==1 && last_active==1);
     const uint8_t suspend_pc[3]={0x70,0x09,0x1c};
     btps_v88_note_signal(0,0x108,suspend_pc,3);assert(changes==2 && last_active==0);
+    assert(!strcmp(peer,"paused"));                       /* a pause: the PC is still connected */
+    const uint8_t close_pc[3]={0x80,0x08,0x1c};
+    btps_v88_note_signal(0,0x108,close_pc,3);assert(!strcmp(peer,"closed"));
+    const uint8_t start_pc3[3]={0x90,0x07,0x1c},accept_pc3[2]={0x92,0x07};
+    btps_v88_note_signal(0,0x108,start_pc3,3);btps_v88_note_signal(1,0x108,accept_pc3,2);
+    assert(!strcmp(peer,"streaming"));
+    const uint8_t abort_pc[3]={0xa0,0x0a,0x1c};
+    btps_v88_note_signal(0,0x108,abort_pc,3);assert(!strcmp(peer,"closed"));
     g_v82_sink_accepted=0;changes=0;
     btps_v88_note_signal(0,0x108,suspend_pc,3);assert(changes==0);
     return 0;

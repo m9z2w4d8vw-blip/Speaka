@@ -50,6 +50,8 @@ final class SpeakaModel: ObservableObject {
         var waitingReason = ""
         var volumeZero = false
         var detail = ""
+        var connected = false
+        var routeName = ""
     }
 
     /// The line above the big button, where Caz shows Update Available.
@@ -77,6 +79,12 @@ final class SpeakaModel: ObservableObject {
     /// A computer iOS reports as connected, and the one computer paired with this iPhone (SPConnectedDevice).
     @Published private(set) var computerName: String? = nil
     @Published private(set) var pairedName: String? = nil
+    /// v9.6: the PC's name as the audio route last showed it, kept while the PC stays connected, because the route
+    /// shows it only while nothing else is playing (while it's paused, say).
+    @Published private(set) var routePCName: String? = nil
+    /// Settings > Kill Bluetooth: running, and how it went.
+    @Published private(set) var killingBluetooth = false
+    @Published private(set) var killResult: String? = nil
 
     private let client = SPTweakClient()
     /// The tweak's own status block, which the steps of a Start or a Stop are read from.
@@ -172,15 +180,17 @@ final class SpeakaModel: ObservableObject {
         guard request == nil else { return nil }
         switch snapshot.session {
         case .on:
+            // The PC's name: iOS's Bluetooth list, else the audio route, else (only while it streams) the one paired
+            // computer.
+            let name = computerName ?? routePCName ?? (snapshot.receiving ? pairedName : nil)
+            let who = name ?? "Your PC"
             guard snapshot.receiving else {
-                // Connected but not playing yet: name the PC as soon as iOS lists it as connected.
-                if let name = computerName {
-                    return StatusLine(symbol: "laptopcomputer", text: "\(name) · connected")
+                // Connected but not playing: just set up, or paused. The PC is still there, so name it.
+                if snapshot.connected || computerName != nil {
+                    return StatusLine(symbol: "laptopcomputer", text: "\(who) · connected")
                 }
                 return StatusLine(symbol: "dot.radiowaves.left.and.right", text: "Connect from your PC")
             }
-            // A PC is streaming, so the one paired computer is it, even if iOS doesn't list it as connected.
-            let who = computerName ?? pairedName ?? "Your PC"
             if snapshot.playing {
                 let place = snapshot.playingOn.isEmpty ? "this iPhone" : snapshot.playingOn
                 return StatusLine(symbol: "laptopcomputer", text: "\(who) · \(place)")
@@ -251,6 +261,8 @@ final class SpeakaModel: ObservableObject {
         next.waitingReason = status.waitingReason
         next.volumeZero = status.volumeZero
         next.detail = status.detail
+        next.connected = status.connected
+        next.routeName = status.routeName
         // Right after a change the preference can still read the old value for a moment: don't flip back.
         if let changed = outputChangeDate, Date().timeIntervalSince(changed) < 2.0 {
             next.outputMode = snapshot.outputMode
@@ -268,6 +280,17 @@ final class SpeakaModel: ObservableObject {
                     tweakPackageMissing = missing
                 }
             }
+        }
+        // The PC's name from the audio route, kept while it stays connected. A Windows default name wins over another
+        // Bluetooth output (headphones, say), and it's forgotten when the PC goes.
+        if next.session == .on && next.connected {
+            let seen = next.routeName
+            if !seen.isEmpty, seen != routePCName,
+               routePCName == nil || Self.isWindowsName(seen) || !Self.isWindowsName(routePCName ?? "") {
+                routePCName = seen
+            }
+        } else if routePCName != nil {
+            routePCName = nil
         }
         // A problem stays in the header until the speaker's state moves on.
         if let problemSession, problemSession != next.session {
@@ -391,7 +414,7 @@ final class SpeakaModel: ObservableObject {
     static func failure(for pending: SPRequest) -> (line: String, problem: String) {
         if pending.resultTitle == "Still waiting" {
             return ("Bluetooth didn't restart",
-                    "Bluetooth didn't restart. If devices don't reconnect, run killall -9 bluetoothd.")
+                    "Bluetooth didn't restart. If devices don't reconnect, use Kill Bluetooth in Settings.")
         }
         return ("Bluetooth wasn't restarted", "Bluetooth wasn't restarted: \(reason(in: pending.resultMessage ?? ""))")
     }
@@ -418,6 +441,38 @@ final class SpeakaModel: ObservableObject {
     static func reason(in message: String) -> String {
         guard let range = message.range(of: "reason=") else { return message }
         return String(message[range.upperBound...].prefix(while: { $0 != ";" }))
+    }
+
+    /// Windows names a PC DESKTOP-XXXXXXX or LAPTOP-XXXXXXXX until someone renames it.
+    static func isWindowsName(_ name: String) -> Bool {
+        let upper = name.uppercased()
+        return upper.hasPrefix("DESKTOP-") || upper.hasPrefix("LAPTOP-")
+    }
+
+    // MARK: - Settings
+
+    /// Settings > Kill Bluetooth: the README's `killall -9 bluetoothd`, through the root helper, since bluetoothd runs
+    /// as root. iOS starts Bluetooth again at once, without the speaker, so it stays off until Start.
+    func killBluetooth() {
+        guard !killingBluetooth, request == nil else { return }
+        killingBluetooth = true
+        killResult = nil
+        let helper = Bundle.main.bundlePath + "/speakahelper"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var errors: [String] = []
+            let status = SpeakaSpawnRoot(helper, ["kill-bluetooth"]) { line in
+                if line.hasPrefix("ERR\t") { errors.append(String(line.dropFirst(4))) }
+            }
+            let reason = errors.last
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.killingBluetooth = false
+                self.killResult = status == 0
+                    ? "Bluetooth restarted. The speaker is off until you tap Start."
+                    : (reason ?? "Bluetooth couldn't be killed (code \(status)).")
+                self.refresh()
+            }
+        }
     }
 
     // MARK: - Audio output
