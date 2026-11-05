@@ -148,6 +148,11 @@ final class SpeakaModel: ObservableObject {
     var headerDetail: String { headerWarning ?? "by Parv" }
 
     var headerWarning: String? {
+        // v9.8: removing the tweak is the point of an uninstall, so it doesn't warn that the tweak is missing (or
+        // that Bluetooth restarted). If the uninstall fails, `uninstalling` is cleared first and the reason shows.
+        if uninstalling {
+            return nil
+        }
         if let problem {
             return problem
         }
@@ -182,7 +187,7 @@ final class SpeakaModel: ObservableObject {
 
     /// Who is connected and where it plays. Hidden while the speaker is off and while a request is in flight.
     var statusLine: StatusLine? {
-        guard request == nil else { return nil }
+        guard request == nil, !uninstalling else { return nil }
         switch snapshot.session {
         case .on:
             // The PC's name: iOS's Bluetooth list, else the audio route, else (only while it streams) the one paired

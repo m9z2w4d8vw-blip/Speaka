@@ -150,20 +150,24 @@ struct MenuRow: View {
     }
 }
 
-/// v9.8, Uninstall: laid out exactly like a MenuRow, but a tap does nothing. Held down, a soft red fill sweeps across
-/// the row over the hold and the title says to keep holding; let go early and the fill runs back. Held the whole time:
-/// a warning haptic and the action, with no second prompt. While it runs, a spinner takes the icon's place and the row
-/// greys out to Caz's disabled 45%. It doesn't dim while pressed, as other rows do, so that 45% means only "busy".
+/// v9.8, Uninstall: laid out exactly like a MenuRow, but a tap does nothing. Held down, the row slowly greys out over
+/// the hold, to the look of Caz's Clean button before a scan (the whole button at 70%), and the title stays Uninstall
+/// throughout; let go early and it brightens again. Held the whole time: a warning haptic and the action, with no second
+/// prompt, and the row stays greyed out while it runs, with a spinner in the icon's place and "Uninstalling...". It
+/// doesn't dim while pressed, as other rows do, so that greying out is the only thing a press does.
 struct HoldMenuRow: View {
     let item: MenuItem
     let height: CGFloat
     @State private var holding = false
 
+    /// Caz's Clean button while it has nothing to clean.
+    static let greyedOut = 0.7
+
     private var seconds: Double { item.holdSeconds ?? 4 }
 
-    private var title: String {
-        if item.busy { return "Uninstalling..." }
-        return holding ? "Keep holding to uninstall" : item.title
+    private var opacity: Double {
+        if item.busy || holding { return Self.greyedOut }
+        return item.enabled ? 1 : 0.45
     }
 
     var body: some View {
@@ -176,7 +180,7 @@ struct HoldMenuRow: View {
                         .font(.system(size: 19, weight: .medium))
                 }
             }
-            Text(title)
+            Text(item.busy ? "Uninstalling..." : item.title)
                 .font(.system(size: 17))
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -185,15 +189,8 @@ struct HoldMenuRow: View {
         .foregroundStyle(Theme.text)
         .padding(.horizontal, 12)
         .frame(height: height)
-        .background(alignment: .leading) {
-            GeometryReader { geo in
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Theme.failure.opacity(0.3))
-                    .frame(width: holding ? geo.size.width : 0)
-            }
-            .padding(.vertical, 8)
-        }
         .contentShape(Rectangle())
+        .opacity(opacity)
         .onLongPressGesture(minimumDuration: seconds, maximumDistance: 40) {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             item.action()
@@ -204,7 +201,6 @@ struct HoldMenuRow: View {
             }
         }
         .disabled(!item.enabled || item.busy)
-        .opacity(item.enabled && !item.busy ? 1 : 0.45)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Hold for \(Int(seconds)) seconds to uninstall Speaka and its tweak.")

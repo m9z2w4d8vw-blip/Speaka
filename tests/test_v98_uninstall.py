@@ -61,21 +61,25 @@ class Menu(unittest.TestCase):
                      ".padding(.horizontal, 12)", ".frame(height: height)", ".contentShape(Rectangle())"):
             self.assertIn(part, row)
             self.assertIn(part, plain)
-        # Only a hold acts: no button, no press-dim (45% means busy), and a fill that shows how long is left.
+        # Only a hold acts: no button and no press-dim. The hold greys the row out to Caz's Clean button before a scan
+        # (the big button's disabled 70%) over the hold, with the title Uninstall all the way; letting go brightens it.
         self.assertNotIn("Button {", row)
         self.assertNotIn("MenuButtonStyle", row)
         self.assertIn(".onLongPressGesture(minimumDuration: seconds, maximumDistance: 40) {", row)
         self.assertIn("private var seconds: Double { item.holdSeconds ?? 4 }", row)
+        self.assertIn("static let greyedOut = 0.7", row)
+        self.assertIn(".opacity(enabled ? 1 : 0.7)", block(components, "struct ActionButton: View {"))
+        self.assertIn("if item.busy || holding { return Self.greyedOut }\n        return item.enabled ? 1 : 0.45", row)
+        self.assertIn(".opacity(opacity)", row)
         self.assertIn("pressing ? Animation.linear(duration: seconds) : Animation.easeOut(duration: 0.25)", row)
-        self.assertIn(".frame(width: holding ? geo.size.width : 0)", row)
-        self.assertIn(".fill(Theme.failure.opacity(0.3))", row)
-        self.assertIn('return holding ? "Keep holding to uninstall" : item.title', row)
+        self.assertIn("holding = pressing", row)
+        for gone in ("Keep holding", "GeometryReader", "Theme.failure"):
+            self.assertNotIn(gone, row)
+        self.assertIn('Text(item.busy ? "Uninstalling..." : item.title)', row)   # only once it's under way
         self.assertIn("UINotificationFeedbackGenerator().notificationOccurred(.warning)\n            item.action()", row)
-        # Then it greys out, saying so, with a spinner where the icon was.
-        self.assertIn('if item.busy { return "Uninstalling..." }', row)
+        # While it runs: still greyed out, with a spinner where the icon was.
         self.assertIn("if item.busy {\n                    Spinner()", row)
         self.assertIn(".disabled(!item.enabled || item.busy)", row)
-        self.assertIn(".opacity(item.enabled && !item.busy ? 1 : 0.45)", row)
         self.assertIn("if item.holdSeconds != nil {\n                        HoldMenuRow(item: item, height: rowHeight)",
                       block(components, "struct ActionMenu: View {"))
         item = block(components, "struct MenuItem: Identifiable {")
@@ -83,7 +87,35 @@ class Menu(unittest.TestCase):
         self.assertIn("var busy = false", item)
 
 
+class Settings(unittest.TestCase):
+    def test_smaller_and_without_descriptions(self):
+        windows = read(APP / "Windows.swift")
+        settings = block(windows, "struct SettingsWindow: View {")
+        self.assertEqual(settings.count(".frame(height: 44)"), 2)
+        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 2)
+        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 2)
+        self.assertIn("VStack(spacing: 10)", settings)
+        self.assertIn(".scaleEffect(0.85)\n                        .frame(width: 51 * 0.85, height: 31 * 0.85)", settings)
+        for gone in ("Every 2 minutes", ".frame(height: 50)", "size: 17", "size: 13"):
+            self.assertNotIn(gone, settings)
+        # A line only when something failed, in the warning colour at Caz's 12 pt for footers.
+        self.assertIn("if let failure = model.killResult {", settings)
+        self.assertIn('if model.notificationsRefused {\n                    Text("Allow notifications', settings)
+        self.assertEqual(settings.count(".font(.system(size: 12))\n                        .foregroundStyle(Theme.failure)"), 2)
+        self.assertNotIn("Color.white.opacity(0.5)", settings)
+
+
 class Uninstall(unittest.TestCase):
+    def test_nothing_about_the_tweak_while_it_goes(self):
+        model = read(APP / "SpeakaModel.swift")
+        warning = block(model, "    var headerWarning: String? {", "\n    }\n")
+        self.assertLess(warning.index("if uninstalling {\n            return nil\n        }"), warning.index("if let problem {"))
+        self.assertIn("guard request == nil, !uninstalling else { return nil }", block(model, "    var statusLine: StatusLine? {", "\n    }\n"))
+        self.assertIn("if updater.showsLink && !model.uninstalling {", read(APP / "ContentView.swift"))
+        # A failed uninstall clears the flag before setting the reason, so the reason shows.
+        flow = block(model, "    func uninstall() {", "\n    }\n")
+        self.assertIn("self.uninstalling = false\n                self.problem = reason", flow)
+
     def test_model_order(self):
         model = read(APP / "SpeakaModel.swift")
         flow = block(model, "    func uninstall() {", "\n    }\n")

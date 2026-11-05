@@ -136,9 +136,10 @@ background.
   without the speaker, so use it when devices won't reconnect, then tap **Start**.
 - **Audio Output** opens a window with the three outputs; the current one has a checkmark. **Choose Output Device**
   under them opens iOS's own picker.
-- **Uninstall** removes everything when held for 4 seconds; a tap alone does nothing. While you hold, a fill sweeps
-  across the row; let go early and nothing happens. At 4 seconds the row greys out and reads *Uninstalling...*, with
-  no second prompt: the tweak is removed with dpkg and Bluetooth restarts, Settings closes, Speaka's logs, settings and
+- **Uninstall** removes everything when held for 4 seconds; a tap alone does nothing. While you hold, the row slowly
+  greys out, the way Caz's Clean button looks before a scan, and still reads *Uninstall*; let go early and it
+  brightens again. At 4 seconds it stays greyed out and reads *Uninstalling...*, with no second prompt, and the
+  header doesn't warn that the tweak is missing: the tweak is removed with dpkg and Bluetooth restarts, Settings closes, Speaka's logs, settings and
   downloads are deleted, and TrollStore removes the app. If the tweak can't be removed, nothing else is, and the header
   says why.
 - **Credits** shows the app's and the tweak's versions and the license of the interface, which Caz and Speaka share.

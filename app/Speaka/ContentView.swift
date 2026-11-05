@@ -114,7 +114,7 @@ struct ContentView: View {
                 // place, or the line above it, 10 pt higher, while Update Available is showing.
                 // v9.5: with no tweak installed it's Install Tweak, which installs the one this app carries; with a
                 // tweak installed, of whatever version, it's Update Available as before.
-                if updater.showsLink {
+                if updater.showsLink && !model.uninstalling {        // no Install Tweak while it's being removed
                     UpdateLinkButton(title: updater.tweakMissing ? "Install Tweak" : "Update Available",
                                      symbol: "arrow.down.circle") {
                         if updater.tweakMissing {

@@ -11,10 +11,10 @@ like Caz's Scan, so it has no chevron.
 
 | You | It |
 | --- | --- |
-| Tap it | Nothing (the fill starts and runs straight back) |
-| Hold it | A fill in the warning colour sweeps across the row over 4 s; the row reads *Keep holding to uninstall* |
-| Let go early | The fill runs back; nothing happens |
-| Hold 4 s | A warning haptic; the row shows a spinner and *Uninstalling...*, greyed to 45%; everything else locks |
+| Tap it | Nothing (the row starts to grey and brightens straight back) |
+| Hold it | The row slowly greys out over 4 s, to 70% like Caz's Clean button before a scan; it still reads *Uninstall* |
+| Let go early | It brightens again; nothing happens |
+| Hold 4 s | A warning haptic; the row stays greyed with a spinner and *Uninstalling...*; everything else locks |
 
 Then, with no second prompt:
 
@@ -34,13 +34,26 @@ Helper 1.3. Files: `app/RootHelper/main.c`, `app/Speaka/{MainComponents,ContentV
 `app/Speaka/Model/SPTweakClient.[hm]`, `tests/test_v98_uninstall.py` (6 tests), and three assertions in
 `tests/test_speaka_app.py`.
 
+## After the first test on the phone
+
+- **Settings** is a size smaller: rows 44 pt (were 50) with 12 pt corners, text at 15 pt (Caz's size for Settings
+  rows), the switch at 85%, 10 pt between rows. Update notifications has no description any more; a line shows only
+  if iOS refused permission, like Kill Bluetooth's line, which shows only if it failed. Both lines are 12 pt.
+- **While uninstalling**, the header no longer warns *The tweak isn't installed yet*: removing it is the point. The
+  header reads *by Parv*, and neither the connection line nor Install Tweak appears, until Speaka closes. If the
+  uninstall fails, the reason shows as before.
+- **The hold** no longer sweeps a red fill or says *Keep holding to uninstall*. The row slowly greys out over the 4 s,
+  to 70%, the level of Caz's Clean button before a scan (and of Speaka's own big button when it can't be pressed),
+  and reads *Uninstall* throughout. Once the uninstall starts, it stays at 70% with the spinner and *Uninstalling...*;
+  the other rows lock at Caz's 45%, so the one doing the work stands out.
+
 ## On the phone
 
 1. **The menu.** Four rows; Uninstall has a trash icon and no chevron. Compare with Caz side by side: the panel's top
    and bottom, the rows and the separators should line up.
-2. **A tap.** Tap Uninstall: the row starts to fill and runs back, and nothing else happens.
-3. **Let go early.** Hold for about 2 seconds and let go: *Keep holding to uninstall* while held, then the fill runs
-   back and the title returns.
+2. **A tap.** Tap Uninstall: the row barely dims and comes straight back, and nothing else happens.
+3. **Let go early.** Hold for about 2 seconds and let go: the row greys out part-way, reading *Uninstall* the whole
+   time, then brightens again.
 4. **The whole thing**, when you're ready to reinstall afterwards. Hold for 4 seconds: a haptic, *Uninstalling...*
    with a spinner. Bluetooth restarts (anything connected drops for a few seconds), then Speaka closes and its icon
    disappears. Then check:

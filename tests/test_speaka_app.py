@@ -616,7 +616,8 @@ class SpeakaApp(unittest.TestCase):
         self.assertNotIn("Timer.publish", content)
         # The switch, in Settings under Kill Bluetooth; the app's own settings, stored by the client.
         settings = block(read(WINDOWS), "struct SettingsWindow: View {")
-        self.assertLess(settings.index("model.killBluetooth()"), settings.index("Toggle(isOn: Binding(get: { model.updateNotifications },"))
+        self.assertLess(settings.index("model.killBluetooth()"),
+                        settings.index('Toggle("Update notifications", isOn: Binding(get: { model.updateNotifications },'))
         self.assertIn("set: { model.setUpdateNotifications($0) }", settings)
         client = read(CLIENT_M)
         self.assertIn('static NSString *const SPUpdateNotificationsKey = @"updateNotifications";', client)
@@ -646,7 +647,7 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn("var showsLink: Bool { tweakMissing || isAvailable }", updater)
         self.assertIn("init() {\n        refreshTweak()\n    }", updater)
         content = read(CONTENT)
-        self.assertIn("if updater.showsLink {", content)
+        self.assertIn("if updater.showsLink && !model.uninstalling {", content)   # v9.8: not while uninstalling
         tap = content.split('UpdateLinkButton(title: updater.tweakMissing ? "Install Tweak" : "Update Available",', 1)[1]
         tap = tap.split("window = .update", 1)[0]
         self.assertIn("if updater.tweakMissing {\n                            updater.installTweak()", tap)

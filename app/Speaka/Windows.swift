@@ -219,47 +219,57 @@ struct SettingsWindow: View {
     private var busy: Bool { model.killingBluetooth || model.request != nil }
 
     var body: some View {
+        // v9.8: a size smaller: rows 44 pt (were 50) with 12 pt corners, text at Caz's 15 pt for Settings rows, the
+        // switch at 85%. Neither row has a description; a line shows only when something failed, at Caz's 12 pt.
         WindowCard(title: "Settings") {
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 Button {
                     model.killBluetooth()
                 } label: {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         Image(systemName: "arrow.triangle.2.circlepath")
                         Text(model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth")
                     }
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(Theme.menu, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .frame(height: 44)
+                    .background(Theme.menu, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .disabled(busy)
                 .opacity(busy ? 0.5 : 1)
                 if let failure = model.killResult {
                     Text(failure)
-                        .font(.system(size: 13))
+                        .font(.system(size: 12))
                         .foregroundStyle(Theme.failure)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Toggle(isOn: Binding(get: { model.updateNotifications },
-                                     set: { model.setUpdateNotifications($0) })) {
+                HStack {
                     Text("Update notifications")
-                        .font(.system(size: 17, weight: .medium))
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.white)
+                    Spacer(minLength: 8)
+                    // A switch is 51 x 31 pt whatever it's asked; scaled, then framed to its new size so it sits
+                    // flush with the row's edge.
+                    Toggle("Update notifications", isOn: Binding(get: { model.updateNotifications },
+                                                                  set: { model.setUpdateNotifications($0) }))
+                        .labelsHidden()
+                        .tint(Theme.accent)
+                        .scaleEffect(0.85)
+                        .frame(width: 51 * 0.85, height: 31 * 0.85)
                 }
-                .tint(Theme.accent)
-                .padding(.horizontal, 16)
-                .frame(height: 50)
-                .background(Theme.menu, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                Text(model.notificationsRefused
-                     ? "Allow notifications for Speaka in Settings > Notifications, then try again."
-                     : "Every 2 minutes while Speaka is open; in the background, as often as iOS allows.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(model.notificationsRefused ? Theme.failure : Color.white.opacity(0.5))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .background(Theme.menu, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if model.notificationsRefused {
+                    Text("Allow notifications for Speaka in Settings > Notifications, then try again.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.failure)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
