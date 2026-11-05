@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = (ROOT/'Tweak.xm').read_text()
+SRC = (ROOT/'tweak/Hooks.xm').read_text()
 
 class TrialTest(unittest.TestCase):
     @classmethod
@@ -15,8 +15,8 @@ class TrialTest(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         lib = Path(cls.tmp.name)/'v81config.so'
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-shared','-fPIC',
-                        str(ROOT/'BTPSV81Config.c'),'-o',str(lib)],check=True)
-        cls.fn = ctypes.CDLL(str(lib)).btps_v81_prepare_shadow
+                        str(ROOT/'tweak/SinkEndpoint.c'),'-o',str(lib)],check=True)
+        cls.fn = ctypes.CDLL(str(lib)).sink_prepare_config_shadow
         cls.fn.argtypes=[ctypes.POINTER(ctypes.c_uint8),ctypes.c_size_t,
                          ctypes.POINTER(ctypes.c_uint8),ctypes.c_int]
         cls.fn.restype=ctypes.c_int
@@ -44,40 +44,40 @@ class TrialTest(unittest.TestCase):
         for mode,length in ((2,32),(-1,32),(1,3),(1,31)):
             self.assertNotEqual(self.call(arm=mode,length=length)[0],0)
     def test_default_off_and_registration_requires_separate_one_shot_arm(self):
-        # v9.8: only Start arms it (BTPSV89Session.c), so Settings has no switch for it.
-        plist=plistlib.loads((ROOT/'speakaprefs/Resources/Root.plist').read_bytes())
+        # v9.8: only Start arms it (tweak/Session.c), so Settings has no switch for it.
+        plist=plistlib.loads((ROOT/'settings/Resources/Root.plist').read_bytes())
         self.assertEqual([x for x in plist['items'] if x.get('key')=='SpeakaV81SevenOnce'],[])
-        self.assertIn('CFPreferencesSetAppValue(CFSTR(BTPS_KEY_V81_SEVEN_ONCE), arm, V89_DOMAIN);',
-                      (ROOT/'BTPSV89Session.c').read_text())
-        self.assertIn('decisive_requested && g_v81_seven_armed && !BTPSExperimentsEnabled()',SRC)
-        self.assertIn('!g_v82_signal_hook_ok || !g_v82_sdp_hook_ok',SRC)
+        self.assertIn('CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_SEVEN_SLOTS_ONCE), arm, SESSION_DOMAIN);',
+                      (ROOT/'tweak/Session.c').read_text())
+        self.assertIn('decisive_requested && g_seven_armed && !SpeakaExperimentsEnabled()',SRC)
+        self.assertIn('!g_signal_rx_hook_ok || !g_sdp_hook_ok',SRC)
         self.assertIn('g_native_source_success != 6',SRC)
         self.assertNotIn('btps_v77_attempt_after_sources(',SRC)
-        self.assertIn('g_orig[BTPS_H_REGISTER]',SRC)
+        self.assertIn('g_orig[HOOK_REGISTER]',SRC)
     def test_one_shot_cleared_before_hook(self):
-        disarm=SRC.index('btps_v81_consume_one_shot();')
-        install=SRC.index('MSHookFunction((void *)target, (void *)btps_v80_hook_get_config')
+        disarm=SRC.index('consume_seven_slots_arm();')
+        install=SRC.index('MSHookFunction((void *)target, (void *)hook_get_config')
         self.assertLess(disarm,install)
-        block=SRC.split('static int btps_v81_consume_one_shot(void)',1)[1].split('static uint64_t btps_v81_try_seven(',1)[0]
+        block=SRC.split('static int consume_seven_slots_arm(void)',1)[1].split('static uint64_t try_seven_slots(',1)[0]
         self.assertIn('CFPreferencesSetAppValue(',block)
         self.assertIn('kCFBooleanFalse',block)
         self.assertIn('CFPreferencesAppSynchronize(',block)
         self.assertIn('!synced || !disarmed',block)
     def test_signature_precheck_and_avoid_hook_collision(self):
-        self.assertIn('g_v81_verified_initial_signature = btps_v79_signatures_match()',SRC)
-        self.assertIn('if (s[i].offset == 0x1f5f20u && g_v80_enabled_for_v79_audit())',SRC)
-        self.assertIn('if (!g_v81_verified_initial_signature) return 0;',SRC)
-        self.assertIn('g_v81_verified_initial_signature && g_v78_exact_uuid',SRC)
+        self.assertIn('g_initial_signature_verified = allocator_signatures_match()',SRC)
+        self.assertIn('if (s[i].offset == 0x1f5f20u && g_config_hook_for_audit())',SRC)
+        self.assertIn('if (!g_initial_signature_verified) return 0;',SRC)
+        self.assertIn('g_initial_signature_verified && g_exact_build',SRC)
         self.assertIn('table_original == original',SRC)
     def test_separate_static_shadow_not_live_mutation(self):
-        self.assertIn('static uint8_t g_v81_shadow[BTPS_V81_CONFIG_COPY_BYTES]',SRC)
-        self.assertIn('btps_v81_prepare_shadow(source, sizeof source, g_v81_shadow, 1)',SRC)
-        self.assertIn('__sync_bool_compare_and_swap(&g_v81_seven_applied, 0u, 1u)',SRC)
+        self.assertIn('static uint8_t g_config_shadow[SINK_CONFIG_COPY_BYTES]',SRC)
+        self.assertIn('sink_prepare_config_shadow(source, sizeof source, g_config_shadow, 1)',SRC)
+        self.assertIn('__sync_bool_compare_and_swap(&g_seven_applied, 0u, 1u)',SRC)
         self.assertNotIn('vm_write(',SRC)
         self.assertNotIn('vm_protect(',SRC)
-        self.assertIn('BTPSV81Config.c', (ROOT/'Makefile').read_text())
+        self.assertIn('tweak/SinkEndpoint.c', (ROOT/'Makefile').read_text())
         self.assertIn('V81_LIVE RESULT',SRC)
-        self.assertIn('g_v81_shadow_returned',SRC)
+        self.assertIn('g_config_shadow_returned',SRC)
     def test_documents_disclose_no_sink_and_rollback(self):
         docs=(ROOT/'docs/history/TESTING-v8.1.md').read_text()
         for term in ('OFF','Legacy Sink','one-shot','v8.0','no Sink', 'slots=7'):

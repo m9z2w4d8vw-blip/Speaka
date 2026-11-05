@@ -14,8 +14,8 @@ __pycache__/
 *.pyc
 
 # Google libsbc is fetched at build time by tools/fetch_google_sbc.sh and is never committed
-btpsaudiohelper/vendor_sbc/*
-!btpsaudiohelper/vendor_sbc/README.md
+audiohelper/vendor_sbc/*
+!audiohelper/vendor_sbc/README.md
 
 # Logs copied off the phone
 *.log

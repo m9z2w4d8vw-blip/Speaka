@@ -21,8 +21,8 @@ REMOVED_TESTS = ("Verify Test Checklist", "Test iOS Audio Output", "Send PCM", "
 
 class SettingsPage(unittest.TestCase):
     def setUp(self):
-        self.items = plistlib.loads((ROOT / "speakaprefs/Resources/Root.plist").read_bytes())["items"]
-        self.controller = (ROOT / "speakaprefs/BTPSRootListController.m").read_text()
+        self.items = plistlib.loads((ROOT / "settings/Resources/Root.plist").read_bytes())["items"]
+        self.controller = (ROOT / "settings/SettingsPage.m").read_text()
 
     def test_three_sections_without_footer_text(self):
         groups = [item for item in self.items if item.get("cell") == "PSGroupCell"]
@@ -51,19 +51,19 @@ class SettingsPage(unittest.TestCase):
     def test_the_code_behind_the_removed_rows_is_gone(self):
         for name in REMOVED_CODE:
             self.assertNotIn(name, self.controller, name)
-        self.assertNotIn("reloadSpecifierID", (ROOT / "speakaprefs/BTPSRootListController.h").read_text())
+        self.assertNotIn("reloadSpecifierID", (ROOT / "settings/SettingsPage.m").read_text())
 
     def test_the_log_screen_only_shows_and_saves_the_log(self):
-        viewer = (ROOT / "speakaprefs/BTPSLogViewController.m").read_text()
-        reader = (ROOT / "speakaprefs/BTPSLogReader.m").read_text()
+        viewer = (ROOT / "settings/DebugLog.m").read_text()
+        reader = (ROOT / "settings/DebugLog.m").read_text()
         for name in REMOVED_TESTS:
             self.assertNotIn(name, viewer, name)
         for name in ("BTPSAudioTestLastResult", "BTPSIPCPlaybackLastResult", "BTPSV75SBCRequestLastResult",
                      "BTPSDaemonIPCRequestLastResult", "diag.v74_ipc", "diag.v75_sbc"):
             self.assertNotIn(name, reader, name)
         self.assertIn("Save Log to iCloud Drive", viewer)
-        make = (ROOT / "speakaprefs/Makefile").read_text()
-        self.assertIn("SpeakaPrefs_FILES      = BTPSRootListController.m BTPSLogViewController.m BTPSLogReader.m\n", make)
+        make = (ROOT / "settings/Makefile").read_text()
+        self.assertIn("SpeakaPrefs_FILES      = SettingsPage.m DebugLog.m\n", make)
         self.assertIn("SpeakaPrefs_FRAMEWORKS = UIKit Foundation CoreFoundation\n", make)
 
 

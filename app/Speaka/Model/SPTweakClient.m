@@ -2,7 +2,7 @@
 //  SPTweakClient.m
 //  Speaka
 //
-//  Every rule here mirrors speakaprefs/BTPSRootListController.m (the Settings page), so the app and Settings
+//  Every rule here mirrors settings/SettingsPage.m (the Settings page), so the app and Settings
 //  always agree about the speaker's state. tests/test_speaka_app.py checks that they stay in step.
 //
 
@@ -10,24 +10,24 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreFoundation/CoreFoundation.h>
 #include <notify.h>
-#import "BTPSShared.h"
+#import "shared/SpeakaShared.h"
 
 #pragma mark - preferences (same domain and scope as the tweak and the Settings page)
 
 static void SPSynchronize(void)
 {
-    CFPreferencesAppSynchronize(CFSTR(BTPS_PREFS_DOMAIN));
+    CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
 }
 
 static id SPCopyPref(NSString *key)   // call SPSynchronize() first
 {
-    return CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR(BTPS_PREFS_DOMAIN)));
+    return CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR(SPEAKA_PREFS_DOMAIN)));
 }
 
 static BOOL SPWritePref(NSString *key, id value)   // nil removes the key
 {
-    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFPropertyListRef)value, CFSTR(BTPS_PREFS_DOMAIN));
-    return CFPreferencesAppSynchronize(CFSTR(BTPS_PREFS_DOMAIN));
+    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFPropertyListRef)value, CFSTR(SPEAKA_PREFS_DOMAIN));
+    return CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
 }
 
 static NSString *SPString(id value)
@@ -37,7 +37,7 @@ static NSString *SPString(id value)
 
 static NSDictionary *SPDaemonStatus(void)
 {
-    id status = SPCopyPref(@BTPS_KEY_STATUS);
+    id status = SPCopyPref(@SPEAKA_KEY_STATUS);
     return [status isKindOfClass:[NSDictionary class]] ? status : @{};
 }
 
@@ -164,7 +164,7 @@ static NSString *SPOutputsDescription(id outputs)
 
 + (NSArray<NSDictionary<NSString *, NSString *> *> *)outputModes
 {
-    // Titles match the "Play audio on" list in speakaprefs/Resources/Root.plist.
+    // Titles match the "Play audio on" list in settings/Resources/Root.plist.
     return @[
         @{ @"key": @"speaker", @"title": @"iPhone speaker", @"shortTitle": @"iPhone speaker",
            @"symbol": @"speaker.wave.2.fill", @"detail": @"Always the built-in loudspeaker" },
@@ -212,7 +212,7 @@ static NSString *SPOutputsDescription(id outputs)
     }
 
     // What BTPSAudioHelper last reported, ignored once it is more than 20 s old (as in Settings).
-    id helperValue = SPCopyPref(@BTPS_KEY_V89_HELPER);
+    id helperValue = SPCopyPref(@SPEAKA_KEY_HELPER_STATUS);
     NSDictionary *helper = [helperValue isKindOfClass:[NSDictionary class]] ? helperValue : nil;
     id when = helper[@"time"];
     double time = [when isKindOfClass:[NSNumber class]] ? [when doubleValue] : 0.0;
@@ -239,7 +239,7 @@ static NSString *SPOutputsDescription(id outputs)
     id volume = helper[@"volume"];
     s.volumeZero = s.playing && [volume isKindOfClass:[NSNumber class]] && [volume doubleValue] < 0.05;
 
-    NSString *mode = SPString(SPCopyPref(@BTPS_KEY_V89_OUTPUT_MODE));
+    NSString *mode = SPString(SPCopyPref(@SPEAKA_KEY_OUTPUT_MODE));
     s.outputMode = [[[SPTweakClient outputModes] valueForKey:@"key"] containsObject:mode] ? mode : @"speaker";
     return s;
 }
@@ -248,10 +248,10 @@ static NSString *SPOutputsDescription(id outputs)
 {
     if (![[[SPTweakClient outputModes] valueForKey:@"key"] containsObject:mode])
         return NO;
-    if (!SPWritePref(@BTPS_KEY_V89_OUTPUT_MODE, mode))
+    if (!SPWritePref(@SPEAKA_KEY_OUTPUT_MODE, mode))
         return NO;
     // The audio helper re-reads the mode when this is posted, so the change applies mid-song.
-    notify_post(BTPS_NOTIFY_V89_OUTPUT);
+    notify_post(SPEAKA_NOTIFY_OUTPUT);
     return YES;
 }
 
@@ -261,13 +261,13 @@ static NSString *SPOutputsDescription(id outputs)
 {
     NSString *nonce = [NSUUID UUID].UUIDString;
     NSDictionary *request = @{ @"action": action, @"nonce": nonce, @"time": @([NSDate date].timeIntervalSince1970) };
-    if (!SPWritePref(@BTPS_KEY_V89_REQUEST, request)) {
+    if (!SPWritePref(@SPEAKA_KEY_SESSION_REQUEST, request)) {
         if (error) *error = @"Could not save the request (preferences did not synchronize). Nothing was changed.";
         return nil;
     }
-    uint32_t posted = notify_post(BTPS_NOTIFY_V89_SESSION);
+    uint32_t posted = notify_post(SPEAKA_NOTIFY_SESSION);
     if (posted != NOTIFY_STATUS_OK) {
-        SPWritePref(@BTPS_KEY_V89_REQUEST, nil);
+        SPWritePref(@SPEAKA_KEY_SESSION_REQUEST, nil);
         if (error) *error = [NSString stringWithFormat:@"Could not reach Bluetooth (notify_post=%u). Nothing was changed.", posted];
         return nil;
     }
@@ -291,7 +291,7 @@ static NSString *SPOutputsDescription(id outputs)
 {
     SPSynchronize();
     NSDictionary *status = SPDaemonStatus();
-    NSString *session = SPString(status[@BTPS_STATUS_V89_SESSION]);
+    NSString *session = SPString(status[@SPEAKA_STATUS_SESSION]);
     BOOL mine = [session containsString:[@"nonce=" stringByAppendingString:request.nonce]];
     BOOL start = [request.action isEqualToString:@"start"];
     NSTimeInterval elapsed = -[request.started timeIntervalSinceNow];
@@ -350,7 +350,7 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
 
 + (void)removeLeftoverPreferences
 {
-    CFStringRef domain = CFSTR(BTPS_PREFS_DOMAIN);
+    CFStringRef domain = CFSTR(SPEAKA_PREFS_DOMAIN);
     CFArrayRef keys = CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
     if (keys) {
         for (NSString *key in (__bridge NSArray *)keys) {

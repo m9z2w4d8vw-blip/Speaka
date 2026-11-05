@@ -3,7 +3,7 @@ import pathlib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-UI = (ROOT / 'speakaprefs' / 'BTPSLogViewController.m').read_text()
+UI = (ROOT / 'settings' / 'DebugLog.m').read_text()
 
 class ICloudExportTests(unittest.TestCase):
     def test_export_is_in_settings_not_daemon(self):
@@ -18,7 +18,7 @@ class ICloudExportTests(unittest.TestCase):
         self.assertIn('[_textView.bottomAnchor constraintEqualToAnchor:exportButton.topAnchor constant:-6.0]', UI)
 
     def test_full_report_is_used(self):
-        self.assertIn('[[BTPSLogReader shared] fullText]', UI)
+        self.assertIn('[[SpeakaLogReader shared] fullText]', UI)
         self.assertIn('log writeToURL:fileURL atomically:YES encoding:NSUTF8StringEncoding', UI)
         self.assertIn('@"Speaka-%@-%@.txt"', UI)
 

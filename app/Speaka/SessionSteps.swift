@@ -1,7 +1,7 @@
 import Foundation
 
 /// The steps of a Start or a Stop after Bluetooth restarts, in the order the tweak goes through them inside
-/// bluetoothd. Each one is read from a status the tweak publishes (Tweak.xm, BTPSV89Session.c), so when a Start fails,
+/// bluetoothd. Each one is read from a status the tweak publishes (tweak/Hooks.xm, tweak/Session.c), so when a Start fails,
 /// the log shows the step that failed and the tweak's own reason. tests/test_speaka_app.py checks every key and prefix
 /// here against the tweak's source.
 ///

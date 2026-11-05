@@ -3,7 +3,7 @@
 //  Speaka
 //
 //  Talks to the Speaka tweak exactly like Settings > Speaka does: through the com.apple.bluetooth
-//  preferences and the Darwin notifications defined in BTPSShared.h at the repository root.
+//  preferences and the Darwin notifications defined in shared/SpeakaShared.h at the repository root.
 //
 //  The SwiftUI screens call it through Speaka-Bridging-Header.h. Every method they use has its Swift name spelled
 //  out (NS_SWIFT_NAME), so Swift's automatic renaming can never change it: pollRequest: would otherwise arrive
@@ -73,7 +73,7 @@ typedef NS_ENUM(NSInteger, SPRequestState) {
 + (BOOL)updateNotificationsEnabled NS_SWIFT_NAME(updateNotificationsEnabled());
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled NS_SWIFT_NAME(setUpdateNotificationsEnabled(_:));
 
-/// Uninstall (v9.8): every key Speaka keeps in com.apple.bluetooth (all start with "Speaka", BTPSShared.h) and the
+/// Uninstall (v9.8): every key Speaka keeps in com.apple.bluetooth (all start with "Speaka", shared/SpeakaShared.h) and the
 /// app's own settings. Run once the tweak is removed, so nothing writes them back.
 + (void)removeLeftoverPreferences NS_SWIFT_NAME(removeLeftoverPreferences());
 + (nullable NSString *)notifiedVersion NS_SWIFT_NAME(notifiedVersion());

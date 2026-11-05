@@ -23,8 +23,8 @@ class TestV79(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory()
         lib = Path(cls.temp.name) / 'libv79.so'
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-shared', '-fPIC',
-                        str(ROOT / 'BTPSV79Geometry.c'), '-o', str(lib)], check=True)
-        cls.func = ctypes.CDLL(str(lib)).btps_v79_analyze
+                        str(ROOT / 'tweak/SinkEndpoint.c'), '-o', str(lib)], check=True)
+        cls.func = ctypes.CDLL(str(lib)).sink_analyze_allocation
         cls.func.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8),
                              ctypes.c_uint, ctypes.POINTER(Geometry)]
         cls.func.restype = ctypes.c_int
@@ -60,25 +60,25 @@ class TestV79(unittest.TestCase):
         self.assertNotEqual(self.check([6,1,1],[0,1,1],7)[0],0)
         self.assertNotEqual(self.check([6,1,1],[6,1,1],8)[0],0)
     def test_source_uses_only_memory_reads(self):
-        source=(ROOT/'Tweak.xm').read_text()
-        block=source.split('static void btps_v79_snapshot_geometry(void)',1)[1].split('/* v8.0/v8.1: Optional config getter observer',1)[0]
-        self.assertIn('g_v78_exact_uuid',source)
-        self.assertIn('btps_v79_signatures_match()',block)
-        self.assertIn('btps_peek',block)
-        self.assertIn('btps_v79_analyze(',block)
+        source=(ROOT/'tweak/Hooks.xm').read_text()
+        block=source.split('static void snapshot_allocation(void)',1)[1].split('/* v8.0/v8.1: Optional config getter observer',1)[0]
+        self.assertIn('g_exact_build',source)
+        self.assertIn('allocator_signatures_match()',block)
+        self.assertIn('safe_peek',block)
+        self.assertIn('sink_analyze_allocation(',block)
         self.assertNotIn('MSHookFunction',block)
         self.assertNotIn('malloc(',block)
         self.assertNotIn('memcpy(',block)
         self.assertNotIn('g_orig[',block)
         self.assertNotIn('btps_v77_attempt_after_sources(',source)
         self.assertIn('if (sources == 6u)',source)
-        self.assertIn('btps_v79_snapshot_geometry();',source)
-        self.assertIn('BTPSV79Geometry.c', (ROOT/'Makefile').read_text())
+        self.assertIn('snapshot_allocation();',source)
+        self.assertIn('tweak/SinkEndpoint.c', (ROOT/'Makefile').read_text())
         self.assertIn('diag.v79_allocator',source)
     def test_provenance_instruction_table(self):
         # We do not ship the user's proprietary 10MB bluetoothd in GitHub.
         # Verifies source pins sites analyzed from the exact UUID only.
-        source=(ROOT/'Tweak.xm').read_text()
+        source=(ROOT/'tweak/Hooks.xm').read_text()
         for offset in ['0x0ce3f8u', '0x0ce3fcu', '0x0ce41cu', '0x0ce424u',
                        '0x0ce470u', '0x0ce4d4u', '0x0ce4f4u', '0x1f5f48u',
                        '0x984a60u', '0x9768b0u']:

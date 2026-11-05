@@ -117,15 +117,15 @@ class SpeakaApp(unittest.TestCase):
     # ------------------------------------------------------------------ protocol
     def test_app_speaks_the_tweaks_protocol(self):
         client = read(CLIENT_M)
-        self.assertIn('#import "BTPSShared.h"', client)
-        for name in ("@BTPS_KEY_V89_REQUEST", "BTPS_NOTIFY_V89_SESSION", "@BTPS_KEY_STATUS", "@BTPS_STATUS_V89_SESSION",
-                     "@BTPS_KEY_V89_HELPER", "@BTPS_KEY_V89_OUTPUT_MODE", "BTPS_NOTIFY_V89_OUTPUT", "BTPS_PREFS_DOMAIN"):
+        self.assertIn('#import "shared/SpeakaShared.h"', client)
+        for name in ("@SPEAKA_KEY_SESSION_REQUEST", "SPEAKA_NOTIFY_SESSION", "@SPEAKA_KEY_STATUS", "@SPEAKA_STATUS_SESSION",
+                     "@SPEAKA_KEY_HELPER_STATUS", "@SPEAKA_KEY_OUTPUT_MODE", "SPEAKA_NOTIFY_OUTPUT", "SPEAKA_PREFS_DOMAIN"):
             self.assertIn(name, client)
         send = client.split("- (SPRequest *)sendAction:", 1)[1].split("\n}\n", 1)[0]
         self.assertIn('@{ @"action": action, @"nonce": nonce, @"time": @([NSDate date].timeIntervalSince1970) }', send)
-        self.assertLess(send.index("SPWritePref(@BTPS_KEY_V89_REQUEST, request)"), send.index("notify_post(BTPS_NOTIFY_V89_SESSION)"))
-        self.assertIn("SPWritePref(@BTPS_KEY_V89_REQUEST, nil);", send)   # withdrawn if the notification fails
-        # Names come from BTPSShared.h only: no hand-typed keys or notification names anywhere in the app.
+        self.assertLess(send.index("SPWritePref(@SPEAKA_KEY_SESSION_REQUEST, request)"), send.index("notify_post(SPEAKA_NOTIFY_SESSION)"))
+        self.assertIn("SPWritePref(@SPEAKA_KEY_SESSION_REQUEST, nil);", send)   # withdrawn if the notification fails
+        # Names come from shared/SpeakaShared.h only: no hand-typed keys or notification names anywhere in the app.
         for source in SOURCES:
             text = read(source)
             self.assertNotRegex(text, r'@?"Speaka[A-Z]\w*"', source.name)
@@ -156,8 +156,8 @@ class SpeakaApp(unittest.TestCase):
         self.assertEqual(keys, ["speaker", "headphones", "any"])
         self.assertEqual(len(re.findall(r'@"title": @"([^"]+)"', modes)), 3)
         self.assertEqual(len(re.findall(r'@"shortTitle": @"([^"]+)"', modes)), 3)
-        helper = read(ROOT / "btpsaudiohelper/BTPSV89Output.h")
-        self.assertIn('return mode == BTPS_V89_MODE_HEADPHONES ? "headphones" : mode == BTPS_V89_MODE_ANY ? "any" : "speaker";',
+        helper = read(ROOT / "audiohelper/OutputPolicy.h")
+        self.assertIn('return mode == OUTPUT_MODE_HEADPHONES ? "headphones" : mode == OUTPUT_MODE_ANY ? "any" : "speaker";',
                       helper)
         for symbol in re.findall(r'@"symbol": @"([^"]+)"', modes):
             self.assertRegex(symbol, r"^[a-z0-9.]+$")
@@ -272,16 +272,16 @@ class SpeakaApp(unittest.TestCase):
         self.assertEqual([n.strip() for n in start.split(",")],
                          ["arm", "hooks", "endpoints", "room", "audioPath", "speaker", "advertising"])
         self.assertIn("static let stop: [SessionStep] = [switchOff]", steps)
-        tweak = read(ROOT / "Tweak.xm") + read(ROOT / "BTPSV89Session.c")
+        tweak = read(ROOT / "tweak/Hooks.xm") + read(ROOT / "tweak/Session.c")
         # Statuses as the tweak writes them: the key, and the format's fixed text before its first conversion.
         written = {}
-        for call in re.finditer(r'BTPSSetStatus\(\s*"([\w.]+)"\s*,(.*?)\);', tweak, re.S):
+        for call in re.finditer(r'SpeakaSetStatus\(\s*"([\w.]+)"\s*,(.*?)\);', tweak, re.S):
             written.setdefault(call.group(1), []).extend(re.findall(r'"([^"]*)"', call.group(2)))
         written.setdefault("diag.v89.session", []).append("%s nonce=%s pid=%d result=%s")
         keys = set(re.findall(r'status\["([\w.]+)"', steps)) | set(re.findall(r'\("(diag\.[\w.]+)", \[', steps))
         self.assertGreaterEqual(len(keys), 12)
         for key in keys:
-            self.assertIn(key, written, f"no BTPSSetStatus writes {key}")
+            self.assertIn(key, written, f"no SpeakaSetStatus writes {key}")
 
         def matches(prefix, key):
             for fmt in written[key]:
@@ -309,45 +309,45 @@ class SpeakaApp(unittest.TestCase):
             for prefix in prefixes:
                 self.assertIn(f'"{prefix}', steps.replace("live_slots=7 ", "live_slots=").replace("SEID=7", "SEID="),
                               f"{prefix!r} is listed here but no step checks it")
-        # The results the steps read from the session line are the ones BTPSV89SessionReport writes.
-        report = read(ROOT / "BTPSV89Session.c")
+        # The results the steps read from the session line are the ones SpeakaSessionReport writes.
+        report = read(ROOT / "tweak/Session.c")
         for result in ("ARMED", "REFUSED", "OFF", "STILL_ARMED"):
             self.assertIn(f'"{result}"', report)
         for result in ("result=REFUSED", "result=OFF", "result=STILL_ARMED"):
             self.assertIn(f'"{result}"', steps)
         # A zero SDP result prints as "0" (%#llx), and SEID 7 is the speaker's.
-        self.assertIn('BTPSSetStatus("diag.v82.sdp", "LOCAL add=%#llx handle=%#x;', read(ROOT / "Tweak.xm"))
+        self.assertIn('SpeakaSetStatus("diag.v82.sdp", "LOCAL add=%#llx handle=%#x;', read(ROOT / "tweak/Hooks.xm"))
         self.assertIn('sdp.hasPrefix("LOCAL add=0 ")', steps)
         self.assertIn('sep.hasPrefix("LOCAL register=0 SEID=7")', steps)
         # Six native Sources: the step accepts the count the tweak writes as "%u".
-        self.assertIn('BTPSSetStatus("diag.native_source_ok", "%u", sources);', read(ROOT / "Tweak.xm"))
+        self.assertIn('SpeakaSetStatus("diag.native_source_ok", "%u", sources);', read(ROOT / "tweak/Hooks.xm"))
 
     def test_the_tweak_reports_every_step_promptly(self):
         """Every final refusal on the way to the speaker sets a status, and statuses reach the app within a second."""
-        tweak = read(ROOT / "Tweak.xm")
-        attempt = block(tweak, "static void btps_v83_attempt_post_source(uint64_t audio_context)\n{")
-        claim = attempt.index("__sync_bool_compare_and_swap(&g_v82_sink_attempted, 0, 1)")
+        tweak = read(ROOT / "tweak/Hooks.xm")
+        attempt = block(tweak, "static void register_sink_after_sources(uint64_t audio_context)\n{")
+        claim = attempt.index("__sync_bool_compare_and_swap(&g_sink_attempted, 0, 1)")
         # Before the one attempt is claimed, a missing prerequisite is WAITING: the next power-on tries again.
-        self.assertIn('BTPSSetStatus("diag.v83.audio_table", "WAITING: %s", missing);', attempt[:claim])
-        self.assertNotRegex(attempt[:claim], r'BTPSSetStatus\([^;]*"REFUSED')
+        self.assertIn('SpeakaSetStatus("diag.v83.audio_table", "WAITING: %s", missing);', attempt[:claim])
+        self.assertNotRegex(attempt[:claim], r'SpeakaSetStatus\([^;]*"REFUSED')
         # After it (its own line returns quietly: someone else made the attempt), every return says why.
         after = attempt[attempt.index("return;", claim) + len("return;"):].split("reject_before_swap:", 1)[0]
         stretches = after.split("return;")[:-1]
         self.assertGreaterEqual(len(stretches), 7)
         for stretch in stretches:
-            self.assertIn("BTPSSetStatus(", stretch, "a return without a status, after: " + stretch[-200:])
-        callback = block(tweak, "static int btps_v88_install_callback(uint64_t context)\n{")
-        self.assertEqual(callback.count("return 0;"), callback.count('BTPSSetStatus("diag.audio_receive","REFUSED'))
-        self.assertRegex(tweak, r'#define BTPS_V89_BUILD_TAG "v9\.6\.0-one-tap-output-select"')
-        log = read(ROOT / "BTPSLog.c")
+            self.assertIn("SpeakaSetStatus(", stretch, "a return without a status, after: " + stretch[-200:])
+        callback = block(tweak, "static int install_media_callback(uint64_t context)\n{")
+        self.assertEqual(callback.count("return 0;"), callback.count('SpeakaSetStatus("diag.audio_receive","REFUSED'))
+        self.assertRegex(tweak, r'#define SESSION_BUILD_TAG "v9\.6\.0-one-tap-output-select"')
+        log = read(ROOT / "tweak/Log.c")
         flush = block(log, "static void schedule_flush(void)\n{")
         self.assertIn("if (!g_queue) return;", flush)
         self.assertIn("if (!__sync_lock_test_and_set(&g_flush_pending, 1))", flush)
         self.assertIn("1LL * NSEC_PER_SEC", flush)
-        status = block(log, "void BTPSSetStatus(const char *key, const char *fmt, ...)\n{")
+        status = block(log, "void SpeakaSetStatus(const char *key, const char *fmt, ...)\n{")
         self.assertLess(status.index("pthread_mutex_unlock(&g_lock);"), status.index("schedule_flush();"))
         common = block(log, "static void log_common(int sync, const char *fmt, va_list ap)\n{")
-        self.assertIn("if (inited) schedule_flush();", common)   # BTPSLogNow too, not only BTPSLog
+        self.assertIn("if (inited) schedule_flush();", common)   # SpeakaLogNow too, not only SpeakaLogLine
         self.assertEqual(log.count("dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 1LL * NSEC_PER_SEC)"), 1)
 
     def test_the_log_never_moves_sideways(self):
@@ -476,7 +476,7 @@ class SpeakaApp(unittest.TestCase):
                      r"URLSession\.shared\.dataTask\(with: part\.url\)"):
             self.assertNotRegex(strip_comments_and_strings(updater), gone)
         self.assertIn('static let downloadFolders = ["/var/mobile/Library/Caches/Speaka", "/tmp/FTABHarvest"]', updater)
-        self.assertRegex(read(ROOT / "BTPSShared.h"), r'#define BTPS_LOG_DIR_TMP\s+"/tmp/FTABHarvest"')
+        self.assertRegex(read(ROOT / "shared/SpeakaShared.h"), r'#define SPEAKA_LOG_DIR\s+"/tmp/FTABHarvest"')
         helper = read(HELPER)
         for folder in ("/var/mobile/", "/tmp/FTABHarvest/", "/private/var/tmp/FTABHarvest/"):
             self.assertIn(f'"{folder}"', helper)
@@ -508,16 +508,16 @@ class SpeakaApp(unittest.TestCase):
 
     def test_a_paused_pc_stays_connected_and_named(self):
         """v9.6: pausing is still connected, and the PC is named from the audio route, where iOS shows it."""
-        tweak = read(ROOT / "Tweak.xm")
+        tweak = read(ROOT / "tweak/Hooks.xm")
         config = block(tweak, "static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,\n"
                               "    uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7)\n{")
-        self.assertIn('BTPSSetStatus("diag.v95.peer","configured: the PC set up the speaker\'s stream");', config)
-        signal = block(tweak, "static void btps_v88_note_signal(unsigned direction,uint64_t cid,const uint8_t *p,size_t size)\n{")
-        self.assertIn('BTPSSetStatus("diag.v95.peer","%s",change==1?"streaming":(p[1]&63u)==9u?"paused":"closed");',
+        self.assertIn('SpeakaSetStatus("diag.v95.peer","configured: the PC set up the speaker\'s stream");', config)
+        signal = block(tweak, "static void note_signal(unsigned direction,uint64_t cid,const uint8_t *p,size_t size)\n{")
+        self.assertIn('SpeakaSetStatus("diag.v95.peer","%s",change==1?"streaming":(p[1]&63u)==9u?"paused":"closed");',
                       signal)
         self.assertLess(signal.index("if(change>=0) {"), signal.index('"diag.v95.peer"'))   # only our stream's
         # The parser it relies on: SUSPEND (9), CLOSE (8) and ABORT (10) give 0, an accepted START gives 1.
-        parser = read(ROOT / "BTPSV88Control.c")
+        parser = read(ROOT / "tweak/StreamControl.c")
         self.assertIn("if(sig!=7 && sig!=8 && sig!=9 && sig!=10) return -1;", parser)
         self.assertIn("return sig==7?-1:0;", parser)
         self.assertIn("if(msg==2 && length==2) return sig==7?1:0;", parser)
@@ -943,7 +943,7 @@ class SpeakaApp(unittest.TestCase):
                      'CODE_SIGNING_ALLOWED: "NO"'):
             self.assertIn(line, project)
         self.assertTrue((APP / "Resources/Info.plist").is_file())
-        self.assertTrue((ROOT / "BTPSShared.h").is_file())       # what HEADER_SEARCH_PATHS is for
+        self.assertTrue((ROOT / "shared/SpeakaShared.h").is_file())       # what HEADER_SEARCH_PATHS is for
         bridge = read(APP / "Speaka/Speaka-Bridging-Header.h")
         imported = re.findall(r'#import "([^"]+)"', bridge)
         self.assertEqual(imported, ["Model/SPTweakClient.h", "Model/SPConnectedDevice.h", "Model/SPRootSpawn.h"])
@@ -985,14 +985,14 @@ class SpeakaApp(unittest.TestCase):
 
     def test_leftovers_are_gone(self):
         """Copying a new version over a clone doesn't delete files, so name what earlier versions left behind."""
-        leftovers = [path.relative_to(ROOT).as_posix() for pattern in ("UI", "main.m", "SPAppDelegate.*", "SPSceneDelegate.*")
+        leftovers = [path.relative_to(ROOT).as_posix() for pattern in ("UI", "AudioHelper.m", "SPAppDelegate.*", "SPSceneDelegate.*")
                      for path in (APP / "Speaka").glob(pattern)]
         self.assertEqual(leftovers, [], "left over from the UIKit app (v9.1): delete these in your clone")
         backdrop = APP / "Speaka/Assets.xcassets/Backdrop.imageset"
         self.assertFalse(backdrop.exists(), "app/Speaka/Assets.xcassets/Backdrop.imageset is Caz's yellow backdrop, "
                                             "left over from v9.2: delete it in your clone")
         project = read(APP / "project.yml")                     # and even if they linger, they're never built
-        for pattern in ('"UI/**"', "main.m", '"SPAppDelegate.*"', '"SPSceneDelegate.*"'):
+        for pattern in ('"UI/**"', "AudioHelper.m", '"SPAppDelegate.*"', '"SPSceneDelegate.*"'):
             self.assertIn(f"          - {pattern}\n", project)
 
     def test_workflow_builds_the_app_without_risking_the_tweak(self):
@@ -1112,13 +1112,13 @@ class SpeakaApp(unittest.TestCase):
         entry = plistlib.loads((ROOT / "layout/Library/PreferenceLoader/Preferences/SpeakaPrefs.plist").read_bytes())
         self.assertEqual(entry["entry"]["label"], "Speaka")
         self.assertEqual(entry["entry"]["bundle"], "SpeakaPrefs")
-        self.assertIn("BUNDLE_NAME = SpeakaPrefs", read(ROOT / "speakaprefs/Makefile"))
-        root = plistlib.loads((ROOT / "speakaprefs/Resources/Root.plist").read_bytes())
+        self.assertIn("BUNDLE_NAME = SpeakaPrefs", read(ROOT / "settings/Makefile"))
+        root = plistlib.loads((ROOT / "settings/Resources/Root.plist").read_bytes())
         self.assertEqual(root["title"], "Speaka")
         job = plistlib.loads((ROOT / "layout/Library/LaunchDaemons/com.parv.speaka.audio.plist").read_bytes())
         self.assertEqual(job["Label"], "com.parv.speaka.audio")
         for name, pixels in (("icon.png", 29), ("icon@2x.png", 58), ("icon@3x.png", 87)):
-            self.assertEqual(png_size(ROOT / "speakaprefs/Resources" / name), (pixels, pixels))
+            self.assertEqual(png_size(ROOT / "settings/Resources" / name), (pixels, pixels))
         for line in read(ROOT / "layout/DEBIAN/postinst").splitlines():
             if line.strip().startswith("echo '"):
                 self.assertTrue(line.strip().startswith("echo 'Speaka: "), line)

@@ -17,21 +17,22 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = Speaka
 
-# bluetoothd never plays audio itself: the helper does (btpsaudiohelper/), so no audio frameworks load into it.
-Speaka_FILES      = Tweak.xm BTPSV88Shared.c BTPSV88Control.c BTPSV88Daemon.c BTPSLog.c BTPSCore.c BTPSDiagnostics.c BTPSDaemonProbe.c BTPSV78Capacity.c BTPSV79Geometry.c BTPSV81Config.c BTPSV77Sink.c BTPSV82SDP.c BTPSV89Session.c
-Speaka_CFLAGS     = -fobjc-arc -fvisibility=hidden -fblocks
+# bluetoothd never plays audio itself: the helper does (audiohelper/), so no audio frameworks load into it.
+Speaka_FILES      = tweak/Hooks.xm tweak/SinkEndpoint.c tweak/StreamControl.c tweak/AudioRelay.c tweak/Session.c tweak/Log.c shared/AudioRing.c
+# -I.: tweak/Hooks.xm reaches tweak/ and shared/ from the root, since Theos compiles it from .theos/obj.
+Speaka_CFLAGS     = -fobjc-arc -fvisibility=hidden -fblocks -I.
 Speaka_FRAMEWORKS = CoreFoundation Foundation
 Speaka_LIBRARIES  = substrate
 
 include $(THEOS)/makefiles/tweak.mk
 
-# The audio helper plays what bluetoothd hands it, so it's always built (folder btpsaudiohelper/).
-SUBPROJECTS += btpsaudiohelper
-# The Settings > Speaka page with the status and debug log (folder speakaprefs/).
+# The audio helper plays what bluetoothd hands it, so it's always built (folder audiohelper/).
+SUBPROJECTS += audiohelper
+# The Settings > Speaka page with the status and debug log (folder settings/).
 # If it ever fails to build, set this to 0 (or run: make package BTPS_WITH_PREFS=0) and the tweak still builds.
 BTPS_WITH_PREFS ?= 1
 ifeq ($(BTPS_WITH_PREFS),1)
-SUBPROJECTS += speakaprefs
+SUBPROJECTS += settings
 endif
 
 # The helper and optional Settings bundle participate in the same package.

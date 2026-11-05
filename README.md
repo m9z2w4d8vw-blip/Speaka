@@ -319,8 +319,8 @@ sequenceDiagram
 
 <br>
 
-**Hooks.** `Tweak.xm` is loaded into `bluetoothd` (filter: `Speaka.plist`). Its five offset hooks come from
-`BTPSBuild.h`, and each target is verified before hooking. Two do the work; three are pass-through observers.
+**Hooks.** `tweak/Hooks.xm` is loaded into `bluetoothd` (filter: `Speaka.plist`). Its five offset hooks come from
+`tweak/BluetoothdBuild.h`, and each target is verified before hooking. Two do the work; three are pass-through observers.
 
 | Function | Offset | Role |
 | --- | --- | --- |
@@ -335,7 +335,7 @@ sequenceDiagram
 1. **A seventh endpoint slot (v8.1).** AVDTP is configured for six endpoints, all used by Apple's Sources. A one-shot
    shadow of its configuration (getter index 3) makes room for a seventh.
 2. **The speaker endpoint (v8.2).** After the six Sources register, the tweak registers one Sink (TSEP 1, SEID 7, SBC)
-   and a local SDP Audio Sink record (UUID `0x110B`). A small state machine (`BTPSV88Control.c`) tracks the stream.
+   and a local SDP Audio Sink record (UUID `0x110B`). A small state machine (`tweak/StreamControl.c`) tracks the stream.
 3. **Media (v8.8).** Apple's stream callback table has 27 pointer-authenticated entries. The tweak copies it and
    replaces only slot `+0xb0`, a no-op stub at `+0x385dfc`. Each packet lands in a ring of 32 × 2048-byte slots in
    locked shared memory, with no locks, allocation, logging or system calls on Bluetooth's receive thread.
@@ -349,7 +349,7 @@ sequenceDiagram
 7. **Bluetooth toggles (v8.9.2).** Turning Bluetooth off and on re-runs Apple's endpoint registration without the
    Sink. The tweak notices, stops forwarding and reports it.
 
-**The audio helper.** `BTPSAudioHelper` (`btpsaudiohelper/`) runs outside `bluetoothd`. It's started by the launchd job
+**The audio helper.** `BTPSAudioHelper` (`audiohelper/`) runs outside `bluetoothd`. It's started by the launchd job
 `com.parv.speaka.audio` on `127.0.0.1:37594`, as user `mobile`, on the first stream. It decodes with Google libsbc and
 plays through AudioQueue. Nothing records, and no input is ever opened.
 
@@ -359,16 +359,16 @@ plays through AudioQueue. Nothing records, and no input is ever opened.
 | Wired headphones or earbuds | PlayAndRecord with no Bluetooth option, so only wired or USB outputs qualify |
 | Any device | Playback, which follows iOS |
 
-The route policy is plain C in `BTPSV89Output.h`, tested directly. The helper also does these things:
+The route policy is plain C in `OutputPolicy.h`, tested directly. The helper also does these things:
 
 - services its run loop, so route changes and interruptions arrive;
 - clears an interruption when a new stream starts;
 - reports its health every ~0.2 s;
 - publishes its status for the app and Settings;
 - keeps its output through stream changes, lets go only after 8 s without audio, and never re-activates its session
-  faster than every 3 s (v9.1, `btpsaudiohelper/BTPSV91Hold.h`).
+  faster than every 3 s (v9.1, `audiohelper/OutputPolicy.h`).
 
-**Shared names.** Everything below lives in `BTPSShared.h`, so the tweak, the helper, Settings and the app always
+**Shared names.** Everything below lives in `shared/SpeakaShared.h`, so the tweak, the helper, Settings and the app always
 agree.
 
 | Name | Kind | Purpose |
@@ -389,14 +389,26 @@ agree.
 
 ```text
 .
-├── Tweak.xm, BTPS*.c/.h       the tweak loaded into bluetoothd (built by ./Makefile)
-│   ├── BTPSBuild.h                offsets and signatures of the supported bluetoothd build
-│   ├── BTPSV88*.c/.h              shared ring, stream control, worker, health lease
-│   ├── BTPSV89Session.c/.h        Start and Stop
-│   └── BTPSShared.h               names shared by the tweak, the helper, Settings and the app
+├── tweak/                     the tweak loaded into bluetoothd (built by ./Makefile)
+│   ├── Hooks.xm                   the build check and every hook
+│   ├── BluetoothdBuild.h          offsets and signatures of the supported bluetoothd build
+│   ├── SinkEndpoint.c             the speaker endpoint: capabilities, table checks, the seventh slot, its SDP record
+│   ├── StreamControl.c            following the PC's stream from its AVDTP signalling
+│   ├── AudioRelay.c               handing the audio to the helper, and waking it
+│   ├── Session.c                  Start and Stop
+│   ├── Log.c                      the debug log and status
+│   └── Tweak.h                    what those files share
+├── shared/                    used by the tweak and the helper (and SpeakaShared.h by Settings and the app)
+│   ├── SpeakaShared.h             preference keys, notification names, log paths
+│   └── AudioRing.c/.h             the shared-memory ring that carries the audio
 ├── Makefile, control, Speaka.plist
-├── btpsaudiohelper/           the audio helper: decoding and playback
-├── speakaprefs/               the Settings page
+├── audiohelper/               the audio helper, installed as BTPSAudioHelper (built by audiohelper/Makefile)
+│   ├── AudioHelper.m              playback: reading the ring, the audio session, choosing the output
+│   ├── SBCDecoder.c/.h            decoding the PC's SBC with Google's libsbc (vendor_sbc/, fetched at build time)
+│   └── OutputPolicy.h             where to play and when to let go, in plain C the tests run
+├── settings/                  the Speaka page in Settings, installed as SpeakaPrefs.bundle
+│   ├── SettingsPage.m             the status rows and the debug log's buttons
+│   └── DebugLog.h/.m              reading the log back, and the screen that shows it
 ├── app/                       the Speaka app (SwiftUI, Caz's design), packaged as Speaka.tipa / Speaka.ipa
 ├── layout/                    install scripts, the helper's launchd job, the Settings entry
 ├── tests/                     the test suite (many tests compile the real C sources)
@@ -405,12 +417,12 @@ agree.
 └── .github/workflows/         CI: test, build, package, publish
 ```
 
-Shared sources exist once, at the root. A subproject that needs one holds a one-line `#include "../file.c"`, so the
-copies can't drift apart. `tests/test_repo_layout.py` fails CI with an explanation in any of these cases:
+Shared sources exist once, in `shared/`. A subproject that needs one holds a one-line `#include "../shared/file.c"`,
+so the copies can't drift apart. `tests/test_repo_layout.py` fails CI with an explanation in any of these cases:
 
 - a file lands in the wrong folder;
 - a `(1)` duplicate appears;
-- a root source becomes unused;
+- a source in `tweak/` or `shared/` becomes unused;
 - a README link breaks.
 
 ## Building and testing
@@ -467,7 +479,7 @@ The tests check the sources statically, or compile the real C files with the hos
 summarizer, the route policy and the SBC decoders. The SDP record is checked against a Python model. The decoder and
 runtime tests need libsbc, so run `tools/fetch_google_sbc.sh` first; without it, `test_v88_runtime` fails by design.
 
-**Porting** to another iOS build means re-deriving every offset and signature in `BTPSBuild.h` and `Tweak.xm`.
+**Porting** to another iOS build means re-deriving every offset and signature in `tweak/BluetoothdBuild.h` and `tweak/Hooks.xm`.
 `docs/research/` and [PROVENANCE-v8.2](docs/history/PROVENANCE-v8.2.md) record how each was found, and
 `tools/inspect_bluetoothd.py` collects the evidence.
 

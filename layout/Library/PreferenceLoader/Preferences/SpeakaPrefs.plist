@@ -9,7 +9,7 @@
 		<key>cell</key>
 		<string>PSLinkCell</string>
 		<key>detail</key>
-		<string>BTPSRootListController</string>
+		<string>SpeakaSettingsController</string>
 		<key>icon</key>
 		<string>icon.png</string>
 		<key>isController</key>

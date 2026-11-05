@@ -9,8 +9,8 @@ import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SUBPROJECTS = ("btpsaudiohelper", "speakaprefs")
-FETCHED_AT_BUILD = {"btpsaudiohelper/vendor_sbc/sbc.c", "btpsaudiohelper/vendor_sbc/bits.c"}  # tools/fetch_google_sbc.sh
+SUBPROJECTS = ("audiohelper", "settings")
+FETCHED_AT_BUILD = {"audiohelper/vendor_sbc/sbc.c", "audiohelper/vendor_sbc/bits.c"}  # tools/fetch_google_sbc.sh
 SKIP_DIRS = {".git", ".theos", "packages", "obj", "__pycache__"}
 SOURCE_SUFFIXES = {".c", ".h", ".m", ".mm", ".xm"}
 
@@ -43,30 +43,33 @@ class RepoLayout(unittest.TestCase):
         for sub in SUBPROJECTS:
             self.assertIn(f"SUBPROJECTS += {sub}", top)
 
-    def test_shared_sources_exist_once_at_the_root(self):
-        root_files = {path.name for path in ROOT.iterdir() if path.is_file()}
+    def test_shared_sources_exist_once_in_shared(self):
+        # Since v9.8 (step 2) shared sources live in shared/. A subproject that compiles one holds a one-line
+        # #include "../shared/<name>", so the copies can't drift apart.
+        shared = {path.name for path in (ROOT / "shared").iterdir() if path.is_file()}
         for sub in SUBPROJECTS:
             for path in sorted((ROOT / sub).iterdir()):
-                if not path.is_file() or path.name == "Makefile" or path.name not in root_files:
+                if not path.is_file() or path.name == "Makefile" or path.name not in shared:
                     continue
                 code = [line for line in path.read_text().splitlines()
                         if line.strip() and not line.lstrip().startswith("/*")]
-                self.assertEqual(code, [f'#include "../{path.name}"'],
-                                 f"{path.name} exists both at the root and in {sub}/. If the root copy is a misplaced "
-                                 f"upload, delete it; if the file is shared, make {sub}/{path.name} a one-line "
-                                 f'#include "../{path.name}" like the other shared sources.')
+                self.assertEqual(code, [f'#include "../shared/{path.name}"'],
+                                 f"{path.name} exists both in shared/ and in {sub}/. If {sub}/'s copy is a misplaced "
+                                 f"upload, delete it; otherwise make it a one-line #include \"../shared/{path.name}\".")
 
     def test_root_holds_only_build_inputs(self):
+        # The tweak's sources are in tweak/ and shared/; the root keeps what Theos needs there.
         allowed = {"Makefile", "control", "Speaka.plist", "README.md", ".gitignore"}
         for path in ROOT.iterdir():
-            if path.is_dir() or path.name in allowed or path.suffix in SOURCE_SUFFIXES:
+            if path.is_dir() or path.name in allowed:
                 continue
             if path.name.startswith(("LICENSE", "CHANGELOG", ".gitattributes")):
                 continue
-            self.fail(f"{path.name} is at the repository root: notes go in docs/, scripts in tools/, tests in tests/")
+            where = "tweak/ or shared/" if path.suffix in SOURCE_SUFFIXES else "docs/, tools/ or tests/"
+            self.fail(f"{path.name} is at the repository root; it belongs in {where}")
 
-    def test_every_root_source_is_used(self):
-        """A root source must be compiled by a Makefile, included by another file, or read by a test."""
+    def test_every_tweak_and_shared_source_is_used(self):
+        """A source in tweak/ or shared/ must be compiled by a Makefile, included by another file, or read by a test."""
         compiled = set(makefile_inputs(ROOT / "Makefile"))
         included, tested = set(), ""
         for path in repo_files():
@@ -75,10 +78,12 @@ class RepoLayout(unittest.TestCase):
                              re.findall(r'^\s*#\s*(?:include|import)\s+"([^"]+)"', path.read_text(errors="replace"), re.M)}
         for path in (ROOT / "tests").glob("*.py"):
             tested += path.read_text()
-        for path in ROOT.iterdir():
-            if path.is_file() and path.suffix in SOURCE_SUFFIXES:
-                self.assertTrue(path.name in compiled or path.name in included or f"'{path.name}'" in tested,
-                                f"{path.name} at the root is not compiled, included or tested: remove it")
+        for folder in ("tweak", "shared"):
+            for path in sorted((ROOT / folder).iterdir()):
+                rel = f"{folder}/{path.name}"
+                if path.is_file() and path.suffix in SOURCE_SUFFIXES:
+                    self.assertTrue(rel in compiled or path.name in included or rel in tested,
+                                    f"{rel} is not compiled, included or tested: remove it")
 
     def test_no_browser_duplicate_uploads(self):
         for path in repo_files():

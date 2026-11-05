@@ -25,11 +25,11 @@ class DecodingTests(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         dylib = Path(cls.tmp.name) / ('libdiag.dylib' if os.uname().sysname == 'Darwin' else 'libdiag.so')
         subprocess.run([shutil.which('clang') or shutil.which('cc'), '-std=c11', '-Wall', '-Wextra', '-Werror',
-                        '-shared', '-fPIC', '-I', str(ROOT), str(ROOT / 'BTPSDiagnostics.c'),
+                        '-shared', '-fPIC', '-I', str(ROOT), str(ROOT / 'tweak/SinkEndpoint.c'),
                         '-o', str(dylib)], check=True)
         cls.lib = CDLL(str(dylib))
-        cls.lib.btps_decode_caps.argtypes = [POINTER(c_ubyte), c_size_t, POINTER(Caps)]
-        cls.lib.btps_decode_caps.restype = c_int
+        cls.lib.avdtp_decode_caps.argtypes = [POINTER(c_ubyte), c_size_t, POINTER(Caps)]
+        cls.lib.avdtp_decode_caps.restype = c_int
 
     @classmethod
     def tearDownClass(cls):
@@ -42,7 +42,7 @@ class DecodingTests(unittest.TestCase):
         payload[32] = 8
         buf = (c_ubyte * 48).from_buffer_copy(payload)
         result = Caps()
-        self.assertEqual(self.lib.btps_decode_caps(buf, 48, byref(result)), 1)
+        self.assertEqual(self.lib.avdtp_decode_caps(buf, 48, byref(result)), 1)
         self.assertEqual(result.transport_records, 1)
         self.assertEqual(result.codec_records, 1)
         self.assertEqual(result.delay_records, 1)
@@ -58,12 +58,12 @@ class DecodingTests(unittest.TestCase):
     def test_malformed_length(self):
         b = (c_ubyte * 2)(1, 7)
         result = Caps()
-        self.assertEqual(self.lib.btps_decode_caps(b, 2, byref(result)), 0)
+        self.assertEqual(self.lib.avdtp_decode_caps(b, 2, byref(result)), 0)
         self.assertEqual(result.total_records, 0)
 
     def test_null_argument(self):
         out = Caps()
-        self.assertEqual(self.lib.btps_decode_caps(None, 48, byref(out)), 0)
+        self.assertEqual(self.lib.avdtp_decode_caps(None, 48, byref(out)), 0)
 
     def test_same_caps_have_same_fingerprint(self):
         self.assertEqual(self.read(0x02, 6).fingerprint, self.read(0x02, 6).fingerprint)

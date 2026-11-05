@@ -70,6 +70,41 @@ Nothing that runs changed. What went:
 
 The phone's own names didn't change: preference and status keys, `/tmp/FTABHarvest`, the helper's path and port.
 
+## Cleanup, step 2, part one: the tweak and shared files
+
+Nothing that runs changed; the files and names did.
+
+- **The tweak** is in `tweak/`: `Hooks.xm` (was `Tweak.xm`), `BluetoothdBuild.h` (was `BTPSBuild.h`),
+  `SinkEndpoint.c` (v7.7, v7.8, v7.9, v8.1 and v8.2, with `BTPSDiagnostics.c`), `StreamControl.c` (v8.8 control),
+  `AudioRelay.c` (v8.8 daemon, with the connect function), `Session.c` (v8.9), `Log.c` (with `BTPSCore.c`) and
+  `Tweak.h`, which replaces 13 headers. 31 files became 8.
+- **Shared** files are in `shared/`: `SpeakaShared.h` (was `BTPSShared.h`) and `AudioRing.c/.h` (was `BTPSV88Shared`).
+  The root helper uses `SpeakaShared.h` for the log folder instead of its own copy.
+- **Names**: 255 BTPS- and version-tagged names in code have functional ones, for example `BTPSV88Prepare` is
+  `AudioRelayPrepare`, `g_v82_armed` is `g_sink_armed` and `BTPS_KEY_V81_SEVEN_ONCE` is
+  `SPEAKA_KEY_SEVEN_SLOTS_ONCE`. Every string the phone keeps has its old value: the rename was checked against each
+  preference key, notification name, status key, path and the helper's binary name.
+- **Removed**: the notification names of the v7.4 and v7.5 probes, and seven status writes nothing read
+  (`experiments`, `experiment.sink_register`, `diag.stage`, `diag.v77_sink_trial`, `diag.v82.media`).
+- `Hooks.xm` opens with what it does today, not the v2-v7 history.
+- `Update-Speaka.ps1` recognises the repository by its `Makefile` and its `control` file's package, since
+  `Tweak.xm` moved.
+
+## Cleanup, step 2, part two: the audio helper and the Settings page
+
+Nothing that runs changed; the files and names did.
+
+- **The helper** is in `audiohelper/` (was `btpsaudiohelper/`): `AudioHelper.m` (the stream code with its `main`),
+  `SBCDecoder.c/.h` (was `BTPSV88Decode`) and `OutputPolicy.h` (`BTPSV89Output.h` and `BTPSV91Hold.h`, where to play
+  and when to let go). Its usage line goes through the timestamped log like every other line. It's still installed
+  as `/var/jb/usr/bin/BTPSAudioHelper`, the name launchd starts.
+- **Settings** is in `settings/` (was `speakaprefs/`): `SettingsPage.m` and `DebugLog.h/.m`, six files becoming
+  three. The classes are `SpeakaSettingsController`, `SpeakaLogViewController` and `SpeakaLogReader`; the bundle's
+  `Info.plist` and the PreferenceLoader entry name the first, and changed with it. The bundle is still
+  `SpeakaPrefs.bundle`, identifier `com.parv.speakaprefs`.
+- **Names**: 54 more, for example `btps_v91_may_start` is `hold_may_start` and `BTPSV88Decoder` is `SBCDecoder`.
+- `tools/fetch_google_sbc.sh`, `.gitignore` and the workflow use `audiohelper/vendor_sbc`.
+
 ## On the phone
 
 1. **The menu.** Four rows; Uninstall has a trash icon and no chevron. Compare with Caz side by side: the panel's top

@@ -20,8 +20,8 @@ class TestV78(unittest.TestCase):
         cls.t = tempfile.TemporaryDirectory()
         target = Path(cls.t.name)/'capacity.so'
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-shared','-fPIC',
-                        str(ROOT/'BTPSV78Capacity.c'),'-o',str(target)],check=True)
-        cls.analyze = ctypes.CDLL(str(target)).btps_v78_analyze
+                        str(ROOT/'tweak/SinkEndpoint.c'),'-o',str(target)],check=True)
+        cls.analyze = ctypes.CDLL(str(target)).sink_analyze_table
         cls.analyze.argtypes = [ctypes.POINTER(ctypes.c_uint8),ctypes.c_size_t,ctypes.c_uint,ctypes.POINTER(CStats)]
         cls.analyze.restype=ctypes.c_int
     @classmethod
@@ -45,20 +45,20 @@ class TestV78(unittest.TestCase):
         self.assertNotEqual(self.analyze(mem,len(mem),33,ctypes.byref(o)),0)
         self.assertNotEqual(self.analyze(mem,len(mem),0,ctypes.byref(o)),0)
     def test_source_safety(self):
-        src=(ROOT/'Tweak.xm').read_text()
-        self.assertRegex(src, r'#define BTPS_BUILD_TAG "v[0-9]+\.[0-9]+[^"]*"')
-        self.assertIn('btps_v78_snapshot_capacity();',src)
+        src=(ROOT/'tweak/Hooks.xm').read_text()
+        self.assertRegex(src, r'#define TWEAK_BUILD_TAG "v[0-9]+\.[0-9]+[^"]*"')
+        self.assertIn('snapshot_table_capacity();',src)
         self.assertIn('if (sources == 6u)',src)
-        self.assertIn('g_v78_exact_uuid = uuid_ok;',src)
+        self.assertIn('g_exact_build = uuid_ok;',src)
         self.assertIn('V78_TABLE RESULT',src)
         self.assertNotIn('btps_v77_attempt_after_sources(',src)
         self.assertNotIn('btps_v77_attempt_after_sources();',src)
-        self.assertIn('BTPSV78Capacity.c',(ROOT/'Makefile').read_text())
-        self.assertIn('#define BTPS_AVDTP_TSEP_SNK 1u',src)
-        self.assertIn('decisive_requested && g_v81_seven_armed && !BTPSExperimentsEnabled()',src)
+        self.assertIn('tweak/SinkEndpoint.c',(ROOT/'Makefile').read_text())
+        self.assertIn('#define AVDTP_TSEP_SNK 1u',src)
+        self.assertIn('decisive_requested && g_seven_armed && !SpeakaExperimentsEnabled()',src)
         self.assertIn('g_native_source_success != 6',src)
     def test_settings_no_trial_toggle(self):
-        d=plistlib.loads((ROOT/'speakaprefs/Resources/Root.plist').read_bytes())
+        d=plistlib.loads((ROOT/'settings/Resources/Root.plist').read_bytes())
         self.assertNotIn('SpeakaV77SinkTrial',[x.get('key') for x in d['items']])
     def test_pinned_disassembly_layout(self):
         docs=(ROOT/'docs/research/V78_AVDTP_CAPACITY_FINDINGS.md').read_text()

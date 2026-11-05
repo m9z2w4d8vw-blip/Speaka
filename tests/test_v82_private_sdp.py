@@ -30,10 +30,10 @@ class SDPTests(unittest.TestCase):
         if not cc: self.skipTest('no native compiler')
         with tempfile.TemporaryDirectory() as td:
             so=pathlib.Path(td)/'sdp.so'
-            subprocess.run([cc,'-shared','-fPIC','-o',str(so),str(ROOT/'BTPSV82SDP.c')],check=True,
+            subprocess.run([cc,'-shared','-fPIC','-o',str(so),str(ROOT/'tweak/SinkEndpoint.c')],check=True,
                             stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-            lib=ctypes.CDLL(str(so));lib.BTPSV82SinkSDPDescriptor.restype=ctypes.POINTER(Descriptor)
-            desc=lib.BTPSV82SinkSDPDescriptor().contents
+            lib=ctypes.CDLL(str(so));lib.SinkSDPDescriptor.restype=ctypes.POINTER(Descriptor)
+            desc=lib.SinkSDPDescriptor().contents
             self.assertEqual((desc.count_a,desc.count_b),(4,1))
             attrs=[desc.a[i] for i in range(4)]
             self.assertEqual([a.id for a in attrs],[1,4,9,0x311])
@@ -58,11 +58,11 @@ class SDPTests(unittest.TestCase):
             'e9408df54c3eebfd263eb745a0b06cf1130dd3228f56c104697f92264c91dbd6')
         for off,words in EXPECTED.items(): self.assertEqual(struct.unpack_from('<4I',data,off),words)
     def test_trial_requires_both_arms_and_verified_hooks(self):
-        s=(ROOT/'Tweak.xm').read_text()
-        self.assertIn('decisive_requested && g_v81_seven_armed && !BTPSExperimentsEnabled()',s)
-        self.assertIn('!g_v82_signal_hook_ok || !g_v82_sdp_hook_ok',s)
+        s=(ROOT/'tweak/Hooks.xm').read_text()
+        self.assertIn('decisive_requested && g_seven_armed && !SpeakaExperimentsEnabled()',s)
+        self.assertIn('!g_signal_rx_hook_ok || !g_sdp_hook_ok',s)
         self.assertIn('g_native_source_success != 6',s)
-        self.assertIn('BTPSV82SinkSDPDescriptor()',s)
-        self.assertIn('BTPS_V82_RX_DISPATCH 0x000d3b08ul',s)
+        self.assertIn('SinkSDPDescriptor()',s)
+        self.assertIn('SIGNAL_RX_DISPATCH 0x000d3b08ul',s)
         self.assertNotIn('MEDIA_BYTES_RECEIVED=PASS',s)
 if __name__=='__main__': unittest.main()

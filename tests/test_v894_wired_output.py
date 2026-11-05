@@ -15,7 +15,7 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-HELPER = ROOT / "btpsaudiohelper/BTPSV88Stream.m"
+HELPER = ROOT / "audiohelper/AudioHelper.m"
 
 
 def read(rel):
@@ -31,7 +31,7 @@ class V894WiredOutput(unittest.TestCase):
         compiler = shutil.which("cc")
         self.assertIsNotNone(compiler)
         flags = ["-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT),
-                 "-I" + str(ROOT / "btpsaudiohelper")]
+                 "-I" + str(ROOT / "audiohelper")]
         env = dict(os.environ)
         if os.environ.get("BTPS_SANITIZE"):
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
@@ -50,45 +50,45 @@ class V894WiredOutput(unittest.TestCase):
         self.compile_run(r'''
 #include <assert.h>
 #include <string.h>
-#include "BTPSV89Output.h"
-static int check(int mode, btps_v89_kind kind, const char *name, const btps_v89_never *never, size_t n) {
-    btps_v89_port port = {kind, "AA:BB:CC:DD:EE:FF-tacl", name};
+#include "OutputPolicy.h"
+static int check(int mode, output_kind_t kind, const char *name, const output_never_t *never, size_t n) {
+    output_port_t port = {kind, "AA:BB:CC:DD:EE:FF-tacl", name};
     size_t bad = 99;
-    return btps_v89_route_check(mode, &port, 1, never, n, &bad);
+    return output_route_check(mode, &port, 1, never, n, &bad);
 }
 int main(void) {
-    const btps_v89_never pc = {"", "laptop-ugivbia5"};          /* matched case-insensitively by name */
+    const output_never_t pc = {"", "laptop-ugivbia5"};          /* matched case-insensitively by name */
     /* Wired / USB only: the PC (or any Bluetooth device) is refused even when nothing is never-listed. */
-    assert(check(BTPS_V89_MODE_HEADPHONES, BTPS_V89_PORT_HEADPHONES, "Headphones", NULL, 0) == BTPS_V89_ROUTE_OK);
-    assert(check(BTPS_V89_MODE_HEADPHONES, BTPS_V89_PORT_BLUETOOTH, "LAPTOP-UGIVBIA5", NULL, 0) == BTPS_V89_ROUTE_NOT_HEADPHONES);
-    assert(check(BTPS_V89_MODE_HEADPHONES, BTPS_V89_PORT_BLUETOOTH, "AirPods", NULL, 0) == BTPS_V89_ROUTE_NOT_HEADPHONES);
-    assert(check(BTPS_V89_MODE_HEADPHONES, BTPS_V89_PORT_RECEIVER, "Receiver", NULL, 0) == BTPS_V89_ROUTE_NOT_HEADPHONES);
-    assert(check(BTPS_V89_MODE_HEADPHONES, BTPS_V89_PORT_SPEAKER, "Speaker", NULL, 0) == BTPS_V89_ROUTE_NOT_HEADPHONES);
+    assert(check(OUTPUT_MODE_HEADPHONES, OUTPUT_PORT_HEADPHONES, "Headphones", NULL, 0) == OUTPUT_ROUTE_OK);
+    assert(check(OUTPUT_MODE_HEADPHONES, OUTPUT_PORT_BLUETOOTH, "LAPTOP-UGIVBIA5", NULL, 0) == OUTPUT_ROUTE_NOT_HEADPHONES);
+    assert(check(OUTPUT_MODE_HEADPHONES, OUTPUT_PORT_BLUETOOTH, "AirPods", NULL, 0) == OUTPUT_ROUTE_NOT_HEADPHONES);
+    assert(check(OUTPUT_MODE_HEADPHONES, OUTPUT_PORT_RECEIVER, "Receiver", NULL, 0) == OUTPUT_ROUTE_NOT_HEADPHONES);
+    assert(check(OUTPUT_MODE_HEADPHONES, OUTPUT_PORT_SPEAKER, "Speaker", NULL, 0) == OUTPUT_ROUTE_NOT_HEADPHONES);
     /* Any device still allows Bluetooth earbuds, and the never-play list still blocks the PC. */
-    assert(check(BTPS_V89_MODE_ANY, BTPS_V89_PORT_BLUETOOTH, "AirPods", &pc, 1) == BTPS_V89_ROUTE_OK);
-    assert(check(BTPS_V89_MODE_ANY, BTPS_V89_PORT_BLUETOOTH, "LAPTOP-UGIVBIA5", &pc, 1) == BTPS_V89_ROUTE_NEVER_LISTED);
+    assert(check(OUTPUT_MODE_ANY, OUTPUT_PORT_BLUETOOTH, "AirPods", &pc, 1) == OUTPUT_ROUTE_OK);
+    assert(check(OUTPUT_MODE_ANY, OUTPUT_PORT_BLUETOOTH, "LAPTOP-UGIVBIA5", &pc, 1) == OUTPUT_ROUTE_NEVER_LISTED);
     /* Speaker mode is unchanged. */
-    assert(check(BTPS_V89_MODE_SPEAKER, BTPS_V89_PORT_SPEAKER, "Speaker", NULL, 0) == BTPS_V89_ROUTE_OK);
-    assert(check(BTPS_V89_MODE_SPEAKER, BTPS_V89_PORT_BLUETOOTH, "LAPTOP-UGIVBIA5", NULL, 0) == BTPS_V89_ROUTE_NOT_SPEAKER);
-    assert(strstr(btps_v89_route_reason(BTPS_V89_ROUTE_NOT_HEADPHONES), "wired"));
+    assert(check(OUTPUT_MODE_SPEAKER, OUTPUT_PORT_SPEAKER, "Speaker", NULL, 0) == OUTPUT_ROUTE_OK);
+    assert(check(OUTPUT_MODE_SPEAKER, OUTPUT_PORT_BLUETOOTH, "LAPTOP-UGIVBIA5", NULL, 0) == OUTPUT_ROUTE_NOT_SPEAKER);
+    assert(strstr(output_route_reason(OUTPUT_ROUTE_NOT_HEADPHONES), "wired"));
     /* The stored value is unchanged, so an existing "headphones" choice becomes wired mode. */
-    assert(btps_v89_mode_from_string("headphones") == BTPS_V89_MODE_HEADPHONES);
+    assert(output_mode_from_string("headphones") == OUTPUT_MODE_HEADPHONES);
     return 0;
 }
 ''')
 
     def test_helper_classifies_bluetooth_separately(self):
-        kinds = between(read("btpsaudiohelper/BTPSV88Stream.m"), "static btps_v89_kind port_kind(", "static NSString *text_field(")
-        wired = kinds.split("return BTPS_V89_PORT_HEADPHONES;", 1)[0]
+        kinds = between(read("audiohelper/AudioHelper.m"), "static output_kind_t port_kind(", "static NSString *text_field(")
+        wired = kinds.split("return OUTPUT_PORT_HEADPHONES;", 1)[0]
         self.assertIn("AVAudioSessionPortHeadphones", wired)
         self.assertIn("AVAudioSessionPortUSBAudio", wired)
         self.assertNotIn("Bluetooth", wired.split("AVAudioSessionPortBuiltInReceiver", 1)[1])
-        bluetooth = kinds.split("return BTPS_V89_PORT_HEADPHONES;", 1)[1].split("return BTPS_V89_PORT_BLUETOOTH;", 1)[0]
+        bluetooth = kinds.split("return OUTPUT_PORT_HEADPHONES;", 1)[1].split("return OUTPUT_PORT_BLUETOOTH;", 1)[0]
         for port in ("BluetoothA2DP", "BluetoothLE", "BluetoothHFP"):
             self.assertIn("AVAudioSessionPort" + port, bluetooth)
 
     def test_wired_mode_cannot_reach_bluetooth_and_beats_a_later_pc(self):
-        helper = read("btpsaudiohelper/BTPSV88Stream.m")
+        helper = read("audiohelper/AudioHelper.m")
         wired = between(helper, "static int configure_wired(", "static int configure_output(")
         category = wired.index("setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeDefault options:0")
         override = wired.index("overrideOutputAudioPort:AVAudioSessionPortOverrideNone")
@@ -103,15 +103,15 @@ int main(void) {
         self.assertIn("AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation", wired.split("note_refusal(session,\"configured\"", 1)[0])
         only = between(helper, "static int builtin_only(", "static int configure_wired(")
         self.assertIn("if(!outputs.count) return 0;", only)  # an empty candidate is not conclusive
-        self.assertIn("kind!=BTPS_V89_PORT_SPEAKER && kind!=BTPS_V89_PORT_RECEIVER", only)
+        self.assertIn("kind!=OUTPUT_PORT_SPEAKER && kind!=OUTPUT_PORT_RECEIVER", only)
         dispatch = between(helper, "static int configure_output(", "static int start_output(")
-        self.assertLess(dispatch.index("if(g_output_mode==BTPS_V89_MODE_HEADPHONES) return configure_wired(rate,s);"),
+        self.assertLess(dispatch.index("if(g_output_mode==OUTPUT_MODE_HEADPHONES) return configure_wired(rate,s);"),
                         dispatch.index("configure_external(rate,s)"))
         external = between(helper, "static int configure_external(", "static int builtin_only(")
         self.assertIn("AVAudioSessionCategoryPlayback", external)  # "any device" keeps following iOS
 
     def test_route_changes_and_interruptions_can_be_delivered(self):
-        helper = read("btpsaudiohelper/BTPSV88Stream.m")
+        helper = read("audiohelper/AudioHelper.m")
         loop = between(helper, "__block int interruption=0,route_changed=0;",
                        "[[NSNotificationCenter defaultCenter] removeObserver:observer];")
         drain = loop.index("CFRunLoopRunInMode(kCFRunLoopDefaultMode,0,true)")
@@ -123,7 +123,7 @@ int main(void) {
         self.assertNotIn("dispatch_get_main_queue", helper)   # nothing else is waiting to run on the main thread
 
     def test_an_interruption_cannot_mute_the_helper_for_good(self):
-        helper = read("btpsaudiohelper/BTPSV88Stream.m")
+        helper = read("audiohelper/AudioHelper.m")
         loop = helper.split("for(;;) {", 1)[1].split("[[NSNotificationCenter defaultCenter] removeObserver:observer];", 1)[0]
         generation = loop.split("if(current!=generation) {", 1)[1].split("\n            }\n", 1)[0]
         self.assertIn('if(interrupted) {hlog(stdout,"V894_INTERRUPTION_CLEARED by=new_stream\\n");interrupted=NO;}', generation)
@@ -133,7 +133,7 @@ int main(void) {
         self.assertIn('"V882_INTERRUPTION type=%s reason=%ld\\n"', loop)
 
     def test_health_reasons_reach_the_daemon_log(self):
-        health = between(read("btpsaudiohelper/BTPSV88Stream.m"), "static void report_health(", "static int read_exact(")
+        health = between(read("audiohelper/AudioHelper.m"), "static void report_health(", "static int read_exact(")
         for bit, cause in (("0x1u", "generation&1u"), ("0x4u", "!running"), ("0x8u", "&o->stopping"),
                            ("0x10u", "&o->error"), ("0x20u", "route_verdict(")):
             line = next(l for l in health.splitlines() if "why|=" + bit in l)
@@ -142,32 +142,31 @@ int main(void) {
         self.compile_run(r'''
 #include <assert.h>
 #include <stdarg.h>
-#include "BTPSV88Daemon.c"
-void BTPSLogNow(const char *fmt, ...) { (void)fmt; }
-int BTPSDaemonConnectLoopback(uint16_t port) { (void)port; return -1; }
-void btps_v88_init(BTPSV88Shared *s, uint32_t pid, uint64_t token) { (void)s; (void)pid; (void)token; }
-int btps_v88_enqueue(BTPSV88Shared *s, const BTPSV88Packet *p) { (void)s; (void)p; return 0; }
-void btps_v88_event(BTPSV88Shared *s, int h, BTPSV88Event e) { (void)s; (void)h; (void)e; }
-static BTPSV88Shared shared;
-static BTPSV88Event queued[4]; static unsigned nq, iq;
-int btps_v88_pop(BTPSV88Queue *q, void *slots, size_t stride, unsigned n, void *v, size_t bytes) {
+#include "tweak/AudioRelay.c"
+void SpeakaLogNow(const char *fmt, ...) { (void)fmt; }
+void audio_ring_init(AudioRing *s, uint32_t pid, uint64_t token) { (void)s; (void)pid; (void)token; }
+int audio_ring_enqueue(AudioRing *s, const AudioPacket *p) { (void)s; (void)p; return 0; }
+void audio_ring_event(AudioRing *s, int h, AudioRingEvent e) { (void)s; (void)h; (void)e; }
+static AudioRing shared;
+static AudioRingEvent queued[4]; static unsigned nq, iq;
+int audio_ring_pop(AudioRingQueue *q, void *slots, size_t stride, unsigned n, void *v, size_t bytes) {
     (void)slots; (void)stride; (void)n;
     if (q == &shared.decode_log && iq < nq) { memcpy(v, &queued[iq++], bytes); return 1; }
     return 0;
 }
 int main(void) {
-    BTPSV882Health health = {0};
+    SinkHealth health = {0};
     health.generation = 7;                                       /* an active stream generation */
-    queued[nq++] = (BTPSV88Event){BTPS_V882_HEALTH, 7, 100, -0x20};
+    queued[nq++] = (AudioRingEvent){RING_EVENT_HEALTH, 7, 100, -0x20};
     drain_logs(&shared, &health, 1000);
-    assert(health.playing == 0 && g_v894_health_why == 0x20u);
-    queued[nq++] = (BTPSV88Event){BTPS_V882_HEALTH, 7, 101, 1};
+    assert(health.playing == 0 && g_relay_health_why == 0x20u);
+    queued[nq++] = (AudioRingEvent){RING_EVENT_HEALTH, 7, 101, 1};
     drain_logs(&shared, &health, 1100);
-    assert(health.playing == 1 && g_v894_health_why == 0u);
+    assert(health.playing == 1 && g_relay_health_why == 0u);
     return 0;
 }
 ''')
-        daemon = read("BTPSV88Daemon.c")
+        daemon = read("tweak/AudioRelay.c")
         self.assertIn("why=0x%x", daemon)
 
     def test_settings_and_version(self):
@@ -178,8 +177,8 @@ int main(void) {
         self.assertEqual(re.findall(r'@"title": @"([^"]+)"', modes)[1], "Wired headphones or earbuds")
         self.assertEqual(re.findall(r'@"shortTitle": @"([^"]+)"', modes)[1], "Wired headphones")
         # v8.9.4 or any later build (v9.0 renamed everything to Speaka).
-        for pattern, text in ((r'#define BTPS_V89_BUILD_TAG "v(\d+)\.(\d+)\.(\d+)-one-tap-output-select"', read("Tweak.xm")),
-                              (r"V889_HELPER build=v(\d+)\.(\d+)\.(\d+)-output-select", read("btpsaudiohelper/BTPSV88Stream.m"))):
+        for pattern, text in ((r'#define SESSION_BUILD_TAG "v(\d+)\.(\d+)\.(\d+)-one-tap-output-select"', read("tweak/Hooks.xm")),
+                              (r"V889_HELPER build=v(\d+)\.(\d+)\.(\d+)-output-select", read("audiohelper/AudioHelper.m"))):
             version = re.search(pattern, text)
             self.assertIsNotNone(version, pattern)
             self.assertGreaterEqual(tuple(map(int, version.groups())), (8, 9, 4))

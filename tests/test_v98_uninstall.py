@@ -149,7 +149,7 @@ class Uninstall(unittest.TestCase):
         header, client = read(APP / "Model/SPTweakClient.h"), read(APP / "Model/SPTweakClient.m")
         self.assertIn("+ (void)removeLeftoverPreferences NS_SWIFT_NAME(removeLeftoverPreferences());", header)
         impl = block(client, "+ (void)removeLeftoverPreferences\n{")
-        for part in ("CFStringRef domain = CFSTR(BTPS_PREFS_DOMAIN);",
+        for part in ("CFStringRef domain = CFSTR(SPEAKA_PREFS_DOMAIN);",
                      "CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)",
                      'if ([key hasPrefix:@"Speaka"])', "CFRelease(keys);",
                      "CFPreferencesSynchronize(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);",
@@ -157,9 +157,9 @@ class Uninstall(unittest.TestCase):
             self.assertIn(part, impl)
         # The prefix finds every key: the tweak's and the helper's all start with "Speaka", and the Settings page
         # (since v9.8) stores none.
-        keys = re.findall(r'#define BTPS_KEY_\w+\s+"([^"]+)"', read(ROOT / "BTPSShared.h"))
+        keys = re.findall(r'#define SPEAKA_KEY_\w+\s+"([^"]+)"', read(ROOT / "shared/SpeakaShared.h"))
         self.assertGreater(len(keys), 10)
-        pane = re.findall(r"<key>key</key>\s*<string>([^<]+)</string>", read(ROOT / "speakaprefs/Resources/Root.plist"))
+        pane = re.findall(r"<key>key</key>\s*<string>([^<]+)</string>", read(ROOT / "settings/Resources/Root.plist"))
         self.assertEqual(pane, [])
         for key in keys:
             self.assertTrue(key.startswith("Speaka"), key)

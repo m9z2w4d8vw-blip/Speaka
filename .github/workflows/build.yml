@@ -81,7 +81,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Package version: ${version}"
 
-      # Theos references vendor_sbc/{sbc,bits}.c from btpsaudiohelper/Makefile.
+      # Theos references vendor_sbc/{sbc,bits}.c from audiohelper/Makefile.
       # Those third-party sources are intentionally NOT committed.  They must
       # be fetched before both the decoder regression and the Theos build.
       - name: Fetch pinned Google libsbc (required for v7.6)
@@ -89,12 +89,12 @@ jobs:
           set -euo pipefail
           bash tools/fetch_google_sbc.sh
           for f in sbc.c bits.c sbc.h bits.h LICENSE UPSTREAM_COMMIT; do
-            test -s "btpsaudiohelper/vendor_sbc/$f" || {
-              echo "::error::Missing decoder dependency: btpsaudiohelper/vendor_sbc/$f"
+            test -s "audiohelper/vendor_sbc/$f" || {
+              echo "::error::Missing decoder dependency: audiohelper/vendor_sbc/$f"
               exit 1
             }
           done
-          echo "Fetched pinned libsbc: $(cat btpsaudiohelper/vendor_sbc/UPSTREAM_COMMIT)"
+          echo "Fetched pinned libsbc: $(cat audiohelper/vendor_sbc/UPSTREAM_COMMIT)"
 
       # In CI, tests/test_v88_runtime.py fails if the sources are missing, and compares the live decoder's PCM
       # with FFmpeg's decode of the same recording from the phone.

@@ -71,7 +71,7 @@ static char *const k_dpkg_env[] = {
 #define SPEAKA_TWEAK_TEMP "/var/tmp/speaka-tweak.XXXXXX"          // root's own copy, for dpkg
 #define SPEAKA_PACKAGE "com.parv.speaka"
 #define SPEAKA_DPKG_LIST "/var/jb/var/lib/dpkg/info/com.parv.speaka.list"   // there while dpkg has the tweak
-#define SPEAKA_LOG_DIR "/tmp/FTABHarvest"                         // the tweak's logs and shared memory
+#include "../../shared/SpeakaShared.h"                    // SPEAKA_LOG_DIR: the tweak's logs and shared memory
 #define SPEAKA_CACHES "/var/mobile/Library/Caches/Speaka"           // downloaded updates (SpeakaUpdater)
 #define SPEAKA_UPDATE_LOG "/tmp/FTABHarvest/SpeakaUpdate.log"
 

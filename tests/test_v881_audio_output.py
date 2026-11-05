@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "btpsaudiohelper/BTPSV88Stream.m"
+SOURCE = ROOT / "audiohelper/AudioHelper.m"
 
 
 class V881AudioOutput(unittest.TestCase):
@@ -143,8 +143,8 @@ int main(void) {
             self.assertNotIn(api, source)
         # v8.9: the speaker remains the default branch of the output dispatcher.
         dispatch = source.split("static int configure_output(", 1)[1].split("static int start_output(", 1)[0]
-        self.assertIn("g_output_mode==BTPS_V89_MODE_SPEAKER?configure_speaker(rate,s)", dispatch)
-        self.assertIn("static int g_output_mode=BTPS_V89_MODE_SPEAKER;", source)
+        self.assertIn("g_output_mode==OUTPUT_MODE_SPEAKER?configure_speaker(rate,s)", dispatch)
+        self.assertIn("static int g_output_mode=OUTPUT_MODE_SPEAKER;", source)
         start = source.split("static int start_output(", 1)[1].split("} PCMLevels;", 1)[0]
         self.assertLess(start.index("configure_output(rate,s)"), start.index("AudioQueueNewOutput("))
         self.assertLess(start.index("route_verdict(session,NULL)"), start.index("AudioQueueStart("))

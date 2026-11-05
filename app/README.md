@@ -137,7 +137,7 @@ that's refused. Then:
 ## How it talks to the tweak
 
 Exactly like Settings > Speaka, through the `com.apple.bluetooth` preferences and the Darwin notifications in
-[`BTPSShared.h`](../BTPSShared.h). This needs two entitlements, `platform-application` and
+[`shared/SpeakaShared.h`](../shared/SpeakaShared.h). This needs two entitlements, `platform-application` and
 `com.apple.private.security.no-sandbox`. The third, `com.apple.private.persona-mgmt`, lets the app start its update
 helper as root. The helper has Caz's helper's entitlements (`RootHelper/entitlements.plist`).
 

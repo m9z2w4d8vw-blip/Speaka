@@ -16,8 +16,8 @@ class V77Safety(unittest.TestCase):
         cls.tmp=tempfile.TemporaryDirectory()
         lib=Path(cls.tmp.name)/'caps.so'
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-shared','-fPIC',
-                        '-o',str(lib),str(ROOT/'BTPSV77Sink.c')],check=True)
-        cls.func=ctypes.CDLL(str(lib)).btps_v77_prepare_sink_caps
+                        '-o',str(lib),str(ROOT/'tweak/SinkEndpoint.c')],check=True)
+        cls.func=ctypes.CDLL(str(lib)).sink_prepare_caps
         cls.func.argtypes=[ctypes.POINTER(SinkCaps),ctypes.POINTER(ctypes.c_uint8),ctypes.POINTER(ctypes.c_uint8)]
         cls.func.restype=ctypes.c_int
     @classmethod
@@ -42,15 +42,15 @@ class V77Safety(unittest.TestCase):
         result=SinkCaps()
         self.assertNotEqual(self.func(ctypes.byref(result),src,codec),0)
     def test_v77_trial_retired_from_settings(self):
-        pl=plistlib.loads((ROOT/'speakaprefs/Resources/Root.plist').read_bytes())
+        pl=plistlib.loads((ROOT/'settings/Resources/Root.plist').read_bytes())
         self.assertFalse(any(x.get('key')=='SpeakaV77SinkTrial' for x in pl['items']))
     def test_v77_mutation_disabled_after_error_0x68(self):
-        src=(ROOT/'Tweak.xm').read_text()
+        src=(ROOT/'tweak/Hooks.xm').read_text()
         self.assertNotIn('btps_v77_attempt_after_sources(',src)
         self.assertNotIn('btps_v77_attempt_after_sources();',src)
-        self.assertIn('btps_v78_snapshot_capacity();',src)
+        self.assertIn('snapshot_table_capacity();',src)
     def test_v78_capacity_logger_is_in_build(self):
-        self.assertIn('BTPSV78Capacity.c',(ROOT/'Makefile').read_text())
-        self.assertIn('diag.v78_table',(ROOT/'Tweak.xm').read_text())
+        self.assertIn('tweak/SinkEndpoint.c',(ROOT/'Makefile').read_text())
+        self.assertIn('diag.v78_table',(ROOT/'tweak/Hooks.xm').read_text())
 
 if __name__=='__main__':unittest.main()

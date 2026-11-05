@@ -4,7 +4,7 @@ set -euo pipefail
 repo=https://github.com/google/libsbc.git
 commit=6e505650145c9973d08a0bdd5e5f5e1914305e40
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-out="$root/btpsaudiohelper/vendor_sbc"
+out="$root/audiohelper/vendor_sbc"
 # An earlier Actions run must not accidentally reuse stale or partial files.
 if [[ -f "$out/UPSTREAM_COMMIT" ]] && [[ "$(cat "$out/UPSTREAM_COMMIT")" == "$commit" ]] && \
    [[ -s "$out/sbc.c" && -s "$out/sbc.h" && -s "$out/bits.c" && -s "$out/bits.h" && -s "$out/LICENSE" ]]; then
