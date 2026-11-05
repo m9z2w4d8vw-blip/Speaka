@@ -11,10 +11,10 @@ like Caz's Scan, so it has no chevron.
 
 | You | It |
 | --- | --- |
-| Tap it | Nothing (the row starts to grey and brightens straight back) |
-| Hold it | The row slowly greys out over 4 s, to 70% like Caz's Clean button before a scan; it still reads *Uninstall* |
-| Let go early | It brightens again; nothing happens |
-| Hold 4 s | A warning haptic; the row stays greyed with a spinner and *Uninstalling...*; everything else locks |
+| Tap it | Nothing (the edge starts across and runs straight back) |
+| Hold it | A gray fill sweeps from left to right over 4 s, and what it has covered dims to 45%, like a disabled row; it still reads *Uninstall* |
+| Let go early | The edge runs back; nothing happens |
+| Hold 4 s | A warning haptic; the whole row has the disabled look, with a spinner and *Uninstalling...*; everything else locks |
 
 Then, with no second prompt:
 
@@ -42,18 +42,20 @@ Helper 1.3. Files: `app/RootHelper/main.c`, `app/Speaka/{MainComponents,ContentV
 - **While uninstalling**, the header no longer warns *The tweak isn't installed yet*: removing it is the point. The
   header reads *by Parv*, and neither the connection line nor Install Tweak appears, until Speaka closes. If the
   uninstall fails, the reason shows as before.
-- **The hold** no longer sweeps a red fill or says *Keep holding to uninstall*. The row slowly greys out over the 4 s,
-  to 70%, the level of Caz's Clean button before a scan (and of Speaka's own big button when it can't be pressed),
-  and reads *Uninstall* throughout. Once the uninstall starts, it stays at 70% with the spinner and *Uninstalling...*;
-  the other rows lock at Caz's 45%, so the one doing the work stands out.
+- **The hold** no longer sweeps a red fill or says *Keep holding to uninstall*. Picked from ten mockups
+  (interpretation 6, *fill and text together*): a gray fill (white at 10%) sweeps across the row from left to right
+  over the 4 s, and everything it has covered dims to 45%, a disabled row's level, while the rest stays white. It reads
+  *Uninstall* throughout, and letting go runs the edge back. Once the uninstall starts, the whole row keeps that
+  disabled look, with the spinner and *Uninstalling...*. One animatable shape draws the fill and cuts the row's two
+  copies (white and dimmed), so the three never drift apart.
 
 ## On the phone
 
 1. **The menu.** Four rows; Uninstall has a trash icon and no chevron. Compare with Caz side by side: the panel's top
    and bottom, the rows and the separators should line up.
-2. **A tap.** Tap Uninstall: the row barely dims and comes straight back, and nothing else happens.
-3. **Let go early.** Hold for about 2 seconds and let go: the row greys out part-way, reading *Uninstall* the whole
-   time, then brightens again.
+2. **A tap.** Tap Uninstall: the edge barely starts and runs straight back, and nothing else happens.
+3. **Let go early.** Hold for about 2 seconds and let go: the fill covers about half the row, with *Unins* dimmed and
+   the rest still white, reading *Uninstall* the whole time; then the edge runs back.
 4. **The whole thing**, when you're ready to reinstall afterwards. Hold for 4 seconds: a haptic, *Uninstalling...*
    with a spinner. Bluetooth restarts (anything connected drops for a few seconds), then Speaka closes and its icon
    disappears. Then check:

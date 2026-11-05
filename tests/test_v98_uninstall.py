@@ -61,25 +61,39 @@ class Menu(unittest.TestCase):
                      ".padding(.horizontal, 12)", ".frame(height: height)", ".contentShape(Rectangle())"):
             self.assertIn(part, row)
             self.assertIn(part, plain)
-        # Only a hold acts: no button and no press-dim. The hold greys the row out to Caz's Clean button before a scan
-        # (the big button's disabled 70%) over the hold, with the title Uninstall all the way; letting go brightens it.
+        # Only a hold acts: no button and no press-dim. Interpretation 6 of the mockups: a gray fill sweeps from the
+        # left over the hold, and everything it has covered dims to Caz's disabled-row 45%, so the passed part looks
+        # disabled while the rest is still white. The title stays Uninstall all the way; letting go runs the edge back.
         self.assertNotIn("Button {", row)
         self.assertNotIn("MenuButtonStyle", row)
         self.assertIn(".onLongPressGesture(minimumDuration: seconds, maximumDistance: 40) {", row)
         self.assertIn("private var seconds: Double { item.holdSeconds ?? 4 }", row)
-        self.assertIn("static let greyedOut = 0.7", row)
-        self.assertIn(".opacity(enabled ? 1 : 0.7)", block(components, "struct ActionButton: View {"))
-        self.assertIn("if item.busy || holding { return Self.greyedOut }\n        return item.enabled ? 1 : 0.45", row)
-        self.assertIn(".opacity(opacity)", row)
+        self.assertIn("@State private var progress: CGFloat = 0", row)
         self.assertIn("pressing ? Animation.linear(duration: seconds) : Animation.easeOut(duration: 0.25)", row)
-        self.assertIn("holding = pressing", row)
-        for gone in ("Keep holding", "GeometryReader", "Theme.failure"):
+        self.assertIn("progress = pressing ? 1 : 0", row)
+        self.assertIn("static let dimmed = 0.45", row)
+        self.assertIn(".opacity(item.enabled ? 1 : 0.45)", plain)                  # the same as a disabled row
+        self.assertIn("static let cover = Color.white.opacity(0.10)", row)
+        # One animatable shape draws the fill and cuts both copies of the row, so all three move together.
+        stack = row[row.index("        ZStack {\n            HoldPortion"):]
+        self.assertIn("HoldPortion(progress: shown).fill(Self.cover)\n"
+                      "            content.mask { HoldPortion(progress: shown, leading: false) }\n"
+                      "            content.opacity(Self.dimmed).mask { HoldPortion(progress: shown) }", stack)
+        shape = block(components, "struct HoldPortion: Shape {")
+        self.assertIn("var animatableData: CGFloat {\n        get { progress }\n        set { progress = newValue }", shape)
+        self.assertIn("let edge = rect.width * min(max(progress, 0), 1)", shape)
+        self.assertIn("CGRect(x: rect.minX, y: rect.minY, width: edge, height: rect.height)", shape)
+        self.assertIn("CGRect(x: rect.minX + edge, y: rect.minY, width: rect.width - edge, height: rect.height)", shape)
+        for gone in ("Keep holding", "GeometryReader", "Theme.failure", "greyedOut", "holding"):
             self.assertNotIn(gone, row)
         self.assertIn('Text(item.busy ? "Uninstalling..." : item.title)', row)   # only once it's under way
         self.assertIn("UINotificationFeedbackGenerator().notificationOccurred(.warning)\n            item.action()", row)
-        # While it runs: still greyed out, with a spinner where the icon was.
+        # While it runs: the whole row stays covered, with a spinner where the icon was. Disabled otherwise: 45%.
+        self.assertIn("private var shown: CGFloat { item.busy ? 1 : progress }", row)
         self.assertIn("if item.busy {\n                    Spinner()", row)
+        self.assertIn(".opacity(item.enabled || item.busy ? 1 : Self.dimmed)", row)
         self.assertIn(".disabled(!item.enabled || item.busy)", row)
+        self.assertIn(".accessibilityElement(children: .ignore)", row)            # drawn twice, heard once
         self.assertIn("if item.holdSeconds != nil {\n                        HoldMenuRow(item: item, height: rowHeight)",
                       block(components, "struct ActionMenu: View {"))
         item = block(components, "struct MenuItem: Identifiable {")

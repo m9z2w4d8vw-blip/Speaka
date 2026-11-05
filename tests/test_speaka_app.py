@@ -1225,7 +1225,7 @@ class SpeakaApp(unittest.TestCase):
             # SwiftUI and Combine
             "App", "Scene", "WindowGroup", "View", "ViewBuilder", "Content", "Context", "Text", "Image", "Font",
             "Color", "Button", "ButtonStyle", "Configuration", "VStack", "HStack", "ZStack", "Spacer", "ForEach",
-            "List", "Section", "ScrollView", "GeometryReader", "Group", "Animation", "Capsule", "Circle", "Rectangle", "RoundedRectangle",
+            "List", "Section", "ScrollView", "GeometryReader", "Group", "Animation", "Shape", "Path", "Capsule", "Circle", "Rectangle", "RoundedRectangle",
             "LinearGradient", "StrokeStyle", "TimelineView", "EdgeInsets", "Namespace", "State", "StateObject",
             "ObservedObject", "Environment", "Published", "ObservableObject", "UIViewRepresentable",
             # UIKit, CoreText and AVKit

@@ -150,27 +150,29 @@ struct MenuRow: View {
     }
 }
 
-/// v9.8, Uninstall: laid out exactly like a MenuRow, but a tap does nothing. Held down, the row slowly greys out over
-/// the hold, to the look of Caz's Clean button before a scan (the whole button at 70%), and the title stays Uninstall
-/// throughout; let go early and it brightens again. Held the whole time: a warning haptic and the action, with no second
-/// prompt, and the row stays greyed out while it runs, with a spinner in the icon's place and "Uninstalling...". It
-/// doesn't dim while pressed, as other rows do, so that greying out is the only thing a press does.
+/// v9.8, Uninstall: laid out exactly like a MenuRow, but a tap does nothing. Held down, a gray fill sweeps across the
+/// row from left to right over the hold, and everything it has covered dims to Caz's disabled 45%, so the part it has
+/// passed looks like a disabled row while the rest is still white. The title stays Uninstall throughout; let go early
+/// and the edge runs back. Held the whole time: a warning haptic and the action, with no second prompt, and the whole
+/// row keeps the disabled look while it runs, with a spinner in the icon's place and "Uninstalling...". It doesn't dim
+/// while pressed, as other rows do, so the sweep is the only thing a press does.
 struct HoldMenuRow: View {
     let item: MenuItem
     let height: CGFloat
-    @State private var holding = false
+    /// How far the hold has got, 0 to 1. Animated: linearly up to 1 over the hold, quickly back to 0 on letting go.
+    @State private var progress: CGFloat = 0
 
-    /// Caz's Clean button while it has nothing to clean.
-    static let greyedOut = 0.7
+    /// Caz's disabled row: what the covered part of the row looks like.
+    static let dimmed = 0.45
+    /// The gray behind the covered part.
+    static let cover = Color.white.opacity(0.10)
 
     private var seconds: Double { item.holdSeconds ?? 4 }
 
-    private var opacity: Double {
-        if item.busy || holding { return Self.greyedOut }
-        return item.enabled ? 1 : 0.45
-    }
+    /// Once the action runs, the whole row stays covered.
+    private var shown: CGFloat { item.busy ? 1 : progress }
 
-    var body: some View {
+    private var content: some View {
         HStack(spacing: 10) {
             ZStack {
                 if item.busy {
@@ -189,21 +191,53 @@ struct HoldMenuRow: View {
         .foregroundStyle(Theme.text)
         .padding(.horizontal, 12)
         .frame(height: height)
+    }
+
+    var body: some View {
+        // The fill, then the row twice: white where the edge hasn't reached, dimmed where it has. One animatable shape
+        // draws the fill and cuts both copies, so all three move together.
+        ZStack {
+            HoldPortion(progress: shown).fill(Self.cover)
+            content.mask { HoldPortion(progress: shown, leading: false) }
+            content.opacity(Self.dimmed).mask { HoldPortion(progress: shown) }
+        }
+        .frame(height: height)
         .contentShape(Rectangle())
-        .opacity(opacity)
+        .opacity(item.enabled || item.busy ? 1 : Self.dimmed)
         .onLongPressGesture(minimumDuration: seconds, maximumDistance: 40) {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             item.action()
         } onPressingChanged: { pressing in
             if pressing { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
             withAnimation(pressing ? Animation.linear(duration: seconds) : Animation.easeOut(duration: 0.25)) {
-                holding = pressing
+                progress = pressing ? 1 : 0
             }
         }
         .disabled(!item.enabled || item.busy)
-        .accessibilityElement(children: .combine)
+        // The content is drawn twice; VoiceOver hears it once.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.busy ? "Uninstalling" : item.title)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Hold for \(Int(seconds)) seconds to uninstall Speaka and its tweak.")
+    }
+}
+
+/// The part of a frame a hold has covered (from the leading edge to `progress` of the width), or the part it hasn't.
+/// A Shape fills whatever frame it's given, so the row needn't measure itself, and `animatableData` makes the edge
+/// sweep smoothly instead of jumping to where the hold is going.
+struct HoldPortion: Shape {
+    var progress: CGFloat
+    var leading = true
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let edge = rect.width * min(max(progress, 0), 1)
+        return Path(leading ? CGRect(x: rect.minX, y: rect.minY, width: edge, height: rect.height)
+                            : CGRect(x: rect.minX + edge, y: rect.minY, width: rect.width - edge, height: rect.height))
     }
 }
 
