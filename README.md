@@ -43,7 +43,7 @@ changing songs; switching outputs during playback; and wired earbuds without rep
 
 | | |
 | --- | --- |
-| 🔊 **One-tap Start and Stop** | One button in the Speaka app, or Settings. It opens into a live log while Bluetooth restarts; your other devices reconnect on their own. |
+| 🔊 **One-tap Start and Stop** | One button in the Speaka app. It opens into a live log while Bluetooth restarts; your other devices reconnect on their own. |
 | 🎧 **Your choice of output** | iPhone speaker, wired or USB headphones, or any iOS output, switchable mid-song. |
 | 💻 **Live connection line** | The app shows when your PC is connected and where the audio is playing. |
 | 🛡️ **Safe by design** | Checks the exact Bluetooth build before hooking anything; every session ends at the next Bluetooth restart. |
@@ -84,7 +84,7 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
 3. **Install the tweak.** Open Speaka and tap **Install Tweak**, above the big button. Bluetooth restarts, the iPhone
    resprings, and Settings gains a **Speaka** page. (Or install the release's `Speaka_<version>_iphoneos-arm64.deb`
    yourself, with Sileo or Zebra or `sudo dpkg -i`; with the tweak installed, the button doesn't show.)
-4. **Start.** Open Speaka, or Settings > Speaka, and tap **Start**. Bluetooth restarts once more.
+4. **Start.** Open Speaka and tap **Start**. Bluetooth restarts once more.
 5. **Connect.** On the PC, pair with the iPhone (Windows: Settings > Bluetooth & devices > Add device > Bluetooth) and
    choose it as the sound output.
 
@@ -138,9 +138,12 @@ background.
   under them opens iOS's own picker.
 - **Credits** shows the app's and the tweak's versions and the license of the interface, which Caz and Speaka share.
 - **Update Available** appears above the button when a newer release is out; see [Updates](#updates).
+- **Settings** also has **Update notifications**: while Speaka is open, it checks for a new release every 2 minutes,
+  and it asks iOS to check in the background too. iOS decides when that happens, often much less often than every 2
+  minutes, and never once Speaka has been swiped away. Each release is announced once, when it carries `Speaka.tipa`.
 
-The app and **Settings > Speaka** read and write the same settings, so they always agree. More detail is in
-[app/README.md](app/README.md).
+Since v9.7, Start, Stop and the audio output are only in the app; **Settings > Speaka** keeps the status, the debug
+log and the research switches. More detail is in [app/README.md](app/README.md).
 
 ### Updates
 
@@ -175,7 +178,7 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 
 ### Where the audio plays
 
-**Audio Output** in the app, or **Play audio on** in Settings, takes effect immediately, even mid-song:
+**Audio Output** in the app takes effect immediately, even mid-song:
 
 | Mode | Plays on | Good to know |
 | --- | --- | --- |
@@ -194,10 +197,10 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 | Section | Rows |
 | --- | --- |
 | Status | Loaded in daemon, Last event, Log channels |
-| Bluetooth speaker | Start, Stop and restore normal Bluetooth, Session |
-| Audio output | Play audio on, Choose output device... |
 | Debug log | View debug log, Copy log to clipboard, Clear log |
-| Research switches | Leftovers from the research stages. **Start** sets the two one-shot switches for you, so leave these alone. |
+| Experiments | All five research switches, leftovers from the research stages. **Start** sets the two one-shot switches for you, so leave these alone. |
+
+Start, Stop, the session and the audio output were here until v9.7; they're in the app now.
 
 ## Troubleshooting
 
@@ -213,7 +216,7 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 | The sound stopped after a call, Siri or another app | iOS interrupted playback | Pause and play on the PC, or change any audio setting. |
 | **Update Available** never appears | The app checks once per launch; offline, or GitHub's limit of 60 checks an hour was reached | Open the app again later. You can always install from the [latest release](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest) by hand. |
 | *Update failed* after *Installing the tweak* | dpkg reported an error, often because Sileo or Zebra was installing at the same time | Close the package manager and tap **Update** again. Nothing else changed. |
-| Bluetooth misbehaves in general | | Tap **Stop** (the app's button reads Stop while the speaker is on), or **Stop and restore normal Bluetooth** in Settings. Without either: **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`. To remove everything, uninstall. |
+| Bluetooth misbehaves in general | | Tap **Stop** in the app (its button reads Stop while the speaker is on), or **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`. To remove everything, uninstall. |
 
 When something goes wrong, open **View debug log** right away and use **Save Log to iCloud Drive**.
 
@@ -473,8 +476,8 @@ runtime tests need libsbc, so run `tools/fetch_google_sbc.sh` first; without it,
 > [!CAUTION]
 > If Bluetooth misbehaves, recover in this order, from least to most drastic:
 >
-> 1. **Stop** in the app, or **Stop and restore normal Bluetooth** in Settings.
-> 2. `sudo killall -9 bluetoothd`.
+> 1. **Stop** in the app.
+> 2. **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`.
 > 3. Uninstall the package.
 
 Three design choices limit what can go wrong:
@@ -544,6 +547,7 @@ notes.
 | v9.4 | Updates that install; Start shows every step and which one failed | [TESTING-v9.4](docs/history/TESTING-v9.4.md) |
 | v9.5 | One `.tipa` installs the app and the tweak; Install Tweak; one-download updates | [TESTING-v9.5](docs/history/TESTING-v9.5.md) |
 | v9.6 | Settings with Kill Bluetooth; the PC's name from the audio route; still connected while paused | [TESTING-v9.6](docs/history/TESTING-v9.6.md) |
+| v9.7 | Update notifications; Kill Bluetooth is just a button; Settings > Speaka without what the app does | [TESTING-v9.7](docs/history/TESTING-v9.7.md) |
 
 | Research note | Topic |
 | --- | --- |

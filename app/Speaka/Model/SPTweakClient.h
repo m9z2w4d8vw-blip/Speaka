@@ -68,6 +68,13 @@ typedef NS_ENUM(NSInteger, SPRequestState) {
 - (nullable SPRequest *)sendAction:(NSString *)action error:(NSString *_Nullable *_Nullable)error
     NS_SWIFT_NAME(sendAction(_:error:));
 - (SPRequestState)pollRequest:(SPRequest *)request NS_SWIFT_NAME(pollRequest(_:));
+/// The app's own settings (v9.7), in the app's own preferences, never com.apple.bluetooth's: whether Settings > Update
+/// notifications is on, and the last release a notification announced, so each is announced once.
++ (BOOL)updateNotificationsEnabled NS_SWIFT_NAME(updateNotificationsEnabled());
++ (void)setUpdateNotificationsEnabled:(BOOL)enabled NS_SWIFT_NAME(setUpdateNotificationsEnabled(_:));
++ (nullable NSString *)notifiedVersion NS_SWIFT_NAME(notifiedVersion());
++ (void)setNotifiedVersion:(nullable NSString *)version NS_SWIFT_NAME(setNotifiedVersion(_:));
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -212,7 +212,7 @@ struct RoutePickerAnchor: UIViewRepresentable {
 }
 
 /// What Speaka is, which versions are installed, and the license of the interface it shares with Caz.
-/// Settings (v9.6): Kill Bluetooth, the README's `killall -9 bluetoothd`, from the app.
+/// Settings: Kill Bluetooth (the README's `killall -9 bluetoothd`, through the root helper) and Update notifications.
 struct SettingsWindow: View {
     @ObservedObject var model: SpeakaModel
 
@@ -220,14 +220,7 @@ struct SettingsWindow: View {
 
     var body: some View {
         WindowCard(title: "Settings") {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Kill Bluetooth")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white)
-                Text("Stops Bluetooth at once, as killall -9 bluetoothd does, and iOS starts it again. Use it when devices won't reconnect. Everything connected drops for a moment, and the speaker is off until you tap Start.")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 12) {
                 Button {
                     model.killBluetooth()
                 } label: {
@@ -244,14 +237,32 @@ struct SettingsWindow: View {
                 .buttonStyle(.plain)
                 .disabled(busy)
                 .opacity(busy ? 0.5 : 1)
-                if let result = model.killResult {
-                    Text(result)
+                if let failure = model.killResult {
+                    Text(failure)
                         .font(.system(size: 13))
-                        .foregroundStyle(Color.white.opacity(0.6))
+                        .foregroundStyle(Theme.failure)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Toggle(isOn: Binding(get: { model.updateNotifications },
+                                     set: { model.setUpdateNotifications($0) })) {
+                    Text("Update notifications")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+                .tint(Theme.accent)
+                .padding(.horizontal, 16)
+                .frame(height: 50)
+                .background(Theme.menu, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                Text(model.notificationsRefused
+                     ? "Allow notifications for Speaka in Settings > Notifications, then try again."
+                     : "Every 2 minutes while Speaka is open; in the background, as often as iOS allows.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(model.notificationsRefused ? Theme.failure : Color.white.opacity(0.5))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(16)
         }
     }

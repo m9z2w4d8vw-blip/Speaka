@@ -333,4 +333,30 @@ static NSString *SPOutputsDescription(id outputs)
     return SPRequestWaiting;
 }
 
+#pragma mark - The app's own settings
+
+static NSString *const SPUpdateNotificationsKey = @"updateNotifications";
+static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
+
++ (BOOL)updateNotificationsEnabled
+{
+    return [[NSUserDefaults standardUserDefaults] boolForKey:SPUpdateNotificationsKey];
+}
+
++ (void)setUpdateNotificationsEnabled:(BOOL)enabled
+{
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:SPUpdateNotificationsKey];
+}
+
++ (NSString *)notifiedVersion
+{
+    id version = [[NSUserDefaults standardUserDefaults] objectForKey:SPNotifiedVersionKey];
+    return [version isKindOfClass:[NSString class]] ? version : nil;
+}
+
++ (void)setNotifiedVersion:(NSString *)version
+{
+    [[NSUserDefaults standardUserDefaults] setObject:version forKey:SPNotifiedVersionKey];
+}
+
 @end

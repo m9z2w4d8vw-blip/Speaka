@@ -38,88 +38,6 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>Bluetooth speaker</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>Start</string>
-			<key>action</key>
-			<string>startSink:</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>Stop and restore normal Bluetooth</string>
-			<key>action</key>
-			<string>stopSink:</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSTitleValueCell</string>
-			<key>label</key>
-			<string>Session</string>
-			<key>get</key>
-			<string>sessionValue:</string>
-			<key>id</key>
-			<string>session</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSGroupCell</string>
-			<key>label</key>
-			<string>Audio output</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSLinkListCell</string>
-			<key>detail</key>
-			<string>PSListItemsController</string>
-			<key>label</key>
-			<string>Play audio on</string>
-			<key>defaults</key>
-			<string>com.apple.bluetooth</string>
-			<key>key</key>
-			<string>SpeakaV89OutputMode</string>
-			<key>default</key>
-			<string>speaker</string>
-			<key>validValues</key>
-			<array>
-				<string>speaker</string>
-				<string>headphones</string>
-				<string>any</string>
-			</array>
-			<key>validTitles</key>
-			<array>
-				<string>iPhone speaker</string>
-				<string>Wired headphones or earbuds</string>
-				<string>Any device (follow iOS)</string>
-			</array>
-			<key>shortTitles</key>
-			<array>
-				<string>iPhone speaker</string>
-				<string>Wired headphones</string>
-				<string>Any device</string>
-			</array>
-			<key>staticTextMessage</key>
-			<string>Changes apply right away, even while audio is playing. Wired headphones or earbuds waits until something is plugged in and never uses Bluetooth. Any device plays wherever iOS is playing; choose it in Control Center or with Choose output device.</string>
-			<key>PostNotification</key>
-			<string>com.parv.speaka.v89.output</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>Choose output device...</string>
-			<key>action</key>
-			<string>chooseOutput:</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSGroupCell</string>
-			<key>label</key>
 			<string>Debug log</string>
 		</dict>
 		<dict>
@@ -166,12 +84,6 @@
 		</dict>
 		<dict>
 			<key>cell</key>
-			<string>PSGroupCell</string>
-			<key>label</key>
-			<string>Optional SDP registration diagnostics</string>
-		</dict>
-		<dict>
-			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>default</key>
 			<false/>
@@ -184,57 +96,39 @@
 		</dict>
 		<dict>
 			<key>cell</key>
-			<string>PSGroupCell</string>
-			<key>label</key>
-			<string>v8.0 init lookup observation</string>
-		</dict>
-		<dict>
-			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Trace AVDTP config lookup (advanced)</string>
+			<key>default</key>
+			<false/>
 			<key>defaults</key>
 			<string>com.apple.bluetooth</string>
 			<key>key</key>
 			<string>SpeakaV80ConfigLookupObserver</string>
-			<key>default</key>
-			<false/>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>v8.1: One-time capacity test</string>
+			<string>Trace AVDTP config lookup (advanced)</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Arm seven slots for ONE restart</string>
+			<key>default</key>
+			<false/>
 			<key>defaults</key>
 			<string>com.apple.bluetooth</string>
 			<key>key</key>
 			<string>SpeakaV81SevenOnce</string>
-			<key>default</key>
-			<false/>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>v8.8 continuous audio experiment</string>
+			<string>Arm seven slots for ONE restart</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>Arm real Sink SDP + signaling ONCE</string>
+			<key>default</key>
+			<false/>
 			<key>defaults</key>
 			<string>com.apple.bluetooth</string>
 			<key>key</key>
 			<string>SpeakaV82DecisiveOnce</string>
-			<key>default</key>
-			<false/>
+			<key>label</key>
+			<string>Arm real Sink SDP + signaling ONCE</string>
 		</dict>
 	</array>
 	<key>title</key>

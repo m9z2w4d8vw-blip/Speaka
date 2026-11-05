@@ -5,7 +5,8 @@ SwiftUI code, on Speaka's own background. It offers:
 
 - **one button** that starts or stops the speaker and opens into a log while Bluetooth restarts, like Caz's Clean
   button;
-- a **Settings** window with **Kill Bluetooth** (`killall -9 bluetoothd`, through the root helper);
+- a **Settings** window with **Kill Bluetooth** (`killall -9 bluetoothd`, through the root helper) and **Update
+  notifications**;
 - an **Audio Output** window with the three outputs, and iOS's own output picker for Bluetooth earbuds;
 - a **connection line** above the button that says who is connected and where the audio plays;
 - **Credits**, with the app's and the tweak's versions and the license of the interface;
@@ -65,7 +66,7 @@ step and the tweak's reason in Caz's warning colour until the speaker's state ch
 | Part | Shows |
 | --- | --- |
 | Header | *Speaka*, *iOS 17.0*, then *by Parv*, or what needs your attention in the warning colour |
-| Settings | A window with **Kill Bluetooth**: `speakahelper kill-bluetooth` kills bluetoothd as `killall -9` does, and launchd starts it again without the speaker. Greyed out during a Start or Stop |
+| Settings | **Kill Bluetooth**, just the button: `speakahelper kill-bluetooth` kills bluetoothd as `killall -9` does, and launchd starts it again without the speaker. Greyed out during a Start or Stop; a line shows only if it failed. Then **Update notifications**, a switch, with one line saying how often it checks (or, if iOS refused permission, where to allow it) |
 | Audio Output | A window with iPhone speaker, Wired headphones or earbuds, and Any device; a gold checkmark on the one in use; then Choose Output Device |
 | Credits | A window with the app's and the tweak's versions, a line on what iOS's Bluetooth list reports, and Dopamine's license |
 | Connection line | *LAPTOP-XXXX · connected* once the PC sets up the stream and while it's paused, *LAPTOP-XXXX · iPhone speaker* while it plays, *Waiting: no wired headphones plugged in*, or *Connect from your PC* while nothing is connected. How the app knows it's connected, and the PC's name, are under [How it talks to the tweak](#how-it-talks-to-the-tweak) |
@@ -116,6 +117,20 @@ own link (`apple-magnifier://install?url=`), then the releases page.
 | 10 | The last step couldn't be started |
 
 The last step writes to `/tmp/FTABHarvest/SpeakaUpdate.log`.
+
+## Update notifications
+
+**Settings > Update notifications** (v9.7) asks iOS for permission to notify when it's turned on, and stays off if
+that's refused. Then:
+
+- **While Speaka is open**, `SpeakaUpdater.watch` runs the release check again every 2 minutes, so Update Available
+  appears within 2 minutes of a release.
+- **In the background**, Speaka asks iOS to wake it in 2 minutes (`BGAppRefreshTaskRequest`, task
+  `speaka.update-check`, listed in `Info.plist` with the `fetch` background mode), and each wake-up asks for the next.
+  iOS decides when that actually happens, often much less often than every 2 minutes, and never once Speaka has been
+  swiped away from the app switcher.
+- **A release counts** once it carries `Speaka.tipa` and is newer than the app. Each is announced once: the last one
+  announced is kept in the app's own preferences (through `SPTweakClient`, never `com.apple.bluetooth`'s).
 
 ## How it talks to the tweak
 
@@ -186,6 +201,7 @@ and commercial use. Only the picture is shipped, not the font.
 | `Speaka/Windows.swift` | `Windows.swift` (the window card) | The Audio Output and Credits windows |
 | `Speaka/SpeakaModel.swift` | after `CleanerModel.swift` | State, polling, and Start or Stop as log lines |
 | `Speaka/SessionSteps.swift` | | The steps after Bluetooth restarts, each read from a status the tweak publishes |
+| `Speaka/UpdateNotifications.swift` | | Settings > Update notifications: the check, iOS's background wake-up, the notification |
 | `Speaka/SpeakaUpdater.swift` | `UpdateModel.swift` | Releases, versions, downloads and the hand-off to the helper |
 | `Speaka/UpdateViews.swift` | `UpdateViews.swift` | Update Available, the changelog, the progress ring |
 | `Speaka/Model/SPTweakClient`, `SPConnectedDevice` | | The tweak's protocol and the PC's name, in Objective-C |

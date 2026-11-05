@@ -82,9 +82,12 @@ final class SpeakaModel: ObservableObject {
     /// v9.6: the PC's name as the audio route last showed it, kept while the PC stays connected, because the route
     /// shows it only while nothing else is playing (while it's paused, say).
     @Published private(set) var routePCName: String? = nil
-    /// Settings > Kill Bluetooth: running, and how it went.
+    /// Settings > Kill Bluetooth: running, and why it failed, if it did.
     @Published private(set) var killingBluetooth = false
     @Published private(set) var killResult: String? = nil
+    /// Settings > Update notifications, and whether iOS refused permission the last time it was turned on.
+    @Published private(set) var updateNotifications = SPTweakClient.updateNotificationsEnabled()
+    @Published private(set) var notificationsRefused = false
 
     private let client = SPTweakClient()
     /// The tweak's own status block, which the steps of a Start or a Stop are read from.
@@ -467,11 +470,16 @@ final class SpeakaModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.killingBluetooth = false
-                self.killResult = status == 0
-                    ? "Bluetooth restarted. The speaker is off until you tap Start."
-                    : (reason ?? "Bluetooth couldn't be killed (code \(status)).")
+                self.killResult = status == 0 ? nil : (reason ?? "Bluetooth couldn't be killed (code \(status)).")
                 self.refresh()
             }
+        }
+    }
+
+    func setUpdateNotifications(_ on: Bool) {
+        UpdateNotifications.setEnabled(on) { [weak self] enabled in
+            self?.updateNotifications = enabled
+            self?.notificationsRefused = on && !enabled
         }
     }
 

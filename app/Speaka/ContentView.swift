@@ -55,10 +55,19 @@ struct ContentView: View {
             if phase == .active {
                 updater.refreshTweak()   // installed from Sileo meanwhile, say
             }
+            // Update notifications: every 2 minutes while open; in the background, when iOS chooses.
+            updater.watch(model.updateNotifications && phase == .active)
+            if phase == .background && model.updateNotifications {
+                UpdateNotifications.schedule()
+            }
+        }
+        .onChange(of: model.updateNotifications) { on in
+            updater.watch(on && scenePhase == .active)
         }
         .onAppear {
             model.setActive(true)
             updater.check()
+            updater.watch(model.updateNotifications)
         }
     }
 

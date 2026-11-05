@@ -324,21 +324,18 @@ int main(void) {
                 if field in item:
                     selector = item[field]
                     self.assertRegex(controller, r"- \((?:id|void)\)%s\(id\)specifier" % re.escape(selector), selector)
+        # v9.7: Start, Stop, the session and the audio output are the app's now, through the same protocol
+        # (app/Speaka/Model/SPTweakClient.m). The page's code behind them stays, unused.
         actions = {item.get("action") for item in items}
-        self.assertTrue({"startSink:", "stopSink:", "chooseOutput:"} <= actions)
-        ids = {item.get("id") for item in items}
-        self.assertIn("session", ids)
-        self.assertIn('[self reloadSpecifierID:@"session"];', controller)
-        lists = [item for item in items if item.get("cell") == "PSLinkListCell"]
-        self.assertEqual(len(lists), 1)
-        mode = lists[0]
-        self.assertEqual(mode["key"], shared_define("BTPS_KEY_V89_OUTPUT_MODE"))
-        self.assertEqual(mode["defaults"], "com.apple.bluetooth")
-        self.assertEqual(mode["default"], "speaker")
-        self.assertEqual(mode["validValues"], ["speaker", "headphones", "any"])
-        self.assertEqual(len(mode["validTitles"]), 3)
-        self.assertEqual(mode["PostNotification"], shared_define("BTPS_NOTIFY_V89_OUTPUT"))
-        self.assertEqual(mode["detail"], "PSListItemsController")
+        self.assertFalse({"startSink:", "stopSink:", "chooseOutput:"} & actions)
+        self.assertNotIn("session", {item.get("id") for item in items})
+        self.assertEqual([item for item in items if item.get("cell") == "PSLinkListCell"], [])
+        client = read("app/Speaka/Model/SPTweakClient.m")
+        for name in ("@BTPS_KEY_V89_REQUEST", "BTPS_NOTIFY_V89_SESSION", "@BTPS_KEY_V89_OUTPUT_MODE",
+                     "BTPS_NOTIFY_V89_OUTPUT"):
+            self.assertIn(name, client)
+        modes = client.split("+ (NSArray<NSDictionary<NSString *, NSString *> *> *)outputModes", 1)[1].split("];", 1)[0]
+        self.assertEqual(re.findall(r'@"key": @"([^"]+)"', modes), ["speaker", "headphones", "any"])
         # The manual switches stay available as an alternative.
         keys = {item.get("key") for item in items}
         self.assertTrue({"SpeakaV81SevenOnce", "SpeakaV82DecisiveOnce"} <= keys)

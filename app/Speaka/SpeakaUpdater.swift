@@ -84,6 +84,17 @@ final class SpeakaUpdater: ObservableObject {
     private var checked = false
     /// This update's tweak comes from inside an app (the new one, or this one) rather than as a download.
     private var tweakFromApp = false
+    /// Settings > Update notifications, while Speaka is open: the check again every 2 minutes.
+    private var watchTimer: Timer?
+
+    func watch(_ on: Bool) {
+        watchTimer?.invalidate()
+        watchTimer = nil
+        guard on else { return }
+        watchTimer = Timer.scheduledTimer(withTimeInterval: UpdateNotifications.interval, repeats: true) { [weak self] _ in
+            self?.check(again: true)
+        }
+    }
 
     init() {
         refreshTweak()
@@ -120,8 +131,8 @@ final class SpeakaUpdater: ObservableObject {
     // MARK: - Checking
 
     /// Fetches the releases once per launch. Drafts and pre-releases are ignored, as in Caz and Dopamine.
-    func check() {
-        guard !checking, !checked else { return }
+    func check(again: Bool = false) {
+        guard !checking, again || !checked else { return }
         checking = true
         var request = URLRequest(url: Self.apiURL, timeoutInterval: 20)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")

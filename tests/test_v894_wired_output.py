@@ -171,11 +171,12 @@ int main(void) {
         self.assertIn("why=0x%x", daemon)
 
     def test_settings_and_version(self):
-        plist = plistlib.loads((ROOT / "speakaprefs/Resources/Root.plist").read_bytes())
-        item = next(i for i in plist["items"] if i.get("key") == "SpeakaV89OutputMode")
-        self.assertEqual(item["validValues"], ["speaker", "headphones", "any"])
-        self.assertEqual(item["validTitles"][1], "Wired headphones or earbuds")
-        self.assertEqual(item["shortTitles"][1], "Wired headphones")
+        # v9.7: the output is chosen in the app (Settings no longer has Play audio on).
+        client = read("app/Speaka/Model/SPTweakClient.m")
+        modes = client.split("+ (NSArray<NSDictionary<NSString *, NSString *> *> *)outputModes", 1)[1].split("];", 1)[0]
+        self.assertEqual(re.findall(r'@"key": @"([^"]+)"', modes), ["speaker", "headphones", "any"])
+        self.assertEqual(re.findall(r'@"title": @"([^"]+)"', modes)[1], "Wired headphones or earbuds")
+        self.assertEqual(re.findall(r'@"shortTitle": @"([^"]+)"', modes)[1], "Wired headphones")
         # v8.9.4 or any later build (v9.0 renamed everything to Speaka).
         for pattern, text in ((r'#define BTPS_V89_BUILD_TAG "v(\d+)\.(\d+)\.(\d+)-one-tap-output-select"', read("Tweak.xm")),
                               (r"V889_HELPER build=v(\d+)\.(\d+)\.(\d+)-output-select", read("btpsaudiohelper/BTPSV88Stream.m"))):

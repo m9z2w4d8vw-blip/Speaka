@@ -14,5 +14,9 @@ struct SpeakaApp: App {
             ContentView()
                 .preferredColorScheme(.dark)
         }
+        // Settings > Update notifications: iOS wakes Speaka in the background when it chooses (UpdateNotifications).
+        .backgroundTask(.appRefresh(UpdateNotifications.taskID)) {
+            await UpdateNotifications.backgroundCheck()
+        }
     }
 }

@@ -152,17 +152,17 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn("request.relaunched ? 45.0 : 25.0", client)
         self.assertIn("self.pendingRelaunched ? 45.0 : 25.0", settings)
 
-    def test_output_modes_match_the_settings_page(self):
-        plist = plistlib.loads((ROOT / "speakaprefs/Resources/Root.plist").read_bytes())
-        item = next(i for i in plist["items"] if i.get("key") == "SpeakaV89OutputMode")
+    def test_output_modes_match_the_helper(self):
+        """The app's three outputs are the ones the helper understands (Settings no longer lists them, v9.7)."""
         client = read(CLIENT_M)
         modes = client.split("+ (NSArray<NSDictionary<NSString *, NSString *> *> *)outputModes", 1)[1].split("];", 1)[0]
         keys = re.findall(r'@"key": @"([^"]+)"', modes)
-        titles = re.findall(r'@"title": @"([^"]+)"', modes)
-        short = re.findall(r'@"shortTitle": @"([^"]+)"', modes)
-        self.assertEqual(keys, item["validValues"])
-        self.assertEqual(titles, item["validTitles"])
-        self.assertEqual(short, item["shortTitles"])
+        self.assertEqual(keys, ["speaker", "headphones", "any"])
+        self.assertEqual(len(re.findall(r'@"title": @"([^"]+)"', modes)), 3)
+        self.assertEqual(len(re.findall(r'@"shortTitle": @"([^"]+)"', modes)), 3)
+        helper = read(ROOT / "btpsaudiohelper/BTPSV89Output.h")
+        self.assertIn('return mode == BTPS_V89_MODE_HEADPHONES ? "headphones" : mode == BTPS_V89_MODE_ANY ? "any" : "speaker";',
+                      helper)
         for symbol in re.findall(r'@"symbol": @"([^"]+)"', modes):
             self.assertRegex(symbol, r"^[a-z0-9.]+$")
         # The Audio Output window lists exactly these, from the client, and the model stores the choice through it.
@@ -176,7 +176,9 @@ class SpeakaApp(unittest.TestCase):
         headers = read(CLIENT_H) + read(DEVICE_H)
         pinned = set(re.findall(r"NS_SWIFT_NAME\((\w+)\(", headers))
         self.assertEqual(pinned, {"outputModes", "readStatus", "setOutputMode", "sendAction", "pollRequest",
-                                  "connectedComputerName", "pairedComputerName", "lookupSummary"})
+                                  "connectedComputerName", "pairedComputerName", "lookupSummary",
+                                  "updateNotificationsEnabled", "setUpdateNotificationsEnabled", "notifiedVersion",
+                                  "setNotifiedVersion"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -561,6 +563,11 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn("model.killBluetooth()", settings)
         self.assertIn('model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth"', settings)
         self.assertIn(".disabled(busy)", settings)                 # not during a Start or Stop
+        # v9.7: just the button. A line shows only if it failed.
+        for fluff in ("Stops Bluetooth at once", 'Text("Kill Bluetooth")\n'):
+            self.assertNotIn(fluff, settings)
+        self.assertIn("if let failure = model.killResult {", settings)
+        self.assertIn('self.killResult = status == 0 ? nil :', read(MODEL))
         model = read(MODEL)
         kill = block(model, "func killBluetooth() {")
         self.assertIn("guard !killingBluetooth, request == nil else { return }", kill)
@@ -571,6 +578,49 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn('kill_named("bluetoothd")', command)
         self.assertIn("kill(pid, SIGKILL)", block(helper, "static int kill_named(const char *name) {"))   # as -9 does
         self.assertIn('if (strcmp(argv[1], "kill-bluetooth") == 0) return do_kill_bluetooth();', helper)
+
+    def test_update_notifications(self):
+        """v9.7: Settings > Update notifications checks GitHub every 2 minutes while Speaka is open, asks iOS for the
+        same in the background, and announces each ready release (one that carries Speaka.tipa) once."""
+        notes = read(APP / "Speaka/UpdateNotifications.swift")
+        self.assertIn('static let taskID = "speaka.update-check"', notes)
+        self.assertIn("static let interval: TimeInterval = 120", notes)
+        info = plistlib.loads((APP / "Resources/Info.plist").read_bytes())
+        self.assertEqual(info["UIBackgroundModes"], ["fetch"])
+        self.assertEqual(info["BGTaskSchedulerPermittedIdentifiers"], ["speaka.update-check"])
+        self.assertIn(".backgroundTask(.appRefresh(UpdateNotifications.taskID)) {\n"
+                      "            await UpdateNotifications.backgroundCheck()", read(APP / "Speaka/SpeakaApp.swift"))
+        background = block(notes, "static func backgroundCheck() async {")
+        self.assertLess(background.index("UpdateNotifications.schedule()"), background.index("await UpdateNotifications.check()"))
+        self.assertIn("guard SPTweakClient.updateNotificationsEnabled() else { return }", background)
+        check = block(notes, "static func check() async {")
+        self.assertIn("releases.filter { $0.tipaURL != nil }", check)            # ready: it carries the app
+        self.assertIn("SpeakaUpdater.compare(newest.version, app) > 0", check)    # newer than this app
+        self.assertIn("SPTweakClient.notifiedVersion() != newest.name", check)    # announced once
+        self.assertLess(check.index("try await UNUserNotificationCenter.current().add(note)"),
+                        check.index("SPTweakClient.setNotifiedVersion(newest.name)"))
+        enable = block(notes, "static func setEnabled(_ on: Bool, completion: @escaping (Bool) -> Void) {")
+        self.assertIn("requestAuthorization(options: [.alert, .sound])", enable)
+        self.assertIn("SPTweakClient.setUpdateNotificationsEnabled(granted)", enable)
+        self.assertIn("BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: UpdateNotifications.taskID)", enable)
+        # While open: a timer on the updater (a timer made in a view's body would restart at every redraw).
+        updater = read(UPDATER)
+        self.assertIn("func check(again: Bool = false) {\n        guard !checking, again || !checked else { return }", updater)
+        watch = block(updater, "func watch(_ on: Bool) {")
+        self.assertIn("Timer.scheduledTimer(withTimeInterval: UpdateNotifications.interval, repeats: true)", watch)
+        self.assertIn("self?.check(again: true)", watch)
+        content = read(CONTENT)
+        self.assertIn("updater.watch(model.updateNotifications && phase == .active)", content)
+        self.assertIn("if phase == .background && model.updateNotifications {\n                UpdateNotifications.schedule()",
+                      content)
+        self.assertNotIn("Timer.publish", content)
+        # The switch, in Settings under Kill Bluetooth; the app's own settings, stored by the client.
+        settings = block(read(WINDOWS), "struct SettingsWindow: View {")
+        self.assertLess(settings.index("model.killBluetooth()"), settings.index("Toggle(isOn: Binding(get: { model.updateNotifications },"))
+        self.assertIn("set: { model.setUpdateNotifications($0) }", settings)
+        client = read(CLIENT_M)
+        self.assertIn('static NSString *const SPUpdateNotificationsKey = @"updateNotifications";', client)
+        self.assertIn("[[NSUserDefaults standardUserDefaults] boolForKey:SPUpdateNotificationsKey]", client)
 
     def test_one_tipa_carries_the_tweak(self):
         """v9.5: Speaka.tipa carries the release's .deb, and Install Tweak shows only while the tweak isn't installed."""
@@ -1156,7 +1206,8 @@ class SpeakaApp(unittest.TestCase):
             "Int32", "UInt32", "Equatable", "Identifiable", "Decodable", "NSString", "Data", "AttributedString", "Bundle",
             "FileManager", "Timer", "RunLoop", "DispatchQueue", "URLRequest", "URLSession", "URLSessionTask",
             "HTTPURLResponse", "JSONDecoder", "Error", "NSError", "NSUnderlyingErrorKey", "TimeInterval", "Set",
-            "Hashable",
+            "Hashable", "BGTaskScheduler", "BGAppRefreshTaskRequest", "UNUserNotificationCenter",
+            "UNMutableNotificationContent", "UNNotificationRequest", "Toggle", "Binding",
             # CoreGraphics
             "CGPoint", "CGContext", "CGColorSpace", "CGGradient", "CGColorSpaceCreateDeviceRGB",
             # SwiftUI and Combine
