@@ -23,7 +23,7 @@ targets:
     sources:
       - path: Speaka
         # The UIKit app that v9.2 replaced. Copying a new version over a clone doesn't delete these, and its AudioHelper.m
-        # would clash with SwiftUI's @main, so they're never built even if they linger (tests/test_speaka_app.py
+        # would clash with SwiftUI's @main, so they're never built even if they linger (tests/test_app.py
         # names them so they get deleted).
         excludes:
           - "UI/**"

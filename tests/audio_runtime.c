@@ -130,7 +130,7 @@ static void decode(const char *path, const char *pcm_out) {
         assert(hz==44100);memcpy(actual+written*2,pcm,ns*4);written+=ns;frames+=nf;p.sequence++;
     }
     assert(frames==258 && written==33024);assert(!memcmp(actual,reference,written*4));
-    if(pcm_out) {   /* the live decoder's output, which test_v88_runtime.py compares with ffmpeg's decode */
+    if(pcm_out) {   /* the live decoder's output, which tests/test_audio.py compares with ffmpeg's decode */
         FILE *o=fopen(pcm_out,"wb");assert(o);assert(fwrite(actual,4,written,o)==written);fclose(o);
     }
     /* Fragmented frame, sequence gap, truncated frame and bad CRC. */

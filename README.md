@@ -411,14 +411,15 @@ agree.
 │   └── DebugLog.h/.m              reading the log back, and the screen that shows it
 ├── app/                       the Speaka app (SwiftUI, Caz's design), packaged as Speaka.tipa / Speaka.ipa
 ├── layout/                    install scripts, the helper's launchd job, the Settings entry
-├── tests/                     the test suite (many tests compile the real C sources)
+├── tests/                     one file per part: test_tweak, test_audio, test_start_stop, test_settings_page,
+│                              test_app, test_build (many compile the real C sources)
 ├── tools/                     offline scripts
 ├── docs/                      release notes (history/), research findings (research/), images
 └── .github/workflows/         CI: test, build, package, publish
 ```
 
 Shared sources exist once, in `shared/`. A subproject that needs one holds a one-line `#include "../shared/file.c"`,
-so the copies can't drift apart. `tests/test_repo_layout.py` fails CI with an explanation in any of these cases:
+so the copies can't drift apart. `tests/test_build.py` fails CI with an explanation in any of these cases:
 
 - a file lands in the wrong folder;
 - a `(1)` duplicate appears;

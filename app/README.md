@@ -15,7 +15,7 @@ SwiftUI code, on Speaka's own background. It offers:
 
 It is a TrollStore app, published as `Speaka.tipa` and `Speaka.ipa` (the same file), and built separately from the
 tweak's `.deb`. The icon and the background are still Speaka's own (`Artwork/make_icon.py`, and `SpeakaBackground` in
-`Theme.swift`, which draws the background exactly as the earlier UIKit app did); `tests/test_speaka_app.py` checks
+`Theme.swift`, which draws the background exactly as the earlier UIKit app did); `tests/test_app.py` checks
 that neither has changed.
 
 ## The button
@@ -169,7 +169,7 @@ CI builds it in its own job, **Build the Speaka app**, and uploads both files as
 release attaches them next to the tweak's `.deb`. If the app fails to build, the release goes out without it rather
 than not at all.
 
-There is no Apple compiler on the host, so `tests/test_speaka_app.py` checks the Swift before CI does: balanced code,
+There is no Apple compiler on the host, so `tests/test_app.py` checks the Swift before CI does: balanced code,
 imports, every type and model member that is used being defined, and every Objective-C method being called by its
 pinned Swift name. The helper does compile on the host: the tests build it in a test mode and run every update path on
 a fake phone's files, checking what it would run and in what order.

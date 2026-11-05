@@ -28,7 +28,7 @@
 // wasn't found, 6 it couldn't be started, 7 it failed, 8 dpkg failed, 9 dpkg wasn't found, 10 the last step couldn't be
 // started, 11 the tweak carried in the app couldn't be copied out, 12 bluetoothd wasn't running (kill-bluetooth).
 //
-// Built by app/Makefile. Test builds (-DSPEAKA_TEST, tests/test_speaka_app.py) run nothing: they take every absolute
+// Built by app/Makefile. Test builds (-DSPEAKA_TEST, tests/test_app.py) run nothing: they take every absolute
 // path under $SPEAKA_ROOT and print what they would run.
 
 #include <stdio.h>

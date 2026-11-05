@@ -431,7 +431,7 @@ final class SpeakaModel: ObservableObject {
 
     /// Every line a Start's or a Stop's log can show, each once, so the log can size its column to the widest of them
     /// before its first line (LyricsLog). Start's and Stop's together, so both logs get the same column and a line
-    /// sits in the same place in either. tests/test_speaka_app.py checks that every line this model writes is here.
+    /// sits in the same place in either. tests/test_app.py checks that every line this model writes is here.
     static func possibleLines() -> [LyricText] {
         var lines = [LyricText(text: "Restarting Bluetooth", running: true)]
         for text in ["Bluetooth restarted", "Bluetooth didn't restart", "Bluetooth wasn't restarted",

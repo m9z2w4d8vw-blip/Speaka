@@ -3,7 +3,7 @@
 //  Speaka
 //
 //  Every rule here mirrors settings/SettingsPage.m (the Settings page), so the app and Settings
-//  always agree about the speaker's state. tests/test_speaka_app.py checks that they stay in step.
+//  always agree about the speaker's state. tests/test_app.py checks that they stay in step.
 //
 
 #import "SPTweakClient.h"

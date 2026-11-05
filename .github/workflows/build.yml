@@ -96,7 +96,7 @@ jobs:
           done
           echo "Fetched pinned libsbc: $(cat audiohelper/vendor_sbc/UPSTREAM_COMMIT)"
 
-      # In CI, tests/test_v88_runtime.py fails if the sources are missing, and compares the live decoder's PCM
+      # In CI, tests/test_audio.py fails if the sources are missing, and compares the live decoder's PCM
       # with FFmpeg's decode of the same recording from the phone.
       - name: Validate C/C++ linkage and SBC decoder waveform
         env:

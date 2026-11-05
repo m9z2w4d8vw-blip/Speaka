@@ -105,6 +105,24 @@ Nothing that runs changed; the files and names did.
 - **Names**: 54 more, for example `btps_v91_may_start` is `hold_may_start` and `BTPSV88Decoder` is `SBCDecoder`.
 - `tools/fetch_google_sbc.sh`, `.gitignore` and the workflow use `audiohelper/vendor_sbc`.
 
+## Cleanup, step 3: the tests
+
+The 25 test files are 6, one per part of Speaka, each in sections titled by what they check:
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `tests/test_tweak.py` | 68 | the build check, the hooks, the speaker endpoint's helpers |
+| `tests/test_audio.py` | 27 | the ring, stream control, the relay, the decoder, playback and output policy |
+| `tests/test_start_stop.py` | 12 | Start and Stop |
+| `tests/test_settings_page.py` | 11 | Settings > Speaka and saving the log |
+| `tests/test_app.py` | 37 | the app, its updater, Uninstall and the root helper |
+| `tests/test_build.py` | 11 | the repository layout and the libsbc fetch |
+
+The same 166 tests as before: the merge listed every test before and after and refused to write unless they
+matched. Only version-tagged class names changed (`V88Runtime` is `AudioRuntime`, `TrialTest` is `SevenSlots`).
+The C harness is `tests/audio_runtime.c` (was `v88_runtime.c`), and the two recordings are
+`tests/fixtures/recorded_258_frames.sbc` and its ffmpeg decode, `recorded_258_frames_ffmpeg.wav`.
+
 ## On the phone
 
 1. **The menu.** Four rows; Uninstall has a trash icon and no chevron. Compare with Caz side by side: the panel's top

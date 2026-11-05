@@ -1,8 +1,7 @@
-"""v8.9: one-tap Start/Stop and audio output selection.
+"""Start and Stop: the request the app writes, and the tweak validating it and restarting bluetoothd.
 
-The pure-C parts (request validation, output-route policy, channel-scoped stream control) are compiled and run on
-the host. The CoreFoundation and Objective-C glue cannot run here, so it is checked statically for the ordering and
-fail-closed properties the design depends on. Behaviour on the phone still needs a device test.
+Sections, in order:
+  - Start and Stop, and the output choice
 """
 import os
 import pathlib
@@ -16,6 +15,13 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+# ---- Start and Stop, and the output choice ----
+# v8.9: one-tap Start/Stop and audio output selection.
+#
+# The pure-C parts (request validation, output-route policy, channel-scoped stream control) are compiled and run on
+# the host. The CoreFoundation and Objective-C glue cannot run here, so it is checked statically for the ordering and
+# fail-closed properties the design depends on. Behaviour on the phone still needs a device test.
+
 def read(rel):
     return (ROOT / rel).read_text(encoding="utf-8")
 
@@ -26,7 +32,7 @@ def shared_define(name):
     return match.group(1)
 
 
-class V89(unittest.TestCase):
+class StartStop(unittest.TestCase):
     def compile_run(self, source, cpp=False, extra=()):
         compiler = shutil.which("c++" if cpp else "cc")
         self.assertIsNotNone(compiler)
