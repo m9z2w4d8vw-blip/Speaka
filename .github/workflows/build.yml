@@ -189,12 +189,31 @@ jobs:
             echo "- Slices: \`$(lipo -archs "$(find pkgroot -name Speaka.dylib | sed -n '1p')")\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v7
+      # GitHub's artifact service sometimes times out after a good build (run 62: ETIMEDOUT on the app's upload, so its
+      # release went out with only the .deb). One more try, 30 s later, before the job fails.
+      - name: Upload the package
+        id: upload
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
           name: Speaka-deb
           path: dist/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Wait, then upload the package again
+        if: steps.upload.outcome == 'failure'
+        run: sleep 30
+
+      - name: Upload the package (second try)
+        if: steps.upload.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Speaka-deb
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
 
   # ---------------------------------------------------------------------------------------------
   # The Speaka companion app (app/) as a TrollStore package, built like Caz: SwiftUI, XcodeGen and xcodebuild.
@@ -258,7 +277,12 @@ jobs:
             || { echo "::error::the app says $shown, the release is ${{ steps.version.outputs.version }}"; exit 1; }
           echo "Package OK: $(du -h "$tipa" | cut -f1)"
 
-      - uses: actions/upload-artifact@v7
+      # GitHub's artifact service sometimes times out after a good build (run 62: ETIMEDOUT on the app's upload, so its
+      # release went out with only the .deb). One more try, 30 s later, before the job fails.
+      - name: Upload the app
+        id: upload
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
           name: Speaka-app
           path: |
@@ -266,6 +290,22 @@ jobs:
             app/packages/Speaka.ipa
           if-no-files-found: error
           retention-days: 14
+
+      - name: Wait, then upload the app again
+        if: steps.upload.outcome == 'failure'
+        run: sleep 30
+
+      - name: Upload the app (second try)
+        if: steps.upload.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Speaka-app
+          path: |
+            app/packages/Speaka.tipa
+            app/packages/Speaka.ipa
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
 
   # ---------------------------------------------------------------------------------------------
   # Publish. Only main and v* tags; only if the build job succeeded.
@@ -338,7 +378,10 @@ jobs:
             gh release delete nightly --cleanup-tag --yes >/dev/null 2>&1 || true   # retire the old rolling build
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" dist/* --clobber                               # a re-run of the same version
+            # A re-run of the same version: replace the files, and the notes too, which may have said the app was
+            # missing. The updater shows them as the changelog.
+            gh release upload "$tag" dist/* --clobber
+            gh release edit "$tag" --notes-file notes.md
           elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             gh release create "$tag" dist/* --verify-tag --title "${VERSION}" --notes-file notes.md --latest
           else

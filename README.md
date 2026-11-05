@@ -411,7 +411,7 @@ Every push runs `.github/workflows/build.yml` on macOS with Xcode and Theos. The
 1. fetches the pinned libsbc;
 2. runs every test;
 3. builds and checks the `.deb`;
-4. uploads it as the `Speaka-deb` artifact.
+4. uploads it as the `Speaka-deb` artifact, trying once more 30 s later if GitHub's artifact service times out.
 
 A separate job builds the app the way Caz is built, with XcodeGen and `xcodebuild`, as the `Speaka-app` artifact.
 

@@ -752,6 +752,25 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn('if [ -f dist/Speaka.tipa ] && [ -f dist/Speaka.ipa ]; then', publish)
         # GitHub renders "<file>" as an HTML tag and drops it.
         self.assertNotIn("<file>", release)
+        # A re-run of the same version replaces the notes too, which may have said the app was missing (run 62).
+        existing = publish.split('if gh release view "$tag" >/dev/null 2>&1; then', 1)[1].split("elif", 1)[0]
+        self.assertIn('gh release upload "$tag" dist/* --clobber', existing)
+        self.assertIn('gh release edit "$tag" --notes-file notes.md', existing)
+        # Each upload gets one more try, 30 s after a failure, with the same artifact; only both failing fails the job.
+        for job, name in ((build_job, "Speaka-deb"), (app_job, "Speaka-app")):
+            first = job.split("        id: upload\n", 1)[1].split("\n\n", 1)[0]
+            self.assertIn("continue-on-error: true", first)
+            self.assertIn(f"name: {name}", first)
+            wait = job.split("        id: upload\n", 1)[1].split("\n\n", 2)[1]
+            self.assertIn("if: steps.upload.outcome == 'failure'\n        run: sleep 30", wait)
+            second = job.split("(second try)\n", 1)[1].split("\n\n", 1)[0]
+            self.assertIn("if: steps.upload.outcome == 'failure'", second)
+            self.assertIn(f"name: {name}", second)
+            self.assertIn("overwrite: true", second)
+            self.assertNotIn("continue-on-error", second)
+            paths = lambda step: step.split("path:", 1)[1].split("if-no-files-found", 1)[0]
+            self.assertEqual(paths(first), paths(second))
+            self.assertEqual(job.count("actions/upload-artifact@v7"), 2)
 
     def test_release_versions(self):
         """One number for the tweak and the app: control's Version plus the run number, or a pushed tag's. The script runs
@@ -797,7 +816,8 @@ class SpeakaApp(unittest.TestCase):
                 self.assertTrue(line.strip().startswith("echo 'Speaka: "), line)
         workflow = read(ROOT / ".github/workflows/build.yml")
         self.assertIn('cp "$deb" "dist/Speaka_${name#*_}"', workflow)
-        self.assertEqual(workflow.count("name: Speaka-deb\n"), 2)            # uploaded by build, downloaded by release
+        # Uploaded by build (and by its second try, if the first timed out), downloaded by release.
+        self.assertEqual(workflow.count("name: Speaka-deb\n"), 3)
 
     def test_the_former_name_appears_nowhere(self):
         """Neither file contents nor paths contain the project's former name. Only its SHA-256 is stored here, so this

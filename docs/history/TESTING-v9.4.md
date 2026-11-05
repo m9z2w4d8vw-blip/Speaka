@@ -64,6 +64,19 @@ The steps need the tweak to report each one, and promptly, so it changed in two 
 
 No check changed, and nothing else in the tweak did. Its build tag is `v9.4.0-one-tap-output-select`.
 
+## The first push
+
+Run 62 built everything: the new Swift compiled, and the app passed its package checks as `9.4.62`. Then GitHub's
+artifact service timed out uploading the app (*Failed to CreateArtifact: Unable to make request: ETIMEDOUT*), so the
+release step got only the `.deb`, and `v9.4.62` went out without `Speaka.tipa`. That's by design: an app failure never
+holds back the tweak's release. Nothing in the code was wrong, but two things in the workflow made it worse than it
+needed to be:
+
+| | Before | Now |
+| --- | --- | --- |
+| A failed upload | Failed the job at once | Is tried once more, 30 s later, and only a second failure fails the job (both jobs) |
+| Re-running a run whose release exists | Replaced the files but kept the notes, which said the app was missing | Replaces the notes too, since the updater shows them as the changelog |
+
 ## Apply and build
 
 Copy the zip's contents over your clone. Nothing needs deleting. The changed files:
@@ -77,12 +90,14 @@ app/Speaka/SessionSteps.swift    (new)
 app/Speaka/SpeakaModel.swift, SpeakaUpdater.swift, UpdateViews.swift
 app/Speaka/Model/SPTweakClient.h, SPTweakClient.m
 tests/test_speaka_app.py
+.github/workflows/build.yml      (the upload retry and the notes on a re-run)
 README.md, app/README.md, docs/history/TESTING-v9.4.md
 ```
 
 ## On the phone
 
-1. Push, and wait for the run. Expect release `v9.4.<run>` marked Latest.
+1. Push, and wait for the run. Expect release `v9.4.<run>` marked Latest, with the `.deb`, `Speaka.tipa`,
+   `Speaka.ipa` and `SHA256SUMS`.
 2. **Install that release's `Speaka.tipa` by hand with TrollStore.** v9.3's updater can't download, so it can't update
    itself this once.
 3. Open Speaka. **Update Available** offers the tweak. Tap it, then **Update**: the window says *Downloading the tweak*,
