@@ -296,9 +296,10 @@ class SpeakaApp(unittest.TestCase):
             self.skipTest("no C compiler")
         with tempfile.TemporaryDirectory() as tmp:
             tmp = pathlib.Path(tmp)
-            # The device code compiles here too, with warnings as errors, so a slip there can't wait for CI.
-            for name, flags in (("device", []), ("test", ["-DSPEAKA_TEST"])):
-                build = subprocess.run([cc, "-std=c11", "-D_GNU_SOURCE", "-Wall", "-Wextra", "-Werror", *flags,
+            # The device code is compiled too, with warnings as errors but not linked (on macOS it would need
+            # CoreFoundation), so a slip there can't wait for the app's build. The test build uses no frameworks.
+            for name, flags in (("device.o", ["-c"]), ("test", ["-DSPEAKA_TEST"])):
+                build = subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", *flags,
                                         "-o", str(tmp / name), str(HELPER)], capture_output=True, text=True)
                 self.assertEqual(build.returncode, 0, build.stderr)
             phone = tmp / "phone"
@@ -452,8 +453,13 @@ class SpeakaApp(unittest.TestCase):
         # The version is the release's, the same as the tweak's: CI passes it, project.yml has control's for local builds.
         self.assertEqual(info["CFBundleShortVersionString"], "$(MARKETING_VERSION)")
         self.assertEqual(info["CFBundleVersion"], "$(CURRENT_PROJECT_VERSION)")
-        base = re.search(r"^Version: (\S+)$", read(ROOT / "control"), re.M).group(1)
-        self.assertIn(f'MARKETING_VERSION: "{base}"', read(APP / "project.yml"))
+        marketing = re.search(r'MARKETING_VERSION: "([^"]+)"', read(APP / "project.yml")).group(1)
+        self.assertRegex(marketing, r"^\d+\.\d+$")
+        # CI stamps control with the release's full version before the tests run (9.3 becomes 9.3.60, or a tag's
+        # 9.4.0), so project.yml has to match control only while control still holds the plain base.
+        stamped = re.search(r"^Version: (\S+)$", read(ROOT / "control"), re.M).group(1)
+        if re.fullmatch(r"\d+\.\d+", stamped):
+            self.assertEqual(marketing, stamped)
         self.assertIn("UILaunchScreen", info)
         self.assertEqual(info["UIUserInterfaceStyle"], "Dark")
         # SwiftUI's own app lifecycle: no scene delegate class to name, and the minimum iOS comes from project.yml.
@@ -579,7 +585,7 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn("app/packages/Speaka.tipa", upload)
         self.assertIn("app/packages/Speaka.ipa", upload)
         self.assertIn('cmp "$tipa" app/packages/Speaka.ipa', app_job)       # both names, one package
-        self.assertIn("for f in Speaka speakahelper Info.plist", app_job)
+        self.assertIn("for f in Speaka speakahelper Info.plist Assets.car", app_job)   # Assets.car holds the title
         for entitlement in ("com.apple.private.security.no-sandbox", "com.apple.private.persona-mgmt"):
             self.assertIn(entitlement, app_job)
         self.assertIn('ldid -e "$bundle/speakahelper"', app_job)
@@ -613,18 +619,27 @@ class SpeakaApp(unittest.TestCase):
         self.assertNotIn("<file>", release)
 
     def test_release_versions(self):
-        """One number for the tweak and the app: control's Version plus the run number, or a pushed tag's."""
-        def version(**env):
-            run = subprocess.run(["bash", str(ROOT / "tools/release_version.sh")], capture_output=True, text=True,
-                                 env={**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, **env})
-            return run.returncode, run.stdout.strip()
-        base = re.search(r"^Version: (\S+)$", read(ROOT / "control"), re.M).group(1)
-        self.assertRegex(base, r"^\d+\.\d+$")
-        self.assertEqual(version(GITHUB_RUN_NUMBER="57"), (0, f"{base}.57"))
-        self.assertEqual(version(GITHUB_REF="refs/tags/v9.4.0", GITHUB_REF_NAME="v9.4.0", GITHUB_RUN_NUMBER="58"),
-                         (0, "9.4.0"))
-        self.assertEqual(version(GITHUB_REF="refs/tags/vbeta", GITHUB_REF_NAME="vbeta")[0], 1)
-        self.assertEqual(version(GITHUB_REF="refs/heads/main", GITHUB_RUN_NUMBER="3"), (0, f"{base}.3"))
+        """One number for the tweak and the app: control's Version plus the run number, or a pushed tag's. The script runs
+        on a copy with its own control, because CI stamps the real one with the full version before the tests run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            (tmp / "tools").mkdir()
+            shutil.copy(ROOT / "tools/release_version.sh", tmp / "tools/release_version.sh")
+            (tmp / "control").write_text("Package: com.parv.speaka\nVersion: 9.3\n")
+
+            def version(**env):
+                clean = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+                run = subprocess.run(["bash", str(tmp / "tools/release_version.sh")], capture_output=True, text=True,
+                                     env={**clean, **env})
+                return run.returncode, run.stdout.strip()
+
+            self.assertEqual(version(GITHUB_RUN_NUMBER="57"), (0, "9.3.57"))
+            self.assertEqual(version(GITHUB_REF="refs/heads/main", GITHUB_RUN_NUMBER="3"), (0, "9.3.3"))
+            self.assertEqual(version(GITHUB_REF="refs/tags/v9.4.0", GITHUB_REF_NAME="v9.4.0", GITHUB_RUN_NUMBER="58"),
+                             (0, "9.4.0"))
+            self.assertEqual(version(GITHUB_REF="refs/tags/vbeta", GITHUB_REF_NAME="vbeta")[0], 1)
+        # The real control: a plain base here, or the full version once CI has stamped it.
+        self.assertRegex(re.search(r"^Version: (\S+)$", read(ROOT / "control"), re.M).group(1), r"^\d+(\.\d+)+$")
 
     def test_everything_is_called_speaka(self):
         control = read(ROOT / "control")

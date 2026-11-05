@@ -33,6 +33,19 @@ def draw(font_path, text, height):
     size, baseline = REF_SIZE * k, REF_BASELINE * k
     engine = ImageFont.Layout.RAQM if features.check("raqm") else ImageFont.Layout.BASIC
     font = ImageFont.truetype(font_path, size * SUPERSAMPLE, layout_engine=engine)
+
+    # Dopamine's proportions leave room below the baseline for its own "p", not for every font's: in Fonarto Regular,
+    # "Speaka" would reach from 2 px under the top of a 120 px canvas to 1.75 px past its bottom. A word that doesn't fit
+    # is drawn just small enough to (about 1.5% here), a pixel clear of the top and the bottom. Words that fit, like
+    # "Caz", are drawn exactly as before.
+    top = min(font.getbbox(ch, anchor="ls")[1] for ch in text) / SUPERSAMPLE      # above the baseline: negative
+    bottom = max(font.getbbox(ch, anchor="ls")[3] for ch in text) / SUPERSAMPLE
+    if baseline + bottom + 1 > height:
+        scale = min(1.0, (height - 2) / (bottom - top))
+        size *= scale
+        font = ImageFont.truetype(font_path, size * SUPERSAMPLE, layout_engine=engine)
+        bottom = max(font.getbbox(ch, anchor="ls")[3] for ch in text) / SUPERSAMPLE
+        baseline = height - 1 - bottom
     track = TRACKING_EM * size * SUPERSAMPLE
 
     # Pen positions: each glyph's advance, plus the font's kerning for the pair, plus the tracking.

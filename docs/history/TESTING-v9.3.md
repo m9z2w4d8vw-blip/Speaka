@@ -10,7 +10,20 @@ Builds on v9.2. Three things change:
 | Releases | A rolling nightly pre-release | A normal release for every push to `main`, named after its version |
 
 Everything else from v9.2 stays: Caz's panels, type and spacing, and the one Start/Stop button that opens into a log.
-The tweak, the audio helper and Settings > Speaka are unchanged.
+The tweak, the audio helper and Settings > Speaka are unchanged. The title is now drawn in Fonarto Regular, as Caz's is.
+
+## The first push
+
+The first push of v9.3 (run 60) built the app but not the `.deb`, so nothing was released. Three of the new tests failed
+on GitHub but not on the host:
+
+| Test | Why it failed on GitHub | Fix |
+| --- | --- | --- |
+| `test_bundle_contents`, `test_release_versions` | CI writes the full version into `control` (`9.3.60`) before the tests run, and both read the base from it | The version script runs on a copy with its own `control`; `project.yml` is compared only with an unstamped `control` |
+| `test_update_helper` | On the macOS runner the helper's Apple code was linked without CoreFoundation, and its test build used that code too | The test build uses none of it on any platform, and the device code is compiled without being linked |
+
+The app itself built and passed its package checks in that run, with version `9.3.60` and both sets of entitlements.
+The tests now pass locally with `control` unstamped, stamped like a push and stamped like a tag.
 
 ## Updates
 
@@ -48,8 +61,8 @@ so the first time, the app offers to update it.
 1. Push, and wait for the run to finish. On the Releases page, expect `v9.3.<run>` marked **Latest** with all four
    files, and no `nightly`.
 2. Install that release's `Speaka.tipa` with TrollStore, by hand this once.
-3. Open Speaka. Expect the indigo background with its glows, not yellow. **Credits** should read
-   *App 9.3.<run> · tweak 0.1.0.<run>*.
+3. Open Speaka. Expect the indigo background with its glows, not yellow, and the title in Fonarto, like Caz's.
+   **Credits** should read *App 9.3.<run> · tweak 0.1.0.<run>*.
 4. **Update Available** should show, for the tweak. Tap it, then **Update**. Expect *Downloading update...*, then
    *Installing update...* with *Bluetooth restarts, then your iPhone resprings*, then a respring.
 5. Open Speaka again. **Credits** should read *App 9.3.<run> · tweak 9.3.<run>*, with no Update Available. Settings >
@@ -66,7 +79,7 @@ Copy the ZIP's contents over your clone of the repository, keeping the folder pa
 **also delete these from the clone**:
 
 ```text
-app/Speaka/Assets.xcassets/     (the whole folder: Caz's yellow backdrop, from v9.2)
+app/Speaka/Assets.xcassets/Backdrop.imageset/     (Caz's yellow backdrop, from v9.2; the title lives next to it)
 ```
 
 If you're coming straight from v9.1, also delete the UIKit app's files listed in
@@ -79,7 +92,8 @@ These change or are new:
 .github/workflows/build.yml
 README.md
 app/                            (README, Makefile, project.yml, Speaka.entitlements, Resources/Info.plist,
-                                 scripts/, Speaka/, and RootHelper/, which is new)
+                                 scripts/, Speaka/ including Assets.xcassets/Wordmark.imageset, and RootHelper/,
+                                 which is new)
 control                         (Version: 9.3)
 docs/history/TESTING-v9.3.md    (new)
 tests/test_speaka_app.py

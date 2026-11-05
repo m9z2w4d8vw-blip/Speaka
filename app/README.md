@@ -126,15 +126,21 @@ a fake phone's files, checking what it would run and in what order.
 
 ## The title
 
-Caz's title is a picture of the word drawn in Fonarto, not live text. Speaka's works the same way:
+Caz's title is a picture of the word drawn in Fonarto Regular, not live text, and Speaka's is too, in
+`Speaka/Assets.xcassets/Wordmark.imageset`. It was drawn with the same script and the same font file as Caz's: redrawing
+"Caz" with them reproduces Caz's title pixel for pixel. To redraw it:
 
 ```sh
 python3 app/scripts/make_wordmark.py --font /path/to/FonartoRegular.ttf
 ```
 
-This draws "Speaka" into `Speaka/Assets.xcassets/Wordmark.imageset`. Until that picture exists, the app writes
-"Speaka" in SF Rounded Bold in the same place. [Fonarto](https://www.fontspace.com/fonarto-2-font-f104632) is by
-Locomotype (Arwan Sutanto) and is free for personal and commercial use. Only the picture is shipped, not the font.
+Dopamine's proportions, which both titles use, leave room for Dopamine's own "p" but not quite for Fonarto Regular's:
+at Caz's size, "Speaka" would run 1.75 px past the bottom of the 120 px picture. So the script draws a word that doesn't
+fit about 1.5% smaller, a pixel clear of the top and bottom, and draws words that fit, like "Caz", exactly as before.
+
+If the picture is ever missing, the app writes "Speaka" in SF Rounded Bold in the same place.
+[Fonarto](https://www.fontspace.com/fonarto-2-font-f104632) is by Locomotype (Arwan Sutanto) and is free for personal
+and commercial use. Only the picture is shipped, not the font.
 
 ## Files
 

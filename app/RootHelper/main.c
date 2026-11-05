@@ -116,7 +116,8 @@ static int update_file_ok(const char *path, const char *ext, const char *alt_ext
 
 // ---------------------------------------------------------------- finding TrollStore (as in Caz's helper)
 
-#ifdef __APPLE__
+// The real thing needs CoreFoundation, which test builds never use, on any platform (CI runs them on macOS).
+#if defined(__APPLE__) && !defined(SPEAKA_TEST)
 // Bundle id from the container manager's metadata plist (binary plist, MCMMetadataIdentifier).
 static int read_container_id(const char *dir, char *out, size_t len) {
     char p[PATH_MAX];
@@ -254,7 +255,7 @@ static int install_deb(const char *path) {
     return 0;
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(SPEAKA_TEST)
 // Kills every process whose executable is called `name` (Caz's kill_procs, by basename).
 static int kill_named(const char *name) {
     int mib[3] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL };
@@ -288,7 +289,7 @@ static int kill_named(const char *name) {
     return killed;
 }
 #else
-// Host builds, for compile checks only.
+// Test builds and host compile checks: nothing is killed.
 __attribute__((unused)) static int kill_named(const char *name) { (void)name; return 0; }
 #endif
 

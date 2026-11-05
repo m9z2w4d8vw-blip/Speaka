@@ -545,8 +545,9 @@ notes.
 - The app's interface, updater included, is [**Caz**](https://github.com/m9z2w4d8vw-blip/Caz)'s, on Speaka's own
   background. Caz's is adapted from [**Dopamine**](https://github.com/opa334/Dopamine) by Lars Fröder (opa334) and its
   contributors under the MIT License, which ships in the app under **Credits**.
-- The app's title is meant to be a picture of "Speaka" drawn in Fonarto, like Caz's (`app/scripts/make_wordmark.py`).
-  Until it's drawn, the app writes it in SF Rounded Bold.
+- The app's title is a picture of "Speaka" drawn in [Fonarto](https://www.fontspace.com/fonarto-2-font-f104632)
+  Regular, the same way as Caz's (`app/scripts/make_wordmark.py`). Fonarto is by Locomotype and free for personal and
+  commercial use; only the picture ships, not the font.
 - `sbc_decode.c` is the project's own SBC decoder, written from the Bluetooth specification and used by the tests.
 - The tweak is built with [**Theos**](https://theos.dev) and the app with [**XcodeGen**](https://github.com/yonaskolb/XcodeGen).
   It runs on Dopamine with ElleKit and PreferenceLoader.

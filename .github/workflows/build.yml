@@ -239,7 +239,7 @@ jobs:
           cmp "$tipa" app/packages/Speaka.ipa || { echo "::error::Speaka.ipa is missing or differs from Speaka.tipa"; exit 1; }
           rm -rf tipacheck && mkdir tipacheck && unzip -q "$tipa" -d tipacheck
           bundle=tipacheck/Payload/Speaka.app
-          for f in Speaka speakahelper Info.plist AppIcon60x60@2x.png AppIcon60x60@3x.png LICENSE-Dopamine.txt; do
+          for f in Speaka speakahelper Info.plist Assets.car AppIcon60x60@2x.png AppIcon60x60@3x.png LICENSE-Dopamine.txt; do
             test -s "$bundle/$f" || { echo "::error::$f is missing from Speaka.app"; exit 1; }
           done
           test -x "$bundle/speakahelper" || { echo "::error::speakahelper is not executable"; exit 1; }
