@@ -71,6 +71,11 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+    # The asset catalog itself needs its own Contents.json; Speaka has no catalog until the title is drawn.
+    catalog = os.path.dirname(os.path.normpath(args.out))
+    if catalog.endswith(".xcassets") and not os.path.exists(os.path.join(catalog, "Contents.json")):
+        with open(os.path.join(catalog, "Contents.json"), "w") as handle:
+            json.dump({"info": {"author": "xcode", "version": 1}}, handle, indent=2)
     images = []
     for scale, name in [(1, "Wordmark.png"), (2, "Wordmark@2x.png"), (3, "Wordmark@3x.png")]:
         image = draw(args.font, args.text, args.points * scale)

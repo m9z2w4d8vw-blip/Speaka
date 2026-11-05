@@ -1,14 +1,19 @@
-"""The Speaka companion app (app/): a SwiftUI app in Caz's style. It must speak exactly the tweak's protocol, agree
-with the Settings page, keep Speaka's own icon, and package correctly for TrollStore.
+"""The Speaka companion app (app/): a SwiftUI app in Caz's style, on Speaka's own background, with Caz's updater for
+both the app and the tweak. It must speak exactly the tweak's protocol, agree with the Settings page, keep Speaka's own
+icon and background, and package correctly for TrollStore.
 
 Swift is first compiled by CI (there is no Apple compiler on the host), so the structural checks below are the only
 ones that run before that: balanced code, imports, every type and model member that is used being defined, and every
 Objective-C method being called by the Swift name its header pins down."""
 import hashlib
+import os
 import pathlib
 import plistlib
 import re
+import shutil
 import struct
+import subprocess
+import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -22,9 +27,17 @@ CONTENT = APP / "Speaka/ContentView.swift"
 THEME = APP / "Speaka/Theme.swift"
 PARTS = APP / "Speaka/MainComponents.swift"
 WINDOWS = APP / "Speaka/Windows.swift"
+UPDATER = APP / "Speaka/SpeakaUpdater.swift"
+UPDATE_VIEWS = APP / "Speaka/UpdateViews.swift"
+HELPER = APP / "RootHelper/main.c"
 CLIENT_H = APP / "Speaka/Model/SPTweakClient.h"
 CLIENT_M = APP / "Speaka/Model/SPTweakClient.m"
 DEVICE_H = APP / "Speaka/Model/SPConnectedDevice.h"
+
+# Speaka's background, as v9.1 drew it (SPTheme.m): x and y as fractions of the size drawn (the screen, 200 pt taller),
+# radius as a fraction of its longer side, colour, alpha.
+GLOWS = [("0.10", "0.12", "0.62", "5B2BB5", "0.95"), ("0.95", "0.30", "0.45", "2B4FD8", "0.60"),
+         ("0.90", "0.92", "0.60", "12B3A6", "0.80"), ("0.05", "0.88", "0.42", "B0307A", "0.45")]
 
 # Speaka keeps its own icon for now: the leading 16 hex digits of each file's SHA-256, as shipped in v9.1.
 # When the icon changes on purpose, update these.
@@ -42,9 +55,30 @@ def read(path):
 
 
 def strip_comments_and_strings(src):
-    src = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), src, flags=re.S)
-    src = re.sub(r"//[^\n]*", "", src)
-    return re.sub(r'@?"(?:\\.|[^"\\\n])*"', '""', src)
+    """Code with comments removed and every string or character literal emptied, read in one pass in source order, so
+    a "//" inside a string (https://...) is never taken for a comment. Line breaks are kept."""
+    out, i, n = [], 0, len(src)
+    while i < n:
+        if src.startswith("//", i):
+            end = src.find("\n", i)
+            i = n if end < 0 else end
+        elif src.startswith("/*", i):
+            end = src.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            out.append("\n" * src.count("\n", i, end))
+            i = end
+        elif src[i] in "\"'" or src.startswith('@"', i):
+            if src[i] == "@":
+                i += 1
+            quote, j = src[i], i + 1
+            while j < n and src[j] != quote and src[j] != "\n":
+                j += 2 if src[j] == "\\" else 1
+            out.append(quote * 2)
+            i = j + 1
+        else:
+            out.append(src[i])
+            i += 1
+    return "".join(out)
 
 
 def png_size(path):
@@ -215,12 +249,133 @@ class SpeakaApp(unittest.TestCase):
         for title in titles:
             self.assertIn(f'title:@"{title}"', read(CLIENT_M))
 
+    # ------------------------------------------------------------------ updates
+    def test_updater_installs_the_tweak_then_the_app_then_resprings(self):
+        updater = read(UPDATER)
+        self.assertIn('URL(string: "https://api.github.com/repos/m9z2w4d8vw-blip/Speaka/releases")!', updater)
+        self.assertIn("if release.draft || release.prerelease { return nil }", updater)   # skips the old nightly too
+        self.assertIn('debURL: link(in: release.assets, ending: ".deb")', updater)
+        self.assertIn('tipaURL: link(in: release.assets, ending: ".tipa") ?? link(in: release.assets, ending: ".ipa")',
+                      updater)
+        # What's installed: this app's version, and the tweak's from dpkg's database.
+        package = re.search(r"^Package: (\S+)$", read(ROOT / "control"), re.M).group(1)
+        self.assertIn(f'static let packageID = "{package}"', updater)
+        self.assertIn('"/var/jb/var/lib/dpkg/status"', updater)
+        self.assertIn('installed = line.hasSuffix(" installed")', updater)
+        self.assertIn("self.choose(from: releases, app: Self.versionParts(Bundle.main.shortVersion), package: package)",
+                      updater)
+        choose = block(updater, "func choose(from releases: [SpeakaRelease], app: [Int], package: [Int]?) {")
+        self.assertIn("Self.compare(release.version, app) > 0", choose)
+        self.assertIn("package.map({ Self.compare(release.version, $0) > 0 }) ?? true", choose)
+        # The .deb is downloaded first and handed over as --deb, the .tipa as --tipa.
+        start = block(updater, "func startDownload() {")
+        self.assertLess(start.index('"Speaka-update.deb"'), start.index('"Speaka-update.tipa"'))
+        self.assertIn('var args = ["install-update"]', updater)
+        self.assertIn('args += [file.pathExtension.lowercased() == "deb" ? "--deb" : "--tipa", file.path]', updater)
+        # Only an app-only update falls back to TrollStore's link; a failed .deb is reported and nothing else happens.
+        done = block(updater, "private func installed(status: Int32, errors: [String], withTweak: Bool) {")
+        self.assertLess(done.index("if withTweak {"), done.index("openInTrollStore()"))
+        self.assertIn('"apple-magnifier://install?url="', updater)
+        self.assertIn("var resprings: Bool { deb != nil }", updater)
+        views = read(UPDATE_VIEWS)
+        self.assertIn('updater.resprings ? "Bluetooth restarts, then your iPhone resprings"', views)
+        self.assertIn('"Speaka will close when it\'s done"', views)
+        self.assertNotIn("Caz will", views)
+        content = read(CONTENT)
+        self.assertIn('UpdateLinkButton(title: "Update Available", symbol: "arrow.down.circle")', content)
+        self.assertIn("if window == .update && updater.isBusy { return }", content)
+        self.assertIn("updater.check()", content)
+        # Update Available keeps Caz's place; the connection line moves up a line while it shows, so they never overlap.
+        self.assertIn(".offset(y: -(30 + linkGap))\n", content)
+        self.assertIn(".offset(y: -(30 + linkGap) - (updater.isAvailable ? 40 : 0))", content)
+
+    def test_update_helper(self):
+        """The root helper, compiled for the host in its test mode, on a fake phone: what it would run, and in what order."""
+        cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+        if not cc:
+            self.skipTest("no C compiler")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            # The device code compiles here too, with warnings as errors, so a slip there can't wait for CI.
+            for name, flags in (("device", []), ("test", ["-DSPEAKA_TEST"])):
+                build = subprocess.run([cc, "-std=c11", "-D_GNU_SOURCE", "-Wall", "-Wextra", "-Werror", *flags,
+                                        "-o", str(tmp / name), str(HELPER)], capture_output=True, text=True)
+                self.assertEqual(build.returncode, 0, build.stderr)
+            phone = tmp / "phone"
+            caches = phone / "var/mobile/Library/Caches"
+            caches.mkdir(parents=True)
+            (phone / "var/jb/usr/bin").mkdir(parents=True)
+            (phone / "var/jb/usr/bin/dpkg").write_text("")
+            box = phone / "private/var/containers/Bundle/Application/ABC"
+            (box / "TrollStore.app").mkdir(parents=True)
+            (box / "TrollStore.app/trollstorehelper").write_text("")
+            (box / ".com.apple.mobile_container_manager.metadata.plist").write_text("com.opa334.TrollStore\n")
+            deb, tipa = caches / "Speaka-update.deb", caches / "Speaka-update.tipa"
+
+            def run(*args, fail=None):
+                deb.write_text("deb")
+                tipa.write_text("tipa")
+                env = {"SPEAKA_ROOT": str(phone), "PATH": os.environ.get("PATH", "")}
+                if fail:
+                    env["SPEAKA_TEST_FAIL"] = fail
+                result = subprocess.run([str(tmp / "test"), *args], capture_output=True, text=True, env=env)
+                return result.returncode, result.stdout
+
+            def arguments(text):
+                return re.findall(r"\(test\)   (.+)", text)
+
+            # Both: dpkg first, waited for; then, in its own session, TrollStore's installer and the respring.
+            code, out = run("install-update", "--deb", str(deb), "--tipa", str(tipa))
+            self.assertEqual(code, 0, out)
+            self.assertLess(out.index("would run " + str(phone / "var/jb/usr/bin/dpkg")), out.index("would start"))
+            self.assertEqual(arguments(out.split("would start", 1)[0]), ["-i", str(deb)])
+            finish = out.split("would start", 1)[1]
+            self.assertIn("in its own session", finish.splitlines()[0])
+            self.assertEqual(arguments(finish), ["finish-update", "--tipa", str(tipa), "--respring"])
+            # The last step: the app, then the respring.
+            code, out = run("finish-update", "--tipa", str(tipa), "--respring")
+            self.assertEqual(code, 0, out)
+            self.assertLess(out.index("trollstorehelper in its own session"), out.index("would kill SpringBoard"))
+            # Only the tweak: dpkg, then a respring, no TrollStore.
+            code, out = run("install-update", "--deb", str(deb))
+            self.assertEqual(code, 0, out)
+            self.assertEqual(arguments(out.split("would start", 1)[1]), ["finish-update", "--respring"])
+            # Only the app: Caz's way. TrollStore's installer is waited for, and nothing resprings.
+            code, out = run("install-update", "--tipa", str(tipa))
+            self.assertEqual(code, 0, out)
+            self.assertIn("trollstorehelper in its own session", out)
+            self.assertNotIn("SpringBoard", out)
+            self.assertNotIn("would start", out)
+            # dpkg fails: nothing else runs and nothing resprings.
+            code, out = run("install-update", "--deb", str(deb), "--tipa", str(tipa), fail="dpkg")
+            self.assertEqual(code, 8, out)
+            self.assertNotIn("would start", out)
+            self.assertNotIn("trollstorehelper", out)
+            # TrollStore's installer fails: code 7, so the app falls back to TrollStore's link.
+            self.assertEqual(run("install-update", "--tipa", str(tipa), fail="trollstorehelper")[0], 7)
+            # Update files must be regular files inside /var/mobile, with the right extension.
+            for bad in ("/tmp/elsewhere.deb", str(caches) + "/../../../../etc/x.deb", str(caches / "Speaka-update.txt")):
+                self.assertEqual(run("install-update", "--deb", bad)[0], 4, bad)
+            (caches / "link.deb").symlink_to(deb)
+            self.assertEqual(run("install-update", "--deb", str(caches / "link.deb"))[0], 4)
+            self.assertEqual(run("install-update")[0], 2)
+            (phone / "var/jb/usr/bin/dpkg").unlink()
+            self.assertEqual(run("install-update", "--deb", str(deb))[0], 9)
+            shutil.rmtree(box)
+            self.assertEqual(run("install-update", "--tipa", str(tipa))[0], 5)
+        # dpkg gets the jailbreak's folders on PATH: the app starts the helper with an empty environment, and the
+        # package's install script calls launchctl and killall by name.
+        source = read(HELPER)
+        self.assertIn('"PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin"', source)
+        self.assertIn("int code = run_and_wait(dpkg, argv, k_dpkg_env, 0);", source)
+        self.assertIn("signal(SIGPIPE, SIG_IGN);", source)
+        self.assertIn('if (resprings) respring();', source)
+
     # ------------------------------------------------------------------ Caz's look
-    def test_the_look_is_cazs(self):
+    def test_the_look_is_cazs_on_speakas_background(self):
         theme = read(THEME)
         for line in ("static let menu = Color(red: 63 / 255.0, green: 63 / 255.0, blue: 63 / 255.0).opacity(114 / 255.0)",
                      "static let window = Color(red: 76 / 255.0, green: 76 / 255.0, blue: 76 / 255.0).opacity(153 / 255.0)",
-                     "static let accent = Color(red: 255 / 255.0, green: 178 / 255.0, blue: 30 / 255.0)",
                      "static let separator = Color(white: 0.6).opacity(0.3)",
                      "static let secondary = Color.white.opacity(0.8)",
                      "static let foreground = Color.white.opacity(0.75)",
@@ -230,7 +385,7 @@ class SpeakaApp(unittest.TestCase):
                      "if isSmall(height) { return 52 }", "return isHomeButtonDevice ? 65 : 73",
                      ".opacity(configuration.isPressed ? 0.45 : 1)",
                      ".animation(.easeOut(duration: 0.15), value: configuration.isPressed)",
-                     'Image("Backdrop")', ".opacity(dimmed ? 0.4 : 1)"):
+                     ".opacity(dimmed ? 0.4 : 1)"):
             self.assertIn(line, theme)
         parts = read(PARTS)
         for line in (".background(Theme.menu, in: RoundedRectangle(cornerRadius: 14, style: .continuous))",
@@ -255,9 +410,21 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn('var headerSubtitle: String { "iOS \\(UIDevice.current.systemVersion)" }', model)
         self.assertIn('var headerDetail: String { headerWarning ?? "by Parv" }', model)
         self.assertIn(".background(Theme.window, in: RoundedRectangle(cornerRadius: 16, style: .continuous))", read(WINDOWS))
-        backdrop = APP / "Speaka/Assets.xcassets/Backdrop.imageset"
-        self.assertEqual(jpeg_size(backdrop / "Backdrop.jpg"), (1290, 2796))    # Caz's Sunshine Sweep
-        self.assertIn('"filename" : "Backdrop.jpg"', read(backdrop / "Contents.json"))
+        # Speaka's own background, exactly as v9.1 drew it, and its teal: not Caz's yellow backdrop or gold.
+        glows = re.findall(r"glow\(context, space, CGPoint\(x: w \* ([\d.]+), y: h \* ([\d.]+)\), m \* ([\d.]+), "
+                           r"0x([0-9A-F]{6}), ([\d.]+)\)", theme)
+        self.assertEqual(glows, GLOWS)
+        for line in ("UIColor(red: 0x0D / 255.0, green: 0x0A / 255.0, blue: 0x24 / 255.0, alpha: 1).setFill()",
+                     "let components: [CGFloat] = [r, g, b, alpha, r, g, b, alpha * 0.45, r, g, b, 0.0]",
+                     "let locations: [CGFloat] = [0.0, 0.45, 1.0]", "format.scale = 1",
+                     "let size = CGSize(width: max(screen.width, 1), height: max(screen.height, 1) + 200)",
+                     ".frame(width: size.width, height: size.height + 200)",
+                     "static let accent = Color(red: 18 / 255.0, green: 179 / 255.0, blue: 166 / 255.0)"):
+            self.assertIn(line, theme)
+        self.assertIn("Backdrop(dimmed: window != nil, size: geo.size)", content)
+        code = "".join(read(source) for source in SWIFT)
+        self.assertNotIn('Image("Backdrop")', code)
+        self.assertNotIn("green: 178 / 255.0, blue: 30", code)            # Caz's gold
 
     def test_the_icon_is_unchanged(self):
         for name, digest in ICON_DIGESTS.items():
@@ -282,7 +449,11 @@ class SpeakaApp(unittest.TestCase):
         self.assertEqual(info["CFBundleExecutable"], "Speaka")
         self.assertEqual(info["CFBundleIdentifier"], "com.parv.speaka")
         self.assertEqual(info["CFBundleDisplayName"], "Speaka")
-        self.assertRegex(info["CFBundleShortVersionString"], r"^\d+\.\d+$")
+        # The version is the release's, the same as the tweak's: CI passes it, project.yml has control's for local builds.
+        self.assertEqual(info["CFBundleShortVersionString"], "$(MARKETING_VERSION)")
+        self.assertEqual(info["CFBundleVersion"], "$(CURRENT_PROJECT_VERSION)")
+        base = re.search(r"^Version: (\S+)$", read(ROOT / "control"), re.M).group(1)
+        self.assertIn(f'MARKETING_VERSION: "{base}"', read(APP / "project.yml"))
         self.assertIn("UILaunchScreen", info)
         self.assertEqual(info["UIUserInterfaceStyle"], "Dark")
         # SwiftUI's own app lifecycle: no scene delegate class to name, and the minimum iOS comes from project.yml.
@@ -292,7 +463,15 @@ class SpeakaApp(unittest.TestCase):
 
     def test_entitlements_are_only_what_the_app_needs(self):
         entitlements = plistlib.loads((APP / "Speaka.entitlements").read_bytes())
-        self.assertEqual(entitlements, {"platform-application": True, "com.apple.private.security.no-sandbox": True})
+        # persona-mgmt is what lets the app start its update helper as root (SPRootSpawn.m), as in Caz.
+        self.assertEqual(entitlements, {"platform-application": True, "com.apple.private.security.no-sandbox": True,
+                                        "com.apple.private.persona-mgmt": True})
+        helper = plistlib.loads((APP / "RootHelper/entitlements.plist").read_bytes())
+        self.assertEqual(helper, {"platform-application": True, "com.apple.private.security.no-sandbox": True,
+                                  "com.apple.private.security.container-required": False,
+                                  "com.apple.private.security.storage.AppBundles": True,
+                                  "com.apple.private.security.storage.AppDataContainers": True,
+                                  "com.apple.private.persona-mgmt": True})
 
     def test_dopamine_ui_is_credited_under_its_license(self):
         license_text = read(APP / "Resources/LICENSE-Dopamine.txt")
@@ -305,12 +484,12 @@ class SpeakaApp(unittest.TestCase):
             self.assertIn("Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).",
                           read(source), source.name)
         self.assertIn('Bundle.main.path(forResource: "LICENSE-Dopamine", ofType: "txt")', read(WINDOWS))
-        # The only pictures are Speaka's own asset catalog entries: Caz's backdrop and the wordmark. Never Dopamine's.
+        # The only picture is the title's, in Speaka's own asset catalog once it's drawn. Never Dopamine's or Caz's.
         named = set()
         for source in SWIFT:
             for pair in re.findall(r'\bImage\("([^"]+)"\)|UIImage\(named: "([^"]+)"\)', read(source)):
                 named |= {name for name in pair if name}
-        self.assertEqual(named, {"Backdrop", "Wordmark"})
+        self.assertEqual(named, {"Wordmark"})
 
     def test_wordmark_falls_back_until_the_picture_exists(self):
         parts = read(PARTS)
@@ -338,11 +517,17 @@ class SpeakaApp(unittest.TestCase):
         self.assertTrue((ROOT / "BTPSShared.h").is_file())       # what HEADER_SEARCH_PATHS is for
         bridge = read(APP / "Speaka/Speaka-Bridging-Header.h")
         imported = re.findall(r'#import "([^"]+)"', bridge)
-        self.assertEqual(imported, ["Model/SPTweakClient.h", "Model/SPConnectedDevice.h"])
+        self.assertEqual(imported, ["Model/SPTweakClient.h", "Model/SPConnectedDevice.h", "Model/SPRootSpawn.h"])
         for name in imported:
             self.assertTrue((APP / "Speaka" / name).is_file(), name)
         make = read(APP / "Makefile")
-        self.assertIn("tipa: app\n\tbash scripts/package.sh", make)
+        self.assertIn("tipa: app helper\n\tbash scripts/package.sh", make)
+        helper_rule = make.split("\nhelper:\n", 1)[1].split("\n\n", 1)[0]
+        for flag in ("xcrun --sdk iphoneos clang -arch arm64 -mios-version-min=16.0", "-framework CoreFoundation",
+                     "-o build/speakahelper RootHelper/main.c"):
+            self.assertIn(flag, helper_rule)
+        self.assertIn('MARKETING_VERSION="$(VERSION)" CURRENT_PROJECT_VERSION="$(BUILD)"', make)
+        self.assertIn("VERSION ?= $(shell sed -n 's/^Version:[[:space:]]*//p' ../control | head -n 1)", make)
         self.assertIn("ipa: tipa", make)
         app_rule = make.split("\napp:\n", 1)[1].split("\n\n", 1)[0]
         self.assertLess(app_rule.index("xcodegen generate"), app_rule.index("xcodebuild"))
@@ -356,19 +541,27 @@ class SpeakaApp(unittest.TestCase):
         package = read(APP / "scripts/package.sh")
         self.assertIn('APP="build/DerivedData/Build/Products/Release-iphoneos/Speaka.app"', package)
         self.assertIn('ldid -SSpeaka.entitlements "$APP/Speaka"', package)
+        self.assertIn('cp build/speakahelper "$APP/speakahelper"', package)
+        self.assertIn('ldid -SRootHelper/entitlements.plist "$APP/speakahelper"', package)
+        # The app starts the helper by this name, from its own bundle.
+        self.assertIn('Bundle.main.bundlePath + "/speakahelper"', read(UPDATER))
         # The .ipa is the same package under its other name, made after the .tipa.
         self.assertLess(package.index("zip -qry ../packages/Speaka.tipa Payload"),
                         package.index("cp packages/Speaka.tipa packages/Speaka.ipa"))
-        # XcodeGen compiles everything under app/Speaka: no source may live anywhere else in app/.
+        # XcodeGen compiles everything under app/Speaka, and clang the helper in app/RootHelper: nothing else in app/.
         for path in APP.rglob("*"):
-            if path.suffix in {".swift", ".m", ".h"}:
-                self.assertEqual(path.relative_to(APP).parts[0], "Speaka", path)
+            if path.suffix in {".swift", ".m", ".h", ".c"}:
+                self.assertIn(path.relative_to(APP).parts[0], {"Speaka", "RootHelper"}, path)
+        self.assertEqual(sorted(p.name for p in (APP / "RootHelper").iterdir()), ["entitlements.plist", "main.c"])
 
-    def test_the_uikit_app_is_gone(self):
-        """v9.2 replaced the UIKit app. Copying a new version over a clone doesn't delete files, so name the leftovers."""
+    def test_leftovers_are_gone(self):
+        """Copying a new version over a clone doesn't delete files, so name what earlier versions left behind."""
         leftovers = [path.relative_to(ROOT).as_posix() for pattern in ("UI", "main.m", "SPAppDelegate.*", "SPSceneDelegate.*")
                      for path in (APP / "Speaka").glob(pattern)]
         self.assertEqual(leftovers, [], "left over from the UIKit app (v9.1): delete these in your clone")
+        backdrop = APP / "Speaka/Assets.xcassets/Backdrop.imageset"
+        self.assertFalse(backdrop.exists(), "app/Speaka/Assets.xcassets/Backdrop.imageset is Caz's yellow backdrop, "
+                                            "left over from v9.2: delete it in your clone")
         project = read(APP / "project.yml")                     # and even if they linger, they're never built
         for pattern in ('"UI/**"', "main.m", '"SPAppDelegate.*"', '"SPSceneDelegate.*"'):
             self.assertIn(f"          - {pattern}\n", project)
@@ -377,15 +570,22 @@ class SpeakaApp(unittest.TestCase):
         workflow = read(ROOT / ".github/workflows/build.yml")
         app_job = workflow.split("\n  app:\n", 1)[1].split("\n  release:\n", 1)[0]
         self.assertIn("brew install xcodegen ldid", app_job)
-        self.assertIn("make -C app clean tipa", app_job)
+        self.assertIn("bash tools/release_version.sh", app_job)
+        self.assertIn('make -C app clean tipa VERSION="${{ steps.version.outputs.version }}" BUILD="$GITHUB_RUN_NUMBER"',
+                      app_job)
         self.assertNotIn("theos", app_job.lower())
         self.assertIn("name: Speaka-app", app_job)
         upload = app_job.split("actions/upload-artifact", 1)[1]
         self.assertIn("app/packages/Speaka.tipa", upload)
         self.assertIn("app/packages/Speaka.ipa", upload)
         self.assertIn('cmp "$tipa" app/packages/Speaka.ipa', app_job)       # both names, one package
-        self.assertIn("com.apple.private.security.no-sandbox", app_job)
-        self.assertIn("Assets.car", app_job)                                # the backdrop's asset catalog
+        self.assertIn("for f in Speaka speakahelper Info.plist", app_job)
+        for entitlement in ("com.apple.private.security.no-sandbox", "com.apple.private.persona-mgmt"):
+            self.assertIn(entitlement, app_job)
+        self.assertIn('ldid -e "$bundle/speakahelper"', app_job)
+        self.assertIn('[ "$shown" = "${{ steps.version.outputs.version }}" ]', app_job)   # the app says the release's number
+        build_job = workflow.split("\n  build:\n", 1)[1].split("\n  app:\n", 1)[0]
+        self.assertIn('version="$(bash tools/release_version.sh)"', build_job)
         release = workflow.split("\n  release:\n", 1)[1]
         self.assertIn("needs: [build, app]\n", release)
         # The release is gated on the tweak only: an app failure must never hold back the .deb.
@@ -400,10 +600,31 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn("files=( *.deb *.tipa *.ipa )", sums)
         self.assertIn("shopt -s nullglob", sums)                       # no .tipa must not break the checksums
         self.assertLess(release.index("- name: Checksums for everything published"), release.index("- name: Publish"))
-        # GitHub renders "<file>" as an HTML tag and drops it: the notes must name the real package.
+        # Normal releases, which the updater reads: v<version>, the latest, never a pre-release, notes from the commits.
+        publish = release.split("- name: Publish\n", 1)[1]
+        self.assertIn('tag="v${VERSION}"', publish)
+        self.assertIn("--latest", publish)
+        self.assertNotIn("--prerelease", publish)
+        self.assertIn("COMMITS_JSON: ${{ toJSON(github.event.commits) }}", publish)
+        self.assertIn('notes="$(jq -r \'.[]? | "- " + (.message | split("\\n")[0])\'', publish)
+        self.assertIn("gh release delete nightly --cleanup-tag --yes", publish)   # the old rolling build is retired
+        self.assertIn('if [ -f dist/Speaka.tipa ] && [ -f dist/Speaka.ipa ]; then', publish)
+        # GitHub renders "<file>" as an HTML tag and drops it.
         self.assertNotIn("<file>", release)
-        self.assertIn("sudo dpkg -i ${deb_name}", release)
-        self.assertIn('if [ -f dist/Speaka.tipa ] && [ -f dist/Speaka.ipa ]; then', release)
+
+    def test_release_versions(self):
+        """One number for the tweak and the app: control's Version plus the run number, or a pushed tag's."""
+        def version(**env):
+            run = subprocess.run(["bash", str(ROOT / "tools/release_version.sh")], capture_output=True, text=True,
+                                 env={**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, **env})
+            return run.returncode, run.stdout.strip()
+        base = re.search(r"^Version: (\S+)$", read(ROOT / "control"), re.M).group(1)
+        self.assertRegex(base, r"^\d+\.\d+$")
+        self.assertEqual(version(GITHUB_RUN_NUMBER="57"), (0, f"{base}.57"))
+        self.assertEqual(version(GITHUB_REF="refs/tags/v9.4.0", GITHUB_REF_NAME="v9.4.0", GITHUB_RUN_NUMBER="58"),
+                         (0, "9.4.0"))
+        self.assertEqual(version(GITHUB_REF="refs/tags/vbeta", GITHUB_REF_NAME="vbeta")[0], 1)
+        self.assertEqual(version(GITHUB_REF="refs/heads/main", GITHUB_RUN_NUMBER="3"), (0, f"{base}.3"))
 
     def test_everything_is_called_speaka(self):
         control = read(ROOT / "control")
@@ -503,12 +724,19 @@ class SpeakaApp(unittest.TestCase):
                 self.assertRegex(block(code[match.start():], match.group(0)), r"var body: some View", match.group(1))
         # Every capitalised name is defined here, bridged from Objective-C, or one of the framework names below.
         bridged = set()
-        for pair in re.findall(r"@interface (\w+)|NS_ENUM\(NSInteger, (\w+)\)", read(CLIENT_H) + read(DEVICE_H)):
+        headers = read(CLIENT_H) + read(DEVICE_H) + read(APP / "Speaka/Model/SPRootSpawn.h")
+        for pair in re.findall(r"@interface (\w+)|NS_ENUM\(NSInteger, (\w+)\)", headers):
             bridged |= {name for name in pair if name}
+        bridged |= set(re.findall(r"^int (\w+)\(", headers, re.M))     # C functions, such as SpeakaSpawnRoot
+        self.assertIn("SpeakaSpawnRoot", bridged)
         framework = {
             # Swift and Foundation
             "Bool", "CGFloat", "CGRect", "CGSize", "Date", "Double", "Int", "String", "UUID", "URL", "Array", "Self", "Void",
-            "Equatable", "Identifiable", "NSString", "Bundle", "FileManager", "Timer", "RunLoop", "DispatchQueue",
+            "Int32", "UInt32", "Equatable", "Identifiable", "Decodable", "NSString", "Data", "AttributedString", "Bundle",
+            "FileManager", "Timer", "RunLoop", "DispatchQueue", "URLRequest", "URLSession", "URLSessionDownloadTask",
+            "HTTPURLResponse", "JSONDecoder",
+            # CoreGraphics
+            "CGPoint", "CGContext", "CGColorSpace", "CGGradient", "CGColorSpaceCreateDeviceRGB",
             # SwiftUI and Combine
             "App", "Scene", "WindowGroup", "View", "ViewBuilder", "Content", "Context", "Text", "Image", "Font",
             "Color", "Button", "ButtonStyle", "Configuration", "VStack", "HStack", "ZStack", "Spacer", "ForEach",
@@ -516,7 +744,8 @@ class SpeakaApp(unittest.TestCase):
             "LinearGradient", "StrokeStyle", "TimelineView", "EdgeInsets", "Namespace", "State", "StateObject",
             "ObservedObject", "Environment", "Published", "ObservableObject", "UIViewRepresentable",
             # UIKit, CoreText and AVKit
-            "UIFont", "UIImage", "UIDevice", "UIApplication", "UIWindow", "UIWindowScene", "UIView", "UIControl",
+            "UIFont", "UIImage", "UIDevice", "UIApplication", "UIWindow", "UIWindowScene", "UIView", "UIControl", "UIColor",
+            "UIGraphicsImageRenderer", "UIGraphicsImageRendererFormat",
             "UIImpactFeedbackGenerator", "UINotificationFeedbackGenerator", "CTFont", "CTFontDescriptor", "CFURL",
             "CTFontManagerRegisterFontsForURL", "CTFontManagerCreateFontDescriptorsFromURL",
             "CTFontDescriptorCopyAttribute", "AVRoutePickerView",
@@ -526,17 +755,17 @@ class SpeakaApp(unittest.TestCase):
         used = set(re.findall(r"(?<![.\w])([A-Z][A-Za-z0-9]*)\b", code))
         self.assertEqual(used - defined - bridged - framework, set(),
                          "names that are neither defined here, bridged from Objective-C, nor listed as framework names")
-        # Every model member the views use exists in SpeakaModel.
-        model = strip_comments_and_strings(read(MODEL))
-        members = set(re.findall(r"\b(?:var|let|func)\s+(\w+)", model))
-        for source in SWIFT:
-            if source == MODEL:
-                continue
-            code = strip_comments_and_strings(read(source))
-            for name in re.findall(r"\bmodel\.(\w+)", code):
-                self.assertIn(name, members, f"{source.name} uses model.{name}, which SpeakaModel doesn't have")
-            for name in re.findall(r"\bSpeakaModel\.(\w+)", code):
-                self.assertIn(name, members | defined, f"{source.name} uses SpeakaModel.{name}")
+        # Every model and updater member the views use exists.
+        for owner, path, type_name in (("model", MODEL, "SpeakaModel"), ("updater", UPDATER, "SpeakaUpdater")):
+            members = set(re.findall(r"\b(?:var|let|func|case)\s+(\w+)", strip_comments_and_strings(read(path))))
+            for source in SWIFT:
+                if source == path:
+                    continue
+                code = strip_comments_and_strings(read(source))
+                for name in re.findall(rf"\b{owner}\.(\w+)", code):
+                    self.assertIn(name, members, f"{source.name} uses {owner}.{name}, which {type_name} doesn't have")
+                for name in re.findall(rf"\b{type_name}\.(\w+)", code):
+                    self.assertIn(name, members | defined, f"{source.name} uses {type_name}.{name}")
 
 
 if __name__ == "__main__":

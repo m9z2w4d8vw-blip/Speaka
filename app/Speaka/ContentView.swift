@@ -12,11 +12,12 @@ import SwiftUI
 import UIKit
 
 enum SpeakaWindow: Equatable {
-    case output, credits
+    case output, credits, update
 }
 
 struct ContentView: View {
     @StateObject private var model = SpeakaModel()
+    @StateObject private var updater = SpeakaUpdater()
     @State private var window: SpeakaWindow? = nil
     @Environment(\.scenePhase) private var scenePhase
     @Namespace private var actionSpace
@@ -24,7 +25,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                Backdrop(dimmed: window != nil)
+                Backdrop(dimmed: window != nil, size: geo.size)
                 mainStack(size: geo.size)
                 if model.sheetVisible {
                     expandedSheet(size: geo.size)
@@ -38,7 +39,8 @@ struct ContentView: View {
         .ignoresSafeArea()
         .animation(.spring(response: 0.75, dampingFraction: 0.9), value: model.sheetVisible)
         .animation(.spring(response: 0.6, dampingFraction: 0.9), value: window)
-        // The status line comes and goes like Caz's Update Available: it slides up 25 pt as it fades in.
+        // Update Available and the connection line come and go like Caz's Update Available: up 25 pt as they fade in.
+        .animation(.spring(response: 0.5, dampingFraction: 0.9), value: updater.isAvailable)
         .animation(.spring(response: 0.5, dampingFraction: 0.9), value: model.statusLine != nil)
         // A light tap as each step finishes and a success buzz at the end, as in Caz. UIKit's generators,
         // because sensoryFeedback needs iOS 17.
@@ -53,6 +55,7 @@ struct ContentView: View {
         }
         .onAppear {
             model.setActive(true)
+            updater.check()
         }
     }
 
@@ -65,6 +68,7 @@ struct ContentView: View {
         let stackHeight = size.height * (Metrics.isHomeButtonDevice ? 0.78 : 0.73)
         let stackWidth = Metrics.isPad ? min(size.width * 0.8, Metrics.iPadMaxWidth) : size.width - Metrics.padding * 2
         let statusOffset = max(15, Metrics.safeTop - 20)
+        let linkGap: CGFloat = Metrics.isHomeButtonDevice ? 10 : 20
 
         return VStack(spacing: 0) {
             HeaderView(subtitle: model.headerSubtitle,
@@ -93,12 +97,23 @@ struct ContentView: View {
             }
             .frame(height: 60)
             .overlay(alignment: .top) {
-                // Where Caz shows Update Available: 30 pt tall, 20 pt above the big button (10 on home-button
-                // phones), and hidden while the big button is open.
+                // Caz's Update Available: 30 pt tall, 20 pt above the big button (10 on home-button phones), sliding
+                // up 25 pt as it fades in, and hidden while the big button is open. The connection line takes the same
+                // place, or the line above it, 10 pt higher, while Update Available is showing.
+                if updater.isAvailable {
+                    UpdateLinkButton(title: "Update Available", symbol: "arrow.down.circle") {
+                        window = .update
+                    }
+                    .frame(height: 30)
+                    .offset(y: -(30 + linkGap))
+                    .opacity(expanded ? 0 : 1)
+                    .allowsHitTesting(!expanded)
+                    .transition(.offset(y: 25).combined(with: .opacity))
+                }
                 if let line = model.statusLine {
                     StatusLineView(line: line)
                         .frame(height: 30)
-                        .offset(y: -(30 + (Metrics.isHomeButtonDevice ? 10 : 20)))
+                        .offset(y: -(30 + linkGap) - (updater.isAvailable ? 40 : 0))
                         .opacity(expanded ? 0 : 1)
                         .transition(.offset(y: 25).combined(with: .opacity))
                 }
@@ -131,9 +146,11 @@ struct ContentView: View {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture {
+                    if window == .update && updater.isBusy { return }   // can't back out mid-update
                     self.window = nil
+                    updater.resetIfIdle()
                 }
-            windowView(window)
+            windowView(window, size: size)
                 .frame(width: min(size.width - Metrics.modalPadding * 2, Metrics.iPadMaxWidth),
                        height: size.height * (small ? 0.8 : 0.7))
                 .transition(.scale(scale: 0.7).combined(with: .opacity))
@@ -142,12 +159,14 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func windowView(_ window: SpeakaWindow) -> some View {
+    private func windowView(_ window: SpeakaWindow, size: CGSize) -> some View {
         switch window {
         case .output:
             OutputWindow(model: model)
         case .credits:
-            CreditsWindow(model: model)
+            CreditsWindow()
+        case .update:
+            UpdateFlowView(updater: updater, screenWidth: size.width)
         }
     }
 

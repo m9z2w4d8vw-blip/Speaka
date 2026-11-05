@@ -1,8 +1,8 @@
 # Build, test and publish Speaka: the tweak (.deb) and the app (.tipa/.ipa).
 #
 #   push to any branch         -> build + package + verify
-#   push to main               -> ...and publish the .deb to the rolling "nightly" pre-release
-#   push of a tag like v0.2.0  -> ...and publish a versioned release
+#   push to main               -> ...and publish release v<version> with the .deb and the app (notes: the commit messages)
+#   push of a tag like v9.4.0  -> ...and publish that tag as a release
 #   Actions tab > Run workflow -> same as a push to the selected branch
 #
 # No secrets are needed: publishing uses the built-in GITHUB_TOKEN.
@@ -75,16 +75,7 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          base="$(sed -n 's/^Version:[[:space:]]*//p' control | sed -n '1p' | tr -d '\r[:space:]')"
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}"            # tag v0.2.0 -> 0.2.0
-          else
-            version="${base}.${GITHUB_RUN_NUMBER}"    # 0.1.0 -> 0.1.0.57  (always increasing)
-          fi
-          if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-            echo "::error::version '$version' is not dotted-numeric (control says '$base', ref is ${GITHUB_REF})"
-            exit 1
-          fi
+          version="$(bash tools/release_version.sh)"   # the app job computes the same number
           sed -i.bak "s/^Version:.*/Version: ${version}/" control
           rm -f control.bak
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -233,8 +224,12 @@ jobs:
       - name: Install build tools (XcodeGen, ldid)
         run: brew install xcodegen ldid
 
+      - name: Compute the version
+        id: version
+        run: echo "version=$(bash tools/release_version.sh)" >> "$GITHUB_OUTPUT"
+
       - name: Build Speaka.tipa
-        run: make -C app clean tipa
+        run: make -C app clean tipa VERSION="${{ steps.version.outputs.version }}" BUILD="$GITHUB_RUN_NUMBER"
 
       - name: Check the package
         run: |
@@ -244,14 +239,23 @@ jobs:
           cmp "$tipa" app/packages/Speaka.ipa || { echo "::error::Speaka.ipa is missing or differs from Speaka.tipa"; exit 1; }
           rm -rf tipacheck && mkdir tipacheck && unzip -q "$tipa" -d tipacheck
           bundle=tipacheck/Payload/Speaka.app
-          for f in Speaka Info.plist Assets.car AppIcon60x60@2x.png AppIcon60x60@3x.png LICENSE-Dopamine.txt; do
+          for f in Speaka speakahelper Info.plist AppIcon60x60@2x.png AppIcon60x60@3x.png LICENSE-Dopamine.txt; do
             test -s "$bundle/$f" || { echo "::error::$f is missing from Speaka.app"; exit 1; }
           done
-          echo "Slices: $(lipo -archs "$bundle/Speaka")"
+          test -x "$bundle/speakahelper" || { echo "::error::speakahelper is not executable"; exit 1; }
+          echo "Slices: Speaka $(lipo -archs "$bundle/Speaka"), speakahelper $(lipo -archs "$bundle/speakahelper")"
           ldid -e "$bundle/Speaka" > entitlements.plist
           grep -q 'com.apple.private.security.no-sandbox' entitlements.plist \
             || { echo "::error::Speaka is not signed with its entitlements"; cat entitlements.plist; exit 1; }
-          plutil -p "$bundle/Info.plist" | grep -E 'CFBundleIdentifier|CFBundleShortVersionString'
+          grep -q 'com.apple.private.persona-mgmt' entitlements.plist \
+            || { echo "::error::Speaka can't start its update helper as root without persona-mgmt"; exit 1; }
+          ldid -e "$bundle/speakahelper" > helper-entitlements.plist
+          grep -q 'com.apple.private.security.no-sandbox' helper-entitlements.plist \
+            || { echo "::error::speakahelper is not signed with its entitlements"; cat helper-entitlements.plist; exit 1; }
+          plutil -p "$bundle/Info.plist" | grep -E 'CFBundleIdentifier|CFBundleShortVersionString|CFBundleVersion'
+          shown="$(plutil -extract CFBundleShortVersionString raw "$bundle/Info.plist")"
+          [ "$shown" = "${{ steps.version.outputs.version }}" ] \
+            || { echo "::error::the app says $shown, the release is ${{ steps.version.outputs.version }}"; exit 1; }
           echo "Package OK: $(du -h "$tipa" | cut -f1)"
 
       - uses: actions/upload-artifact@v7
@@ -306,54 +310,39 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.build.outputs.version }}
+          COMMITS_JSON: ${{ toJSON(github.event.commits) }}
         run: |
           set -euo pipefail
           ls -la dist
           short="${GITHUB_SHA:0:7}"
           first_deb=""
           for f in dist/*.deb; do first_deb="$f"; break; done
-          pkg="$(dpkg-deb -f "$first_deb" Package)"
           deb_name="$(basename "$first_deb")"
+
+          # The notes are this push's commit messages, as in Caz: the app's updater shows them as its changelog.
+          notes="$(jq -r '.[]? | "- " + (.message | split("\n")[0])' <<< "${COMMITS_JSON:-null}" || true)"
+          [ -n "$notes" ] || notes="- Build of commit ${short}"
+          printf '%s\n' "$notes" > notes.md
           if [ -f dist/Speaka.tipa ] && [ -f dist/Speaka.ipa ]; then
-            app_note="- Speaka.tipa and Speaka.ipa: the Speaka app, the same file under both names. Open either with TrollStore and install the .deb too; sideloading it with AltStore or Sideloadly removes the permissions it needs to control the tweak."
+            echo "Release ${VERSION}: ${deb_name}, Speaka.tipa and Speaka.ipa" | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            app_note="- The Speaka app did not build in this run, so there is no Speaka.tipa or Speaka.ipa here; see the run's log."
+            # The updater then updates only the tweak.
+            echo "- This release has only the tweak: the app didn't build in this run." >> notes.md
           fi
+          cat notes.md
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            # ---- versioned release: v0.2.0 ----
-            tag="${GITHUB_REF_NAME}"
-            if gh release view "$tag" >/dev/null 2>&1; then
-              gh release upload "$tag" dist/* --clobber                 # re-run of the same tag
-            else
-              gh release create "$tag" dist/* --verify-tag --title "Speaka ${VERSION}" --generate-notes
-            fi
+            tag="${GITHUB_REF_NAME}"                  # a tag you pushed yourself, like v9.4.0
           else
-            # ---- rolling pre-release "nightly": delete and recreate so the tag moves to this commit ----
-            tag="nightly"
-            gh release delete "$tag" --cleanup-tag --yes >/dev/null 2>&1 || true
-            gh api -X DELETE "repos/${GH_REPO}/git/refs/tags/${tag}" >/dev/null 2>&1 || true
-            sleep 3
-            cat > notes.md <<EOF
-          Automated build of commit ${short} (workflow run #${GITHUB_RUN_NUMBER}).
-
-          - Package version: ${VERSION}
-          - Rootless (iphoneos-arm64), arm64 + arm64e
-          ${app_note}
-          - Verify your downloads against SHA256SUMS
-
-          Install the tweak on the device:
-
-              sudo dpkg -i ${deb_name} && sudo killall -9 bluetoothd
-
-          Remove it:
-
-              sudo dpkg -r ${pkg}
-
-          Experimental build; not tested on a device by CI.
-          EOF
-            gh release create "$tag" dist/* --target "$GITHUB_SHA" --prerelease \
-              --title "Nightly ${VERSION} (${short})" --notes-file notes.md
+            tag="v${VERSION}"                         # every push to main: v9.3.57
+            gh release delete nightly --cleanup-tag --yes >/dev/null 2>&1 || true   # retire the old rolling build
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber                               # a re-run of the same version
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            gh release create "$tag" dist/* --verify-tag --title "${VERSION}" --notes-file notes.md --latest
+          else
+            gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "${VERSION}" --notes-file notes.md --latest
           fi
 
           echo "Published: https://github.com/${GH_REPO}/releases/tag/${tag}" | tee -a "$GITHUB_STEP_SUMMARY"

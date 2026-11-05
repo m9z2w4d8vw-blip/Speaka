@@ -161,12 +161,6 @@ final class SpeakaModel: ObservableObject {
         }
     }
 
-    /// "v9.1.0" from "v9.1.0-one-tap-output-select", for the credits.
-    var tweakVersion: String? {
-        let version = snapshot.build.components(separatedBy: "-").first ?? ""
-        return version.isEmpty ? nil : version
-    }
-
     // MARK: - Polling, every 0.5 s like Settings > Speaka
 
     /// Polling pauses while the app isn't active, except to follow a Start or Stop that is in flight.

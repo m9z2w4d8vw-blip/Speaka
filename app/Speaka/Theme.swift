@@ -2,8 +2,9 @@
 //  Theme.swift
 //  Speaka
 //
-//  Colours, metrics and small building blocks, the same as Caz's (Caz/Theme.swift) so the two apps look alike.
-//  Caz follows Dopamine's DOGlobalAppearance, DOThemeManager and Themes.plist, with the yellow theme of its icon.
+//  Colours, metrics and small building blocks, the same as Caz's (Caz/Theme.swift) so the two apps look alike,
+//  on Speaka's own background and with Speaka's teal. Caz follows Dopamine's DOGlobalAppearance, DOThemeManager and
+//  Themes.plist.
 //  Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).
 //
 
@@ -17,8 +18,8 @@ enum Theme {
     static let menu = Color(red: 63 / 255.0, green: 63 / 255.0, blue: 63 / 255.0).opacity(114 / 255.0)
     /// The Audio Output and Credits windows. Dopamine's windowColor 994c4c4c: #4C4C4C at 153/255 (60%).
     static let window = Color(red: 76 / 255.0, green: 76 / 255.0, blue: 76 / 255.0).opacity(153 / 255.0)
-    /// Caz's gold, used for the checkmark of the audio output in use.
-    static let accent = Color(red: 255 / 255.0, green: 178 / 255.0, blue: 30 / 255.0)
+    /// Speaka's teal (#12B3A6, from its icon and background), used for the checkmark of the audio output in use.
+    static let accent = Color(red: 18 / 255.0, green: 179 / 255.0, blue: 166 / 255.0)
     static let separator = Color(white: 0.6).opacity(0.3)
     /// Menu and button titles and icons. Dopamine's button configuration only dims white given in an
     /// RGB colour space, so plain white renders at full strength (measured at 253, 254, 254).
@@ -70,21 +71,67 @@ struct MenuButtonStyle: ButtonStyle {
     }
 }
 
-/// Caz's yellow backdrop (Sunshine Sweep). It dims to 40% while a window is open, like Dopamine's.
+/// Speaka's own background, drawn exactly as the app drew it before v9.2 (SPTheme): deep indigo with violet, blue,
+/// teal and magenta glows, rendered for the screen's size and reaching 100 pt past its top and bottom. It dims to 40%
+/// over black while a window is open, like Caz's backdrop.
 struct Backdrop: View {
     var dimmed: Bool
+    var size: CGSize
 
     var body: some View {
         Color.black
             .overlay {
-                Image("Backdrop")
+                Image(uiImage: SpeakaBackground.image(for: size))
                     .resizable()
-                    .scaledToFill()
+                    .frame(width: size.width, height: size.height + 200)
                     .opacity(dimmed ? 0.4 : 1)
                     .animation(.easeInOut(duration: 0.3), value: dimmed)
             }
             .clipped()
             .ignoresSafeArea()
+    }
+}
+
+/// SPTheme's backgroundImageWithSize:, line for line: the image is drawn at 1x (smooth gradients need no more) for
+/// the screen's width and its height plus 200 pt, and kept until the size changes.
+enum SpeakaBackground {
+    private static var cached: (size: CGSize, image: UIImage)? = nil
+
+    static func image(for screen: CGSize) -> UIImage {
+        let size = CGSize(width: max(screen.width, 1), height: max(screen.height, 1) + 200)
+        if let cached, cached.size == size {
+            return cached.image
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { renderer in
+            let context = renderer.cgContext
+            let w = size.width, h = size.height, m = max(w, h)
+            UIColor(red: 0x0D / 255.0, green: 0x0A / 255.0, blue: 0x24 / 255.0, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            let space = CGColorSpaceCreateDeviceRGB()
+            glow(context, space, CGPoint(x: w * 0.10, y: h * 0.12), m * 0.62, 0x5B2BB5, 0.95)   // violet
+            glow(context, space, CGPoint(x: w * 0.95, y: h * 0.30), m * 0.45, 0x2B4FD8, 0.60)   // blue
+            glow(context, space, CGPoint(x: w * 0.90, y: h * 0.92), m * 0.60, 0x12B3A6, 0.80)   // teal
+            glow(context, space, CGPoint(x: w * 0.05, y: h * 0.88), m * 0.42, 0xB0307A, 0.45)   // magenta
+        }
+        cached = (size, image)
+        return image
+    }
+
+    /// One soft glow: the colour at the centre, 45% of it at 45% of the radius, transparent at the radius.
+    private static func glow(_ context: CGContext, _ space: CGColorSpace, _ centre: CGPoint, _ radius: CGFloat,
+                             _ rgb: UInt32, _ alpha: CGFloat) {
+        let r = CGFloat((rgb >> 16) & 0xFF) / 255.0
+        let g = CGFloat((rgb >> 8) & 0xFF) / 255.0
+        let b = CGFloat(rgb & 0xFF) / 255.0
+        let components: [CGFloat] = [r, g, b, alpha, r, g, b, alpha * 0.45, r, g, b, 0.0]
+        let locations: [CGFloat] = [0.0, 0.45, 1.0]
+        guard let gradient = CGGradient(colorSpace: space, colorComponents: components,
+                                        locations: locations, count: 3) else { return }
+        context.drawRadialGradient(gradient, startCenter: centre, startRadius: 0,
+                                   endCenter: centre, endRadius: radius, options: [])
     }
 }
 

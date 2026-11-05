@@ -211,9 +211,8 @@ struct RoutePickerAnchor: UIViewRepresentable {
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
 
-/// What Speaka is, which versions are running, and the license of the interface it shares with Caz.
+/// What Speaka is, which versions are installed, and the license of the interface it shares with Caz.
 struct CreditsWindow: View {
-    @ObservedObject var model: SpeakaModel
 
     var body: some View {
         WindowCard(title: "Credits") {
@@ -247,12 +246,13 @@ struct CreditsWindow: View {
         }
     }
 
+    /// The app's version and the tweak package's, which a release keeps the same.
     private var versions: String {
         let app = "App \(Bundle.main.shortVersion)"
-        guard let tweak = model.tweakVersion else {
-            return "\(app) · tweak not running"
+        guard let package = SpeakaUpdater.installedPackageVersion() else {
+            return "\(app) · tweak not installed"
         }
-        return "\(app) · tweak \(tweak)"
+        return "\(app) · tweak \(package)"
     }
 
     /// Dopamine's MIT License, shipped in the app (app/Resources/LICENSE-Dopamine.txt).

@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/m9z2w4d8vw-blip/Speaka/actions/workflows/build.yml"><img src="https://github.com/m9z2w4d8vw-blip/Speaka/actions/workflows/build.yml/badge.svg" alt="build"></a>
-  <a href="https://github.com/m9z2w4d8vw-blip/Speaka/releases"><img src="https://img.shields.io/badge/download-nightly-12B3A6?logo=github" alt="download nightly"></a>
+  <a href="https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest"><img src="https://img.shields.io/badge/download-latest-12B3A6?logo=github" alt="download the latest release"></a>
   <img src="https://img.shields.io/badge/iOS-17.0-1B1446?logo=apple&logoColor=white" alt="iOS 17.0">
   <img src="https://img.shields.io/badge/jailbreak-Dopamine%20rootless-5B2BB5" alt="Dopamine rootless">
   <img src="https://img.shields.io/badge/app-TrollStore-12B3A6" alt="TrollStore app">
@@ -78,8 +78,8 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
 ## Quick start
 
 1. **Download** `Speaka_<version>_iphoneos-arm64.deb` and `Speaka.tipa` from the
-   [**nightly** release](https://github.com/m9z2w4d8vw-blip/Speaka/releases). It's rebuilt on every push; `SHA256SUMS`
-   lets you verify the files.
+   [**latest release**](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest). `SHA256SUMS` lets you verify the
+   files. After this first install, the app updates both itself and the tweak ([Updates](#updates)).
 2. **Install the tweak.** Open the `.deb` with Sileo or Zebra, or run `sudo dpkg -i Speaka_*.deb` over SSH. Bluetooth
    restarts once, and Settings gains a **Speaka** page.
 3. **Install the app.** Open `Speaka.tipa` with TrollStore. `Speaka.ipa` is the same file under another name.
@@ -116,7 +116,8 @@ sudo killall -9 bluetoothd
 
 ### The app
 
-The app looks and moves like Caz: the same backdrop, panels, type and animations, from Caz's own code.
+The app looks and moves like Caz, from Caz's own code: the same panels, type and animations, on Speaka's own
+background.
 
 - **One button** at the bottom reads **Start**, or **Stop** while the speaker is on. Tapping it opens it into a log,
   as Caz's Clean button does: *Restarting Bluetooth*, *Adding the speaker*, then *Ready for your PC*. About 1.6 s after
@@ -128,9 +129,26 @@ The app looks and moves like Caz: the same backdrop, panels, type and animations
 - **Audio Output** opens a window with the three outputs; the current one has a checkmark. **Choose Output Device**
   under them opens iOS's own picker.
 - **Credits** shows the app's and the tweak's versions and the license of the interface, which Caz and Speaka share.
+- **Update Available** appears above the button when a newer release is out; see [Updates](#updates).
 
 The app and **Settings > Speaka** read and write the same settings, so they always agree. More detail is in
 [app/README.md](app/README.md).
+
+### Updates
+
+Once per launch, the app asks GitHub for Speaka's releases. When one is newer than the installed app or tweak,
+**Update Available** slides up above the button, as in Caz. Tapping it opens the changelog (the commit messages of
+each release), and **Update** installs it:
+
+1. it downloads what's newer: the tweak's `.deb`, the app's `.tipa`, or both;
+2. it installs the `.deb` with dpkg, whose install script restarts Bluetooth, so a running speaker stops;
+3. it installs the `.tipa` with TrollStore, which closes Speaka;
+4. if the tweak was updated, it resprings, so Settings and the app open in their new versions.
+
+If the `.deb` doesn't install, nothing else changes, and the window says what dpkg reported. If only the app is newer,
+nothing resprings, and if TrollStore can't install it, TrollStore is asked to download it from the release instead.
+Installing needs the app's update helper, which runs as root through TrollStore, so update by hand if you sideloaded
+the app some other way.
 
 ### When to tap Start again
 
@@ -180,6 +198,8 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 | The app says the volume is at 0% | That output's volume is at zero | Raise the iPhone volume while audio plays. |
 | Wired mode is silent and the connection line says it's waiting | Nothing is plugged in | Plug the headset in; playback starts by itself. |
 | The sound stopped after a call, Siri or another app | iOS interrupted playback | Pause and play on the PC, or change any audio setting. |
+| **Update Available** never appears | The app checks once per launch; offline, or GitHub's limit of 60 checks an hour was reached | Open the app again later. You can always install from the [latest release](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest) by hand. |
+| *Update failed* after *Installing the tweak* | dpkg reported an error, often because Sileo or Zebra was installing at the same time | Close the package manager and tap **Update** again. Nothing else changed. |
 | Bluetooth misbehaves in general | | Tap **Stop** (the app's button reads Stop while the speaker is on), or **Stop and restore normal Bluetooth** in Settings. Without either: `sudo killall -9 bluetoothd`. To remove everything, uninstall. |
 
 When something goes wrong, open **View debug log** right away and use **Save Log to iCloud Drive**.
@@ -378,7 +398,7 @@ copies can't drift apart. `tests/test_repo_layout.py` fails CI with an explanati
 
 ```mermaid
 flowchart LR
-    push["Push to GitHub"] --> tests["Run tests"] --> deb["Build the .deb"] --> check["Check the package"] --> rel["Nightly release"]
+    push["Push to GitHub"] --> tests["Run tests"] --> deb["Build the .deb"] --> check["Check the package"] --> rel["A release for<br/>every push"]
     push --> app["Build the app<br/>.tipa and .ipa"] -.->|"attached if it built"| rel
 ```
 
@@ -390,10 +410,14 @@ Every push runs `.github/workflows/build.yml` on macOS with Xcode and Theos. The
 4. uploads it as the `Speaka-deb` artifact.
 
 A separate job builds the app the way Caz is built, with XcodeGen and `xcodebuild`, as the `Speaka-app` artifact.
-Pushes to `main` republish the **nightly** release with
-all three files and `SHA256SUMS`. If the app fails to build, the release still goes out with the `.deb`. A tag such as
-`v0.2.0` publishes a versioned release. Package versions are `control`'s version plus the run number, so every build
-is newer than the last.
+
+Each push to `main` publishes a full release named after its version (`9.3.57`, tag `v9.3.57`) with the `.deb`,
+`Speaka.tipa`, `Speaka.ipa` and `SHA256SUMS`, marked latest. Its notes are the push's commit messages, which the app's
+changelog shows, and the old rolling **nightly** release is deleted. If the app fails to build, the release still goes
+out with the `.deb`, and the updater updates only the tweak. Versions are `control`'s `Version` plus the run number,
+for the `.deb` and the app alike (`tools/release_version.sh`), so every release is newer than the last. A tag you push,
+like `v9.4.0`, publishes as `9.4.0`; set `control`'s `Version` (and `MARKETING_VERSION` in `app/project.yml`) to `9.4`
+afterwards.
 
 <details>
 <summary><b>Building locally, running the tests, and porting</b></summary>
@@ -500,6 +524,7 @@ notes.
 | v9.0 | **Renamed to Speaka** throughout: package `com.parv.speaka` and new internal names | [TESTING-v9.0](docs/history/TESTING-v9.0.md) |
 | v9.1 | No more Headphones / PC flicker: the helper keeps its output through stream changes | [TESTING-v9.1](docs/history/TESTING-v9.1.md) |
 | v9.2 | The app takes Caz's look: one Start/Stop button that opens into a live log | [TESTING-v9.2](docs/history/TESTING-v9.2.md) |
+| v9.3 | Speaka's own background again; the app updates itself and the tweak; numbered releases | [TESTING-v9.3](docs/history/TESTING-v9.3.md) |
 
 | Research note | Topic |
 | --- | --- |
@@ -517,9 +542,9 @@ notes.
 
 - [**Google libsbc**](https://github.com/google/libsbc) (Apache-2.0) decodes the audio. It's fetched at build time at
   commit `6e505650145c9973d08a0bdd5e5f5e1914305e40` and isn't committed.
-- The app's interface is [**Caz**](https://github.com/m9z2w4d8vw-blip/Caz)'s, backdrop included, which is adapted from
-  [**Dopamine**](https://github.com/opa334/Dopamine) by Lars Fröder (opa334) and its contributors under the MIT License.
-  The license ships in the app under **Credits**.
+- The app's interface, updater included, is [**Caz**](https://github.com/m9z2w4d8vw-blip/Caz)'s, on Speaka's own
+  background. Caz's is adapted from [**Dopamine**](https://github.com/opa334/Dopamine) by Lars Fröder (opa334) and its
+  contributors under the MIT License, which ships in the app under **Credits**.
 - The app's title is meant to be a picture of "Speaka" drawn in Fonarto, like Caz's (`app/scripts/make_wordmark.py`).
   Until it's drawn, the app writes it in SF Rounded Bold.
 - `sbc_decode.c` is the project's own SBC decoder, written from the Bluetooth specification and used by the tests.
