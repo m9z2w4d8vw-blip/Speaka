@@ -72,6 +72,10 @@ struct MenuItem: Identifiable {
     let symbol: String
     var chevron = false
     var enabled = true
+    /// v9.8: a row that acts only once held this long (Uninstall). A tap alone does nothing.
+    var holdSeconds: Double? = nil
+    /// Its action is running: a spinner in the icon's place, and the row greyed out like a disabled one.
+    var busy = false
     let action: () -> Void
 }
 
@@ -83,15 +87,21 @@ struct ActionMenu: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                MenuRow(item: item, height: rowHeight)
-                    .overlay(alignment: .bottom) {
-                        if index < items.count - 1 {
-                            Capsule()
-                                .fill(Theme.separator)
-                                .frame(height: 1)
-                                .padding(.horizontal, 10)
-                        }
+                Group {
+                    if item.holdSeconds != nil {
+                        HoldMenuRow(item: item, height: rowHeight)
+                    } else {
+                        MenuRow(item: item, height: rowHeight)
                     }
+                }
+                .overlay(alignment: .bottom) {
+                    if index < items.count - 1 {
+                        Capsule()
+                            .fill(Theme.separator)
+                            .frame(height: 1)
+                            .padding(.horizontal, 10)
+                    }
+                }
             }
         }
         .padding(.horizontal, innerPadding)
@@ -137,6 +147,67 @@ struct MenuRow: View {
         .buttonStyle(MenuButtonStyle())
         .disabled(!item.enabled)
         .opacity(item.enabled ? 1 : 0.45)
+    }
+}
+
+/// v9.8, Uninstall: laid out exactly like a MenuRow, but a tap does nothing. Held down, a soft red fill sweeps across
+/// the row over the hold and the title says to keep holding; let go early and the fill runs back. Held the whole time:
+/// a warning haptic and the action, with no second prompt. While it runs, a spinner takes the icon's place and the row
+/// greys out to Caz's disabled 45%. It doesn't dim while pressed, as other rows do, so that 45% means only "busy".
+struct HoldMenuRow: View {
+    let item: MenuItem
+    let height: CGFloat
+    @State private var holding = false
+
+    private var seconds: Double { item.holdSeconds ?? 4 }
+
+    private var title: String {
+        if item.busy { return "Uninstalling..." }
+        return holding ? "Keep holding to uninstall" : item.title
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                if item.busy {
+                    Spinner()
+                } else {
+                    Image(systemName: item.symbol)
+                        .font(.system(size: 19, weight: .medium))
+                }
+            }
+            Text(title)
+                .font(.system(size: 17))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(Theme.text)
+        .padding(.horizontal, 12)
+        .frame(height: height)
+        .background(alignment: .leading) {
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.failure.opacity(0.3))
+                    .frame(width: holding ? geo.size.width : 0)
+            }
+            .padding(.vertical, 8)
+        }
+        .contentShape(Rectangle())
+        .onLongPressGesture(minimumDuration: seconds, maximumDistance: 40) {
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            item.action()
+        } onPressingChanged: { pressing in
+            if pressing { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            withAnimation(pressing ? Animation.linear(duration: seconds) : Animation.easeOut(duration: 0.25)) {
+                holding = pressing
+            }
+        }
+        .disabled(!item.enabled || item.busy)
+        .opacity(item.enabled && !item.busy ? 1 : 0.45)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Hold for \(Int(seconds)) seconds to uninstall Speaka and its tweak.")
     }
 }
 

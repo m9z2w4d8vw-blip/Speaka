@@ -10,6 +10,9 @@
 //   speakahelper install-update [--deb <path> | --tweak-from-app] [--tipa <path>]
 //   speakahelper finish-update [--tipa <path>] [--tweak-from-app] [--respring]   (started by install-update, own session)
 //   speakahelper kill-bluetooth                                  (Settings > Kill Bluetooth: killall -9 bluetoothd)
+//   speakahelper remove-tweak                                    (Uninstall, first: the tweak and its files)
+//   speakahelper uninstall-app                                   (Uninstall, last: the app, through TrollStore)
+//   speakahelper finish-uninstall                                (started by uninstall-app, in its own session)
 //   speakahelper version
 //
 // install-update installs the tweak's .deb with dpkg first and reports how that went; the package's install script
@@ -49,7 +52,7 @@
 #include <sys/sysctl.h>
 #endif
 
-#define SPEAKA_HELPER_VERSION "1.2"
+#define SPEAKA_HELPER_VERSION "1.3"
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
@@ -66,6 +69,10 @@ static char *const k_dpkg_env[] = {
 #define SPEAKA_APP_ID "com.parv.speaka"
 #define SPEAKA_CARRIED_DEB "Speaka.app/Speaka.deb"                 // inside the app's bundle container
 #define SPEAKA_TWEAK_TEMP "/var/tmp/speaka-tweak.XXXXXX"          // root's own copy, for dpkg
+#define SPEAKA_PACKAGE "com.parv.speaka"
+#define SPEAKA_DPKG_LIST "/var/jb/var/lib/dpkg/info/com.parv.speaka.list"   // there while dpkg has the tweak
+#define SPEAKA_LOG_DIR "/tmp/FTABHarvest"                         // the tweak's logs and shared memory
+#define SPEAKA_CACHES "/var/mobile/Library/Caches/Speaka"           // downloaded updates (SpeakaUpdater)
 #define SPEAKA_UPDATE_LOG "/tmp/FTABHarvest/SpeakaUpdate.log"
 
 extern char **environ;
@@ -389,26 +396,16 @@ static void respring(void) {
 #endif
 }
 
-// Starts `speakahelper finish-update ...` in its own session without waiting, its output appended to the update log.
-static int start_finish(const char *tipa, int tweak_from_app) {
-    char *argv[7];
-    int n = 0;
-    argv[n++] = "speakahelper";
-    argv[n++] = "finish-update";
-    if (tipa) { argv[n++] = "--tipa"; argv[n++] = (char *)tipa; }
-    if (tweak_from_app) argv[n++] = "--tweak-from-app";
-    argv[n++] = "--respring";
-    argv[n] = NULL;
+// Starts this helper again with `argv`, in its own session and without waiting, its output appended to `log`.
+static int start_detached(char *const argv[], const char *log) {
 #ifdef SPEAKA_TEST
-    emit("LOG\t(test) would start %s in its own session, output to " SPEAKA_UPDATE_LOG, g_self);
+    emit("LOG\t(test) would start %s in its own session, output to %s", g_self, log);
     for (int i = 1; argv[i]; i++) emit("LOG\t(test)   %s", argv[i]);
     return 0;
 #else
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
-    // The log folder is the tweak's; without it, the last step still runs, just unlogged.
-    const char *log = access("/tmp/FTABHarvest", W_OK) == 0 ? SPEAKA_UPDATE_LOG : "/dev/null";
     posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, log, O_WRONLY | O_CREAT | O_APPEND, 0644);
     posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
     posix_spawnattr_t attr;
@@ -421,11 +418,44 @@ static int start_finish(const char *tipa, int tweak_from_app) {
     posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&actions);
     if (rc != 0) {
-        emit("ERR\tCouldn't start the last step of the update: %s", strerror(rc));
+        emit("ERR\tCouldn't start the last step: %s", strerror(rc));
         return 10;
     }
     return 0;
 #endif
+}
+
+// Starts `speakahelper finish-update ...` in its own session without waiting, its output appended to the update log.
+static int start_finish(const char *tipa, int tweak_from_app) {
+    char *argv[7];
+    int n = 0;
+    argv[n++] = "speakahelper";
+    argv[n++] = "finish-update";
+    if (tipa) { argv[n++] = "--tipa"; argv[n++] = (char *)tipa; }
+    if (tweak_from_app) argv[n++] = "--tweak-from-app";
+    argv[n++] = "--respring";
+    argv[n] = NULL;
+    // The log folder is the tweak's; without it, the last step still runs, just unlogged.
+    return start_detached(argv, access(SPEAKA_LOG_DIR, W_OK) == 0 ? SPEAKA_UPDATE_LOG : "/dev/null");
+}
+
+// Speaka's own files in `folder`: regular files whose names start with one of `prefixes`, and never anything else.
+// The folder itself goes only if that leaves it empty.
+static void remove_matching(const char *folder, const char *const prefixes[], size_t count) {
+    DIR *d = opendir(folder);
+    if (!d) return;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        int ours = 0;
+        for (size_t i = 0; i < count && !ours; i++) ours = starts_with(de->d_name, prefixes[i]);
+        char path[PATH_MAX];
+        struct stat st;
+        if (ours && pathf(path, "%s/%s", folder, de->d_name) && lstat(path, &st) == 0 && S_ISREG(st.st_mode))
+            unlink(path);
+    }
+    closedir(d);
+    rmdir(folder);
 }
 
 // ---------------------------------------------------------------- commands
@@ -478,6 +508,87 @@ static int do_kill_bluetooth(void) {
 #endif
 }
 
+// Uninstall, first (v9.8): the tweak, then what it leaves behind. dpkg removes the package (its remove script stops the
+// audio helper); bluetoothd is killed so the removed tweak unloads, and launchd starts a clean one; Settings closes so
+// Settings > Speaka goes; then Speaka's files. The app removes Speaka's preferences next, as mobile, now that nothing
+// rewrites them, and then runs uninstall-app.
+static int do_remove_tweak(void) {
+    char listed[PATH_MAX];
+    rp(listed, SPEAKA_DPKG_LIST);
+    if (access(listed, F_OK) == 0) {
+        char dpkg[PATH_MAX];
+        rp(dpkg, SPEAKA_DPKG);
+        if (access(dpkg, F_OK) != 0) {
+            emit("ERR\tdpkg wasn't found at " SPEAKA_DPKG);
+            return 9;
+        }
+        emit("LOG\tRemoving the tweak with dpkg");
+        char *argv[] = { "dpkg", "-r", SPEAKA_PACKAGE, NULL };
+        int code = run_and_wait(dpkg, argv, k_dpkg_env, 0);
+        if (code == -1) {
+            emit("ERR\tdpkg couldn't start (%s). Is the jailbreak active? Run it again, then try once more.", strerror(errno));
+            return 8;
+        }
+        if (code != 0) {
+            emit("ERR\tThe tweak didn't uninstall (dpkg exited with %d). Nothing else was removed.", code);
+            return 8;
+        }
+    } else {
+        emit("LOG\tThe tweak isn't installed");
+    }
+#ifdef SPEAKA_TEST
+    emit("LOG\t(test) would kill bluetoothd and Preferences");
+#else
+    kill_named("bluetoothd");
+    kill_named("Preferences");
+#endif
+    char folder[PATH_MAX];
+    static const char *const logs[] = { "Speaka", "BTPS" };          // Speaka.log, BTPS-v88-*.shm, BTPSAudioHelper-*.log
+    rp(folder, SPEAKA_LOG_DIR);
+    remove_matching(folder, logs, sizeof logs / sizeof logs[0]);
+    static const char *const all[] = { "" };
+    rp(folder, SPEAKA_CACHES);
+    remove_matching(folder, all, 1);
+    emit("LOG\tTweak removed; Bluetooth restarted");
+    return 0;
+}
+
+// Uninstall, last: TrollStore removes the app, in a step of its own that outlives Speaka (removing the app closes it,
+// and takes this helper with it). Nothing is logged: Speaka's log folder has just gone.
+static int do_uninstall_app(void) {
+    char helper[PATH_MAX];
+    if (!find_trollstore_helper(helper)) {
+        emit("ERR\tTrollStore's installer wasn't found");
+        return 5;
+    }
+    char *argv[] = { "speakahelper", "finish-uninstall", NULL };
+    if (start_detached(argv, "/dev/null") != 0) return 10;
+    emit("LOG\tUninstalling the app");
+    return 0;
+}
+
+static int do_finish_uninstall(void) {
+    char helper[PATH_MAX];
+    if (!find_trollstore_helper(helper)) {
+        emit("ERR\tTrollStore's installer wasn't found");
+        return 5;
+    }
+#ifndef SPEAKA_TEST
+    sleep(1);                                       // let Speaka read that the last step started
+#endif
+    char *argv[] = { "trollstorehelper", "uninstall", SPEAKA_APP_ID, NULL };
+    int code = run_and_wait(helper, argv, environ, 0);
+    if (code == -1) {
+        emit("ERR\tCouldn't start TrollStore's installer: %s", strerror(errno));
+        return 6;
+    }
+    if (code != 0) {
+        emit("ERR\tTrollStore's installer returned %d", code);
+        return 7;
+    }
+    return 0;
+}
+
 static int do_finish_update(const char *tipa, int tweak_from_app, int resprings) {
     int code = tipa ? install_tipa(tipa) : 0;
     if (code == 0 && tweak_from_app) code = install_carried_tweak();   // the app TrollStore just installed
@@ -501,7 +612,8 @@ int main(int argc, char **argv) {
     if (!realpath(argv[0], g_self)) snprintf(g_self, sizeof g_self, "%s", argv[0]);
     if (argc < 2) {
         emit("ERR\tusage: speakahelper install-update [--deb <path> | --tweak-from-app] [--tipa <path>] | "
-             "finish-update [--tipa <path>] [--tweak-from-app] [--respring] | version");
+             "finish-update [--tipa <path>] [--tweak-from-app] [--respring] | kill-bluetooth | remove-tweak | "
+             "uninstall-app | version");
         return 2;
     }
     const char *deb = NULL, *tipa = NULL;
@@ -518,6 +630,9 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "version") == 0) { emit("LOG\tspeakahelper %s", SPEAKA_HELPER_VERSION); return 0; }
     if (strcmp(argv[1], "kill-bluetooth") == 0) return do_kill_bluetooth();
+    if (strcmp(argv[1], "remove-tweak") == 0) return do_remove_tweak();
+    if (strcmp(argv[1], "uninstall-app") == 0) return do_uninstall_app();
+    if (strcmp(argv[1], "finish-uninstall") == 0) return do_finish_uninstall();
     if (strcmp(argv[1], "install-update") == 0) return do_install_update(deb, tipa, tweak_from_app);
     if (strcmp(argv[1], "finish-update") == 0) return do_finish_update(tipa, tweak_from_app, resprings);
     emit("ERR\tUnknown command %s", argv[1]);

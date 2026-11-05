@@ -72,6 +72,10 @@ typedef NS_ENUM(NSInteger, SPRequestState) {
 /// notifications is on, and the last release a notification announced, so each is announced once.
 + (BOOL)updateNotificationsEnabled NS_SWIFT_NAME(updateNotificationsEnabled());
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled NS_SWIFT_NAME(setUpdateNotificationsEnabled(_:));
+
+/// Uninstall (v9.8): every key Speaka keeps in com.apple.bluetooth (all start with "Speaka", BTPSShared.h) and the
+/// app's own settings. Run once the tweak is removed, so nothing writes them back.
++ (void)removeLeftoverPreferences NS_SWIFT_NAME(removeLeftoverPreferences());
 + (nullable NSString *)notifiedVersion NS_SWIFT_NAME(notifiedVersion());
 + (void)setNotifiedVersion:(nullable NSString *)version NS_SWIFT_NAME(setNotifiedVersion(_:));
 

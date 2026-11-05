@@ -9,6 +9,7 @@ SwiftUI code, on Speaka's own background. It offers:
   notifications**;
 - an **Audio Output** window with the three outputs, and iOS's own output picker for Bluetooth earbuds;
 - a **connection line** above the button that says who is connected and where the audio plays;
+- **Uninstall**: held for 4 seconds, it removes the tweak, Speaka's leftovers and the app, with no second prompt;
 - **Credits**, with the app's and the tweak's versions and the license of the interface;
 - **Update Available**, Caz's updater, which installs a newer release's tweak and app and then resprings.
 
@@ -68,6 +69,7 @@ step and the tweak's reason in Caz's warning colour until the speaker's state ch
 | Header | *Speaka*, *iOS 17.0*, then *by Parv*, or what needs your attention in the warning colour |
 | Settings | **Kill Bluetooth**, just the button: `speakahelper kill-bluetooth` kills bluetoothd as `killall -9` does, and launchd starts it again without the speaker. Greyed out during a Start or Stop; a line shows only if it failed. Then **Update notifications**, a switch, with one line saying how often it checks (or, if iOS refused permission, where to allow it) |
 | Audio Output | A window with iPhone speaker, Wired headphones or earbuds, and Any device; a gold checkmark on the one in use; then Choose Output Device |
+| Uninstall | An action row without a chevron, like Caz's Scan. A tap does nothing; held, a fill in the warning colour sweeps across it over 4 seconds while it reads *Keep holding to uninstall*, and runs back if you let go. At 4 seconds, a warning haptic; the row shows a spinner and *Uninstalling...* at 45%, and every other row and the button lock. `speakahelper remove-tweak` runs `dpkg -r com.parv.speaka`, kills bluetoothd so the tweak unloads, closes Settings, and deletes Speaka's files in `/tmp/FTABHarvest` (only names starting with *Speaka* or *BTPS*) and its downloads folder. Then the app removes every *Speaka* key from Bluetooth's preferences and its own settings, and `speakahelper uninstall-app` starts `finish-uninstall` in its own session, which runs `trollstorehelper uninstall com.parv.speaka`. If removing the tweak fails, nothing else is removed and the header shows dpkg's reason |
 | Credits | A window with the app's and the tweak's versions, a line on what iOS's Bluetooth list reports, and Dopamine's license |
 | Connection line | *LAPTOP-XXXX · connected* once the PC sets up the stream and while it's paused, *LAPTOP-XXXX · iPhone speaker* while it plays, *Waiting: no wired headphones plugged in*, or *Connect from your PC* while nothing is connected. How the app knows it's connected, and the PC's name, are under [How it talks to the tweak](#how-it-talks-to-the-tweak) |
 | The button | Start or Stop, as above |

@@ -192,14 +192,20 @@ struct ContentView: View {
 
     // MARK: - Menu
 
+    /// Four rows, like Caz's menu, so the panel is Caz's to the point: 4 x 73 + 10 = 302 pt at y 306.7 on an iPhone 13.
+    /// Uninstall is an action, like Caz's Scan, so no chevron. Once it starts, every other row is locked.
     private var menuItems: [MenuItem] {
-        [
+        let locked = model.uninstalling
+        return [
             MenuItem(id: "settings", title: "Settings", symbol: "gearshape",
-                     chevron: true) { window = .settings },
+                     chevron: true, enabled: !locked) { window = .settings },
             MenuItem(id: "output", title: "Audio Output", symbol: "speaker.wave.2",
-                     chevron: true) { window = .output },
+                     chevron: true, enabled: !locked) { window = .output },
+            MenuItem(id: "uninstall", title: "Uninstall", symbol: "trash",
+                     enabled: model.request == nil && !updater.isBusy,
+                     holdSeconds: 4, busy: locked) { model.uninstall() },
             MenuItem(id: "credits", title: "Credits", symbol: "info.circle",
-                     chevron: true) { window = .credits },
+                     chevron: true, enabled: !locked) { window = .credits },
         ]
     }
 }

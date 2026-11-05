@@ -348,6 +348,23 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
     [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:SPUpdateNotificationsKey];
 }
 
++ (void)removeLeftoverPreferences
+{
+    CFStringRef domain = CFSTR(BTPS_PREFS_DOMAIN);
+    CFArrayRef keys = CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    if (keys) {
+        for (NSString *key in (__bridge NSArray *)keys) {
+            if ([key hasPrefix:@"Speaka"])            // never Bluetooth's own settings
+                CFPreferencesSetValue((__bridge CFStringRef)key, NULL, domain,
+                                      kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+        }
+        CFRelease(keys);
+        CFPreferencesSynchronize(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    }
+    NSString *app = [NSBundle mainBundle].bundleIdentifier;
+    if (app.length) [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:app];
+}
+
 + (NSString *)notifiedVersion
 {
     id version = [[NSUserDefaults standardUserDefaults] objectForKey:SPNotifiedVersionKey];

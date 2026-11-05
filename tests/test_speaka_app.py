@@ -178,7 +178,7 @@ class SpeakaApp(unittest.TestCase):
         self.assertEqual(pinned, {"outputModes", "readStatus", "setOutputMode", "sendAction", "pollRequest",
                                   "connectedComputerName", "pairedComputerName", "lookupSummary",
                                   "updateNotificationsEnabled", "setUpdateNotificationsEnabled", "notifiedVersion",
-                                  "setNotifiedVersion"})
+                                  "setNotifiedVersion", "removeLeftoverPreferences"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -229,7 +229,7 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn('var buttonTitle: String { buttonStops ? "Stop" : "Start" }', model)
         self.assertIn('var buttonSymbol: String { buttonStops ? "stop" : "play" }', model)
         press = block(model, "var canPress: Bool {")
-        self.assertIn("guard request == nil else { return false }", press)
+        self.assertIn("guard request == nil, !uninstalling else { return false }", press)   # v9.8: not while uninstalling
         self.assertIn("case .noTweak, .oldTweak:\n            return false", press)
 
         # Tapping opens the log first, then sends the request; each step of the restart gets a line.
@@ -1224,7 +1224,7 @@ class SpeakaApp(unittest.TestCase):
             # SwiftUI and Combine
             "App", "Scene", "WindowGroup", "View", "ViewBuilder", "Content", "Context", "Text", "Image", "Font",
             "Color", "Button", "ButtonStyle", "Configuration", "VStack", "HStack", "ZStack", "Spacer", "ForEach",
-            "List", "Section", "ScrollView", "GeometryReader", "Capsule", "Circle", "Rectangle", "RoundedRectangle",
+            "List", "Section", "ScrollView", "GeometryReader", "Group", "Animation", "Capsule", "Circle", "Rectangle", "RoundedRectangle",
             "LinearGradient", "StrokeStyle", "TimelineView", "EdgeInsets", "Namespace", "State", "StateObject",
             "ObservedObject", "Environment", "Published", "ObservableObject", "UIViewRepresentable",
             # UIKit, CoreText and AVKit

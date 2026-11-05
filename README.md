@@ -136,6 +136,11 @@ background.
   without the speaker, so use it when devices won't reconnect, then tap **Start**.
 - **Audio Output** opens a window with the three outputs; the current one has a checkmark. **Choose Output Device**
   under them opens iOS's own picker.
+- **Uninstall** removes everything when held for 4 seconds; a tap alone does nothing. While you hold, a fill sweeps
+  across the row; let go early and nothing happens. At 4 seconds the row greys out and reads *Uninstalling...*, with
+  no second prompt: the tweak is removed with dpkg and Bluetooth restarts, Settings closes, Speaka's logs, settings and
+  downloads are deleted, and TrollStore removes the app. If the tweak can't be removed, nothing else is, and the header
+  says why.
 - **Credits** shows the app's and the tweak's versions and the license of the interface, which Caz and Speaka share.
 - **Update Available** appears above the button when a newer release is out; see [Updates](#updates).
 - **Settings** also has **Update notifications**: while Speaka is open, it checks for a new release every 2 minutes,
@@ -216,7 +221,7 @@ Start, Stop, the session and the audio output were here until v9.7; they're in t
 | The sound stopped after a call, Siri or another app | iOS interrupted playback | Pause and play on the PC, or change any audio setting. |
 | **Update Available** never appears | The app checks once per launch; offline, or GitHub's limit of 60 checks an hour was reached | Open the app again later. You can always install from the [latest release](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest) by hand. |
 | *Update failed* after *Installing the tweak* | dpkg reported an error, often because Sileo or Zebra was installing at the same time | Close the package manager and tap **Update** again. Nothing else changed. |
-| Bluetooth misbehaves in general | | Tap **Stop** in the app (its button reads Stop while the speaker is on), or **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`. To remove everything, uninstall. |
+| Bluetooth misbehaves in general | | Tap **Stop** in the app (its button reads Stop while the speaker is on), or **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`. To remove everything, hold **Uninstall** in the app for 4 seconds. |
 
 When something goes wrong, open **View debug log** right away and use **Save Log to iCloud Drive**.
 
@@ -549,6 +554,7 @@ notes.
 | v9.5 | One `.tipa` installs the app and the tweak; Install Tweak; one-download updates | [TESTING-v9.5](docs/history/TESTING-v9.5.md) |
 | v9.6 | Settings with Kill Bluetooth; the PC's name from the audio route; still connected while paused | [TESTING-v9.6](docs/history/TESTING-v9.6.md) |
 | v9.7 | Update notifications; Kill Bluetooth is just a button; Settings > Speaka without what the app does | [TESTING-v9.7](docs/history/TESTING-v9.7.md) |
+| v9.8 | Caz's four-row menu; Uninstall, held for 4 seconds, removes the tweak, its leftovers and the app | [TESTING-v9.8](docs/history/TESTING-v9.8.md) |
 
 | Research note | Topic |
 | --- | --- |

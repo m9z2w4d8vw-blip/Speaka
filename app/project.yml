@@ -47,7 +47,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         # The version is the release's, the same as the tweak's (tools/release_version.sh). CI passes it; these
         # are for local builds, and MARKETING_VERSION matches control's Version.
-        MARKETING_VERSION: "9.7"
+        MARKETING_VERSION: "9.8"
         CURRENT_PROJECT_VERSION: "1"
         ENABLE_PREVIEWS: "NO"
 schemes:

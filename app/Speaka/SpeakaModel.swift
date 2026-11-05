@@ -84,6 +84,8 @@ final class SpeakaModel: ObservableObject {
     @Published private(set) var routePCName: String? = nil
     /// Settings > Kill Bluetooth: running, and why it failed, if it did.
     @Published private(set) var killingBluetooth = false
+    /// Uninstall (v9.8): from the end of the 4 s hold until Speaka is gone, or it fails.
+    @Published private(set) var uninstalling = false
     @Published private(set) var killResult: String? = nil
     /// Settings > Update notifications, and whether iOS refused permission the last time it was turned on.
     @Published private(set) var updateNotifications = SPTweakClient.updateNotificationsEnabled()
@@ -130,7 +132,7 @@ final class SpeakaModel: ObservableObject {
     /// Greyed out while nothing would answer it (no tweak, or an older one still running in Bluetooth) and while a
     /// request is in flight, like Caz's Clean button before a scan.
     var canPress: Bool {
-        guard request == nil else { return false }
+        guard request == nil, !uninstalling else { return false }
         switch snapshot.session {
         case .noTweak, .oldTweak:
             return false
@@ -471,6 +473,41 @@ final class SpeakaModel: ObservableObject {
                 guard let self = self else { return }
                 self.killingBluetooth = false
                 self.killResult = status == 0 ? nil : (reason ?? "Bluetooth couldn't be killed (code \(status)).")
+                self.refresh()
+            }
+        }
+    }
+
+    /// The menu's Uninstall row, held for 4 s; the hold is the prompt, so there's no second one. The tweak goes first,
+    /// as root: dpkg removes it, Bluetooth restarts so it unloads, Settings closes, Speaka's files go. Then Speaka's
+    /// preferences, as you, now that nothing writes them back. Then TrollStore removes the app, in a step of its own
+    /// that outlives Speaka. If the tweak can't be removed, nothing else is, and the header says why.
+    func uninstall() {
+        guard !uninstalling, request == nil else { return }
+        uninstalling = true
+        problem = nil
+        problemSession = nil
+        let helper = Bundle.main.bundlePath + "/speakahelper"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var errors: [String] = []
+            var status = SpeakaSpawnRoot(helper, ["remove-tweak"]) { line in
+                if line.hasPrefix("ERR\t") { errors.append(String(line.dropFirst(4))) }
+            }
+            var fallback = "The tweak couldn't be removed (code \(status))."
+            if status == 0 {
+                SPTweakClient.removeLeftoverPreferences()
+                status = SpeakaSpawnRoot(helper, ["uninstall-app"]) { line in
+                    if line.hasPrefix("ERR\t") { errors.append(String(line.dropFirst(4))) }
+                }
+                fallback = "Speaka couldn't be uninstalled (code \(status))."
+            }
+            guard status != 0 else { return }               // TrollStore closes Speaka from here
+            let reason = errors.last ?? fallback
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.uninstalling = false
+                self.problem = reason
+                self.problemSession = self.snapshot.session
                 self.refresh()
             }
         }
