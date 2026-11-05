@@ -1055,7 +1055,18 @@ class SpeakaApp(unittest.TestCase):
         # A re-run of the same version replaces the notes too, which may have said the app was missing (run 62).
         existing = publish.split('if gh release view "$tag" >/dev/null 2>&1; then', 1)[1].split("elif", 1)[0]
         self.assertIn('gh release upload "$tag" dist/* --clobber', existing)
-        self.assertIn('gh release edit "$tag" --notes-file notes.md', existing)
+        self.assertIn('gh release edit "$tag" --notes-file notes.md --draft=false || return 1', existing)
+        # Publishing retries (run 68 left an unpublished draft): three tries, 30 s apart, each clearing the drafts
+        # GitHub Actions left behind, and every gh step returns its own failure, since set -e is off inside `if`.
+        function = publish.split("publish() {", 1)[1].split("\n          }\n", 1)[0]
+        self.assertIn('select(.draft and .author.login == "github-actions[bot]")', function)
+        self.assertIn('gh api -X DELETE "repos/${GH_REPO}/releases/${id}"', function)
+        for line in function.splitlines():
+            if line.strip().startswith("gh release "):
+                self.assertTrue(line.rstrip().endswith("|| return 1"), line)
+        self.assertIn("for attempt in 1 2 3; do\n            if publish; then\n              break", publish)
+        self.assertIn("sleep 30", publish)
+        self.assertIn('echo "::error::Publishing failed three times"', publish)
         # Each upload gets one more try, 30 s after a failure, with the same artifact; only both failing fails the job.
         for job, name in ((build_job, "Speaka-deb"), (app_job, "Speaka-app")):
             first = job.split("        id: upload\n", 1)[1].split("\n\n", 1)[0]

@@ -24,6 +24,15 @@
 - **Experiments** holds all five research switches under one header, instead of one header each.
 - **Status** and **Debug log** are as they were.
 
+## The first push
+
+Run 68 built everything: the `.deb`, the app carrying it, both artifacts uploaded. Then publishing failed on GitHub's
+side: `gh release create` makes a draft, uploads the files into it and publishes it; one upload was retried and
+refused (*ReleaseAsset.name already exists*), and deleting the half-made draft got *HTTP 500*. So `v9.7.68` was left as
+an unpublished draft, which the updater ignores. Publishing now has three tries, 30 s apart; each first deletes the
+drafts GitHub Actions left behind (never anyone else's), and a re-run that finds a draft publishes it. The next run
+also deletes run 68's draft.
+
 ## Apply and build
 
 Copy the zip's contents over your clone (or let `Update-Speaka.ps1` do it). Nothing needs deleting. The changed files:
@@ -37,6 +46,7 @@ app/Speaka/UpdateNotifications.swift   (new)
 app/Speaka/SpeakaApp.swift, SpeakaUpdater.swift, SpeakaModel.swift, ContentView.swift, Windows.swift
 app/Speaka/Model/SPTweakClient.h, SPTweakClient.m
 tests/test_settings_page.py, test_speaka_app.py, test_v89_session_output.py, test_v894_wired_output.py
+.github/workflows/build.yml      (after run 68: publishing retries and clears leftover drafts)
 README.md, app/README.md, docs/history/TESTING-v9.7.md
 ```
 

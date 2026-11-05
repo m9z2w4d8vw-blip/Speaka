@@ -396,15 +396,37 @@ jobs:
             tag="v${VERSION}"                         # every push to main: v9.3.57
             gh release delete nightly --cleanup-tag --yes >/dev/null 2>&1 || true   # retire the old rolling build
           fi
-          if gh release view "$tag" >/dev/null 2>&1; then
-            # A re-run of the same version: replace the files, and the notes too, which may have said the app was
-            # missing. The updater shows them as the changelog.
-            gh release upload "$tag" dist/* --clobber
-            gh release edit "$tag" --notes-file notes.md
-          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            gh release create "$tag" dist/* --verify-tag --title "${VERSION}" --notes-file notes.md --latest
-          else
-            gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "${VERSION}" --notes-file notes.md --latest
-          fi
+          # GitHub's release service sometimes fails partway. In run 68 an upload was retried and refused ("ReleaseAsset.name
+          # already exists"), then deleting the half-made draft got HTTP 500, so v9.7.68 was never published. So: up to
+          # three tries, 30 s apart, each first clearing drafts that GitHub Actions left behind (never anyone else's).
+          # Inside a function called from `if`, bash ignores set -e, so every step returns its failure itself.
+          publish() {
+            local id
+            for id in $(gh api "repos/${GH_REPO}/releases?per_page=100" \
+                          --jq '.[] | select(.draft and .author.login == "github-actions[bot]") | .id' 2>/dev/null || true); do
+              gh api -X DELETE "repos/${GH_REPO}/releases/${id}" >/dev/null 2>&1 || true
+            done
+            if gh release view "$tag" >/dev/null 2>&1; then
+              # A re-run of the same version: replace the files and the notes, which may have said the app was
+              # missing (the updater shows them as the changelog), and make sure it's published, not a draft.
+              gh release upload "$tag" dist/* --clobber || return 1
+              gh release edit "$tag" --notes-file notes.md --draft=false || return 1
+            elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+              gh release create "$tag" dist/* --verify-tag --title "${VERSION}" --notes-file notes.md --latest || return 1
+            else
+              gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "${VERSION}" --notes-file notes.md --latest || return 1
+            fi
+          }
+          for attempt in 1 2 3; do
+            if publish; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::Publishing failed three times"
+              exit 1
+            fi
+            echo "::warning::Publishing failed (attempt ${attempt} of 3); trying again in 30 s"
+            sleep 30
+          done
 
           echo "Published: https://github.com/${GH_REPO}/releases/tag/${tag}" | tee -a "$GITHUB_STEP_SUMMARY"

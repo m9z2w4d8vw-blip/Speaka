@@ -433,7 +433,8 @@ A second job, after the first, builds the app the way Caz is built, with XcodeGe
 Each push to `main` publishes a full release named after its version (`9.3.57`, tag `v9.3.57`) with the `.deb`,
 `Speaka.tipa`, `Speaka.ipa` and `SHA256SUMS`, marked latest. Its notes are the push's commit messages, which the app's
 changelog shows, and the old rolling **nightly** release is deleted. If the app fails to build, the release still goes
-out with the `.deb`, and the updater updates only the tweak. Versions are `control`'s `Version` plus the run number,
+out with the `.deb`, and the updater updates only the tweak. Publishing is tried up to three times, 30 s apart, and
+clears any draft a failed try left behind, since GitHub's release service sometimes fails partway. Versions are `control`'s `Version` plus the run number,
 for the `.deb` and the app alike (`tools/release_version.sh`), so every release is newer than the last. A tag you push,
 like `v9.4.0`, publishes as `9.4.0`; set `control`'s `Version` (and `MARKETING_VERSION` in `app/project.yml`) to `9.4`
 afterwards.
