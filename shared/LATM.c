@@ -4,14 +4,14 @@
 #include "LATM.h"
 #include <string.h>
 
-typedef struct { const uint8_t *data; size_t len; size_t bit; } BitReader;
+typedef struct { const uint8_t *data; size_t len; size_t bit; int eof; } BitReader;
 
 static int br_read(BitReader *b, unsigned bits, uint32_t *out) {
     uint32_t v = 0;
     if (bits > 32) return 0;
     for (unsigned i = 0; i < bits; ++i) {
         size_t byte = b->bit >> 3;
-        if (byte >= b->len) return 0;                 /* never read past the buffer */
+        if (byte >= b->len) { b->eof = 1; return 0; } /* never read past the buffer; remember it ran out */
         unsigned shift = 7u - (b->bit & 7u);
         v = (v << 1) | ((b->data[byte] >> shift) & 1u);
         b->bit++;
@@ -98,33 +98,38 @@ int latm_parse_audiomuxelement(const uint8_t *in, size_t len, uint8_t *au_out, s
     if (out) *out = z;
     if (!in || !out || !au_out || len == 0) return 0;
 
-    BitReader b = { in, len, 0 };
+    BitReader b = { in, len, 0, 0 };
     uint32_t use_same;
-    if (!br_read(&b, 1, &use_same)) return 0;         /* AudioMuxElement(muxConfigPresent=1): useSameStreamMux */
+    if (!br_read(&b, 1, &use_same)) goto fail;        /* AudioMuxElement(muxConfigPresent=1): useSameStreamMux */
     out->used_same_mux = use_same ? 1u : 0u;
     if (!use_same) {
-        if (!parse_stream_mux_config(&b, out->asc, &out->asc_len)) { *out = z; return 0; }
+        if (!parse_stream_mux_config(&b, out->asc, &out->asc_len)) goto fail;
     }
 
     /* PayloadLengthInfo (Table 1.23) for frameLengthType==0: MuxSlotLengthBytes as a run of 0xFF chunks + remainder. */
     size_t au_len = 0;
     for (;;) {
         uint32_t chunk;
-        if (!br_read(&b, 8, &chunk)) { *out = z; return 0; }
+        if (!br_read(&b, 8, &chunk)) goto fail;
         au_len += chunk;
         if (chunk != 255u) break;
-        if (au_len > len) { *out = z; return 0; }
+        if (au_len > 65536u) goto fail;                /* far beyond any AAC frame: malformed, not a fragment */
     }
 
     /* PayloadMux is au_len bytes, read through the bit reader because it is generally NOT byte-aligned within the
      * element (StreamMuxConfig and PayloadLengthInfo are bit fields). Copy the shifted bytes out. */
-    if (au_len == 0 || au_len > au_cap) { *out = z; return 0; }
-    if (b.bit + au_len * 8u > len * 8u) { *out = z; return 0; }   /* must fit in what remains */
+    if (au_len == 0 || au_len > au_cap) goto fail;
+    if (b.bit + au_len * 8u > len * 8u) { b.eof = 1; goto fail; }  /* declared AU runs past the input: a fragment */
     for (size_t i = 0; i < au_len; ++i) {
         uint32_t byte;
-        if (!br_read(&b, 8, &byte)) { *out = z; return 0; }
+        if (!br_read(&b, 8, &byte)) goto fail;
         au_out[i] = (uint8_t)byte;
     }
     out->au_len = au_len;
     return 1;
+
+fail:
+    *out = z;
+    out->truncated = b.eof ? 1u : 0u;
+    return 0;
 }

@@ -11,7 +11,7 @@ practice and not yet confirmed on this build.
 | AAC capability record | **Verified built** | `sink_build_aac_codec_record` (tested); it is not advertised anywhere yet |
 | AAC config parse | **Verified** | `aac_parse_config` tested, including rejecting ranges and unsupported rates |
 | LATM depacketization | **Verified against ffmpeg** | `latm_parse_audiomuxelement` extracts 25/25 access units byte-identical to ffmpeg's ADTS encode of the same audio |
-| AAC-LC decode to PCM | **Unproven until device run** | `AACDecoder.c` compiles against the real SDK in CI but AudioConverter never runs there; `tools/aac_decode_test` runs it on the phone |
+| AAC-LC decode to PCM | **Verified on macOS in CI; device run pending** | The converter gets bare access units and an ESDS cookie (an earlier version wrongly sent ADTS headers). CI's device-test job decodes the fixture with the real AudioToolbox and compares with ffmpeg; the phone runs the same code through `BTPSAudioHelper --aac-selftest` |
 | Codec dispatch + safe fallback | **Verified** | `codec_decoder_begin` tested: SBC stays SBC; undecodable AAC goes to a silent DISABLED state, never SBC |
 | Ring carries the codec | **Verified** | `AudioRing.codec` / `codec_config` set by `AudioRelaySetCodec`, read by the helper; handshake size check passed on device (ring is 78984 bytes and the helper mapped it) |
 
@@ -34,13 +34,13 @@ practice and not yet confirmed on this build.
 - *Isolated behind an interface:* the AAC capability record is `sink_build_aac_codec_record()` (built and tested).
   Everything that does not need the native layout is done; only the table-write for a second endpoint is missing.
 
-**Identifying the chosen codec at CONFIGURE:**
+**Identifying the chosen codec at CONFIGURE (implemented):**
 - *Verified:* `hook_setconfigind` already sees the local SEID (`a3`). With one Sink (SEID 7 = SBC) the codec is
   always SBC, which is why `AudioRelaySetCodec(A2DP_CODEC_SBC, ...)` is called unconditionally.
-- *Design, not yet implemented:* with an AAC endpoint at (say) SEID 8, the hook would select the codec by which
-  SEID was configured, parse the SRC's 6-byte AAC Codec Specific Information from the CONFIGURE capabilities with
-  `aac_parse_config`, and call `AudioRelaySetCodec(A2DP_CODEC_AAC, csi, 6)`. The CONFIGURE capability parsing reuses
-  `avdtp_decode_caps` (already present) to locate the codec record.
+- *Implemented, protocol level:* the verified RX signaling hook already copies the PC's SET_CONFIGURATION for
+  SEID 7; `avdtp_setconfig_media_codec` (StreamControl.c) reads its Media Codec capability per AVDTP 8.9/8.21, and
+  `hook_setconfigind` publishes that codec (AAC with its 6 Codec Specific bytes) instead of assuming SBC. Logged as
+  `V93_CONFIG_RX` and `V88_CONFIG ... codec=`. With only the SBC endpoint registered it reads SBC.
 
 **Does the config reach the helper before decoding?**
 - *Verified:* `AudioRelaySetCodec` writes `codec` and `codec_config` into the ring header before
@@ -55,20 +55,17 @@ practice and not yet confirmed on this build.
 | Ring payload capacity | **Verified sufficient** | 2048-byte payload; AAC-LC is ≤~853 bytes/access unit at 320 kbps. Fixture elements are 296–401 bytes. |
 | One access unit per packet | **Verified for A2DP** | A2DP sends one AudioMuxElement per media packet; `aac_decoder_decode` handles one element per call. |
 | Decoder state across frames | **Verified** | `AudioConverterReset` on generation change / sequence gap, matching the SBC decoder's reset points. |
-| Config change mid-stream | **Assumption** | A2DP reconfigures via a new CONFIGURE (new generation), which rebuilds the decoder. In-band StreamMuxConfig changes (useSameStreamMux=0 on a later element) carry a fresh ASC; the decoder currently keeps its creation-time config. For AAC-LC at a fixed negotiated rate this is fine; a mid-stream rate change is not handled and would surface as decode errors (dropped frames, never misread). |
-| LATM fragmentation across packets | **Known limitation, fails safe** | If a single AudioMuxElement exceeds the A2DP MTU and is fragmented at the RTP layer, the helper receives a partial element and `latm_parse_audiomuxelement` rejects it (`-11`), dropping the frame. At AAC-LC bitrates frames are well under typical MTUs, so this is rare, but reassembly is not implemented. It never produces wrong audio. |
+| Config change mid-stream | **Implemented** | An in-band StreamMuxConfig that differs from the converter's rebuilds it; a new rate reaches the helper, which restarts its output. Unsupported configs are refused (-14). |
+| LATM fragmentation across packets | **Implemented** | Fragments share an RTP timestamp (RFC 3016); the decoder reassembles them, and a lost fragment costs only its own element. |
 | Multiple access units per element | **Out of scope, rejected** | A2DP uses one AU per element; the parser handles one and rejects `numSubFrames != 0`. |
 
 ## Minimum remaining work for real Bluetooth AAC
 
-1. **Run `tools/aac_decode_test` on the device** and confirm `"pass": true`. This closes the one unproven item in
-   the decode path (AudioConverter actually decoding AAC-LC to PCM on iOS). No Bluetooth needed.
-2. **Register a second AAC Sink endpoint** in `tweak/Hooks.xm` (grow the table to hold an 8th slot; write SEID 8
-   with `sink_build_aac_codec_record()`'s capability bytes using the native layout). **This needs the reverse
-   engineering not done here.**
-3. **Codec selection at CONFIGURE**: pick the codec by the configured SEID, parse the AAC CSI, and call
-   `AudioRelaySetCodec(A2DP_CODEC_AAC, csi, 6)`. Straightforward once step 2 exists.
-4. **Optional robustness**: LATM reassembly for fragmented elements, and handling an in-band ASC change. Neither is
-   required for correctness (both fail safe today); add only if real streams need them.
-
-Steps 1, 3, and 4 need no native reverse engineering. Step 2 is the sole hard blocker.
+1. **Run the device test kit** (`tools/device_test/README.md`) and confirm `"pass": true`: AudioConverter decoding
+   AAC-LC to PCM on iOS. No Bluetooth needed.
+2. **Register a second AAC Sink endpoint** in `tweak/Hooks.xm` (an eighth table slot; a SEID with
+   `sink_build_aac_codec_record()`'s capability bytes, written with the native layout). **This needs the reverse
+   engineering not done here** - the only remaining blocker.
+3. **Accept that SEID** where the hooks match SEID 7 (`a3 == 7u` in `hook_setconfigind`, `(control[2]>>2)==7u` in
+   `hook_receive_signal`, `local_seid=7`). Everything after CONFIGURE - codec identification, the codec in the ring,
+   the decoder - already works for whichever codec the PC chooses.

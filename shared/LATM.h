@@ -28,6 +28,10 @@ typedef struct {
     unsigned asc_len;
     size_t au_len;            /* bytes of AAC access unit copied into the caller's au_out buffer */
     unsigned used_same_mux;   /* 1 if this element reused the prior StreamMuxConfig */
+    /* On failure: 1 if the element was well-formed so far but ended early (the input ran out, or the declared
+     * access-unit length exceeds what arrived). That is what a fragment of a larger AudioMuxElement looks like, so
+     * the caller can append the next fragment and parse again. 0 for anything malformed or out of scope. */
+    unsigned truncated;
 } LATMFrame;
 
 /* Parse one AudioMuxElement from in[0..len), copying the extracted AAC access unit (PayloadMux) into au_out (up to

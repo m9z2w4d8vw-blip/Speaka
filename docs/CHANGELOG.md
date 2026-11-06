@@ -46,6 +46,16 @@ falls back to SBC if AAC setup fails.
 
 On-device steps and how to read the codec line: [AAC-TESTING.md](AAC-TESTING.md).
 
+Later in this cycle:
+- **Decoder fix:** AudioConverter now gets each bare access unit with an ESDS magic cookie. The previous build sent
+  ADTS-headed packets to a raw-AAC converter, which Apple's decoder reads as corrupt data.
+- **`BTPSAudioHelper --aac-selftest`:** decodes an embedded fixture through the real decoder on the phone and prints
+  JSON (`tools/device_test`). It replaces the standalone test binary, which the phone killed at launch (exit 137).
+- **The codec at CONFIGURE** is read from the PC's SET_CONFIGURATION instead of assumed; fragmented LATM elements
+  are reassembled; an in-band configuration change rebuilds the converter.
+- **CI:** a separate `device-test` job decodes the fixture with the real AudioToolbox on macOS and builds the phone
+  kit; the release doesn't wait for it.
+
 ## v9.8
 
 - **Caz's four-row menu:** Settings, Audio Output, Uninstall, Credits, at Caz's exact sizes and positions.

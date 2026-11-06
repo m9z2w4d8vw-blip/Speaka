@@ -8,6 +8,7 @@
  * made bluetoothd START or SUSPEND the PC's stream, which the helper answered with another session change.
  */
 #include "CodecDecoder.h"
+#include "AACSelfTest.h"
 #include "OutputPolicy.h"
 #include "../shared/SpeakaShared.h"
 #import <stdio.h>
@@ -722,7 +723,11 @@ static int stream_service_main(void) {
 int main(int argc, const char **argv) {
     @autoreleasepool {
         if (argc == 2 && strcmp(argv[1], "--stream-service") == 0) return stream_service_main();
-        hlog(stderr, "usage: BTPSAudioHelper --stream-service (launchd starts it: com.parv.speaka.audio)\n");   /* timestamped, as every line is */
+        /* A diagnostic, run by hand over SSH: decodes an embedded AAC fixture through the real decoder (AACSelfTest.c).
+         * It touches nothing else - no ring, no preferences, no audio output. */
+        if (argc >= 2 && strcmp(argv[1], "--aac-selftest") == 0) return aac_selftest_main(argc, argv);
+        hlog(stderr, "usage: BTPSAudioHelper --stream-service (launchd starts it: com.parv.speaka.audio)\n"
+                     "       BTPSAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=NAME|all]\n");   /* timestamped, as every line is */
         return 2;
     }
 }

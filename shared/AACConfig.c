@@ -79,3 +79,57 @@ size_t aac_build_asc(const AACConfig *cfg, uint8_t out[2]) {
     out[1] = (uint8_t)(asc & 0xffu);
     return 2u;
 }
+
+int aac_config_from_asc(const uint8_t *asc, size_t len, AACConfig *out) {
+    AACConfig c = {0,0,0,0,0};
+    if (out) *out = c;
+    if (!asc || !out || len < 2) return 0;
+    unsigned v = ((unsigned)asc[0] << 8) | asc[1];
+    unsigned object = (v >> 11) & 0x1fu, freq_index = (v >> 7) & 0x0fu, channels = (v >> 3) & 0x0fu;
+    unsigned frame_length_flag = (v >> 2) & 1u, depends_core = (v >> 1) & 1u, extension = v & 1u;
+    static const uint32_t rates[] = {96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
+                                     16000, 12000, 11025, 8000, 7350};
+    if (object != 2u || frame_length_flag || depends_core || extension) return 0;
+    if (freq_index >= sizeof rates / sizeof rates[0]) return 0;
+    c.object_type = AAC_OBJECT_TYPE_MPEG4_LC;
+    c.sample_rate = rates[freq_index];
+    c.channels = (uint8_t)channels;
+    if (!aac_config_supported(&c)) return 0;
+    *out = c;
+    return 1;
+}
+
+/* One ISO/IEC 14496-1 descriptor header: tag, then the length as four 7-bit groups (0x80 continuation bits). */
+static size_t esds_header(uint8_t *out, uint8_t tag, uint32_t length) {
+    out[0] = tag;
+    out[1] = (uint8_t)(0x80u | ((length >> 21) & 0x7fu));
+    out[2] = (uint8_t)(0x80u | ((length >> 14) & 0x7fu));
+    out[3] = (uint8_t)(0x80u | ((length >> 7) & 0x7fu));
+    out[4] = (uint8_t)(length & 0x7fu);
+    return 5u;
+}
+
+size_t aac_build_esds(const uint8_t *asc, size_t asc_len, uint32_t avg_bitrate, uint8_t *out, size_t cap) {
+    if (!asc || !out || asc_len == 0 || asc_len > 64u) return 0;
+    size_t dsi = 5u + asc_len;                  /* DecoderSpecificInfo (tag 0x05): the ASC */
+    size_t dcd = 5u + 13u + dsi;                /* DecoderConfigDescriptor (tag 0x04) */
+    size_t sl = 5u + 1u;                        /* SLConfigDescriptor (tag 0x06) */
+    size_t es_payload = 3u + dcd + sl;          /* ES_ID(2) + flags(1) + the two descriptors */
+    size_t total = 5u + es_payload;
+    if (cap < total) return 0;
+    size_t o = 0;
+    o += esds_header(out + o, 0x03u, (uint32_t)es_payload);
+    out[o++] = 0x00u; out[o++] = 0x00u;         /* ES_ID 0 */
+    out[o++] = 0x00u;                           /* no dependence, no URL, no OCR stream, priority 0 */
+    o += esds_header(out + o, 0x04u, (uint32_t)(dcd - 5u));
+    out[o++] = 0x40u;                           /* objectTypeIndication: Audio ISO/IEC 14496-3 */
+    out[o++] = 0x15u;                           /* streamType 5 (audio) << 2, upStream 0, reserved 1 */
+    out[o++] = 0x00u; out[o++] = 0x00u; out[o++] = 0x00u;   /* bufferSizeDB: unspecified */
+    for (int shift = 24; shift >= 0; shift -= 8) out[o++] = (uint8_t)(avg_bitrate >> shift);   /* maxBitrate */
+    for (int shift = 24; shift >= 0; shift -= 8) out[o++] = (uint8_t)(avg_bitrate >> shift);   /* avgBitrate */
+    o += esds_header(out + o, 0x05u, (uint32_t)asc_len);
+    for (size_t i = 0; i < asc_len; ++i) out[o++] = asc[i];
+    o += esds_header(out + o, 0x06u, 1u);
+    out[o++] = 0x02u;                           /* SLConfig predefined: reserved for MP4 files */
+    return o;
+}

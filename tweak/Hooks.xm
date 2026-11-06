@@ -280,6 +280,8 @@ static uint64_t g_sink_owner;
 static uint64_t g_media_callbacks[27];
 static StreamControl g_stream_control;
 static pthread_mutex_t g_stream_control_lock = PTHREAD_MUTEX_INITIALIZER;
+/* The codec the PC chose in its SET_CONFIGURATION for our Sink (note_pc_configuration), read by SetConfigInd. */
+static struct { unsigned valid, codec; uint8_t info[16]; size_t info_len; } g_pc_config;
 static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
     uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7)
 {
@@ -290,11 +292,20 @@ static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a
         __atomic_store_n(&g_sink_stream_handle,(unsigned)a2,__ATOMIC_RELEASE);
         memset(&g_stream_control,0,sizeof g_stream_control);
         g_stream_control.local_seid=7;g_stream_control.remote_seid=(unsigned)a4;
-        /* v9.3: tell the helper which codec this session uses. Only the SBC endpoint exists, so it is SBC;
-         * when an AAC endpoint is registered (the native blocker), its CONFIGURE would publish AAC here. */
-        AudioRelaySetCodec(A2DP_CODEC_SBC,NULL,0);
+        /* Tell the helper the codec the PC chose, read from its SET_CONFIGURATION (note_pc_configuration). An AAC
+         * configuration goes with its 6 Codec Specific bytes; any other non-SBC codec is published as it is, so the
+         * helper refuses it rather than decoding it as SBC. If the PDU wasn't seen: SBC, the only codec SEID 7 offers. */
+        unsigned codec=g_pc_config.valid?g_pc_config.codec:A2DP_CODEC_SBC;
+        if(codec==A2DP_CODEC_AAC && g_pc_config.info_len==AAC_CSI_BYTES)
+            AudioRelaySetCodec(A2DP_CODEC_AAC,g_pc_config.info,AAC_CSI_BYTES);
+        else if(codec!=A2DP_CODEC_SBC)
+            AudioRelaySetCodec(codec,g_pc_config.info,g_pc_config.info_len);
+        else
+            AudioRelaySetCodec(A2DP_CODEC_SBC,NULL,0);
+        unsigned seen=g_pc_config.valid;
         pthread_mutex_unlock(&g_stream_control_lock);
-        SpeakaLogNow("V88_CONFIG handle=%u local_seid=7 remote_seid=%u",(unsigned)a2,(unsigned)a4);
+        SpeakaLogNow("V88_CONFIG handle=%u local_seid=7 remote_seid=%u codec=%s%s",(unsigned)a2,(unsigned)a4,
+                     avdtp_codec_name((uint8_t)codec),seen?"":" (assumed: SET_CONFIGURATION not seen)");
         /* v9.6: the PC's side of the speaker's stream, for the app's connection line (diag.v95.peer). */
         SpeakaSetStatus("diag.v95.peer","configured: the PC set up the speaker's stream");
     }
@@ -736,6 +747,29 @@ static void install_config_hook(uintptr_t base, int uuid_ok)
     SpeakaLogNow("V80_CFG_GET installed at image+0x1f5f20; one-shot seven=%s; otherwise original return unchanged", g_seven_armed ? "ARMED" : "OFF");
 }
 
+/* The codec the PC chose for our Sink, from its SET_CONFIGURATION (AVDTP 8.9, parsed by StreamControl.c): protocol
+ * bytes the RX hook already copies, no bluetoothd structure. Read by hook_setconfigind for the helper. */
+static void note_pc_configuration(const uint8_t *p,size_t length)
+{
+    unsigned seid=0,media=0,codec=0;
+    uint8_t info[16]={0};
+    size_t info_len=0;
+    int ok=avdtp_setconfig_media_codec(p,length,&seid,&media,&codec,info,sizeof info,&info_len);
+    pthread_mutex_lock(&g_stream_control_lock);
+    memset(&g_pc_config,0,sizeof g_pc_config);
+    if(ok && media==0u) {                                   /* media type 0: audio */
+        g_pc_config.valid=1;
+        g_pc_config.codec=codec;
+        memcpy(g_pc_config.info,info,info_len);
+        g_pc_config.info_len=info_len;
+    }
+    pthread_mutex_unlock(&g_stream_control_lock);
+    char hex[64]="";
+    log_hex(info,ok?info_len:0,hex,sizeof hex);
+    SpeakaLogNow("V93_CONFIG_RX seid=%u ok=%d media=%u codec=%s info=[%s]",seid,ok,media,
+                 ok?avdtp_codec_name((uint8_t)codec):"none",hex);
+}
+
 /* Verified exact-image AVDTP RX signaling dispatcher; CID, packet ptr, length.
  * These logs are inbound SIGNALING, not RTP media or TX response receipts. */
 #define SIGNAL_RX_DISPATCH 0x000d3b08ul
@@ -747,8 +781,10 @@ static uint64_t hook_receive_signal(uint64_t cid, uint64_t ptr, uint64_t length,
     uint8_t control[1024];
     if(length>=2u && length<=sizeof control && safe_peek(ptr,control,(size_t)length)) {
         if(length>=4u && (control[0]&3u)==0u && ((control[0]>>2)&3u)==0u &&
-           (control[1]&63u)==3u && (control[2]>>2)==7u)
+           (control[1]&63u)==3u && (control[2]>>2)==7u) {
             __atomic_store_n(&g_pc_signal_cid,cid,__ATOMIC_RELEASE);
+            note_pc_configuration(control,(size_t)length);
+        }
         note_signal(0,cid,control,(size_t)length);
     }
     if (length >= 2u && length <= 1024u) {

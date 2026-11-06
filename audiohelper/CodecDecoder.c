@@ -25,12 +25,17 @@ uint32_t codec_decoder_begin(CodecDecoder *d, const AudioRing *header, int aac_e
             if (log) log("V93_CODEC aac negotiated but SpeakaAAC off; no audio (not decoding AAC as SBC)\n");
         } else if (!aac_parse_config(header->codec_config, &cfg) || !aac_config_supported(&cfg)) {
             if (log) log("V93_CODEC aac config invalid/unsupported; no audio\n");
-        } else if (!(d->aac = aac_decoder_create(&cfg))) {
-            if (log) log("V93_CODEC aac decoder setup failed; no audio\n");
         } else {
-            d->codec = A2DP_CODEC_AAC;
-            if (log) log("V93_CODEC aac rate=%u channels=%u\n", cfg.sample_rate, cfg.channels);
-            return d->codec;
+            AACDecoderCreateStatus cs;
+            if (!(d->aac = aac_decoder_create_ex(&cfg, NULL, &cs))) {
+                if (log) log("V93_CODEC aac decoder setup failed specific_status=%d new_status=%d; no audio\n",
+                             cs.specific_status, cs.new_status);
+            } else {
+                d->codec = A2DP_CODEC_AAC;
+                if (log) log("V93_CODEC aac rate=%u channels=%u software=%d cookie_status=%d\n", cfg.sample_rate,
+                             cfg.channels, cs.used_software, cs.cookie_status);
+                return d->codec;
+            }
         }
         d->codec = CODEC_DISABLED;      /* AAC session we can't decode: silent, never SBC-misdecoded */
         return d->codec;

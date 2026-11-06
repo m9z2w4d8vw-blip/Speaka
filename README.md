@@ -236,11 +236,14 @@ found is in [docs/BLUETOOTHD.md](docs/BLUETOOTHD.md).
 │   └── Tweak.h                    what those files share
 ├── shared/                    used by the tweak and the helper (and SpeakaShared.h by Settings and the app)
 │   ├── SpeakaShared.h             preference keys, notification names, log paths
-│   └── AudioRing.c/.h             the shared-memory ring that carries the audio
+│   ├── AudioRing.c/.h             the shared-memory ring that carries the audio
+│   └── AACConfig.c/.h, LATM.c/.h  experimental AAC: the A2DP AAC configuration, and LATM depacketizing
 ├── Makefile, control, Speaka.plist
 ├── audiohelper/               the audio helper, installed as BTPSAudioHelper (built by audiohelper/Makefile)
 │   ├── AudioHelper.m              playback: reading the ring, the audio session, choosing the output
 │   ├── SBCDecoder.c/.h            decoding the PC's SBC with Google's libsbc (vendor_sbc/, fetched at build time)
+│   ├── AACDecoder.c/.h, CodecDecoder.c/.h   experimental AAC decoding (AudioToolbox), and choosing the decoder
+│   ├── AACSelfTest.c/.h           BTPSAudioHelper --aac-selftest, the on-device AAC check (tools/device_test)
 │   └── OutputPolicy.h             where to play and when to let go, in plain C the tests run
 ├── settings/                  the Speaka page in Settings, installed as SpeakaPrefs.bundle
 │   ├── SettingsPage.m             the status rows and the debug log's buttons
@@ -248,8 +251,9 @@ found is in [docs/BLUETOOTHD.md](docs/BLUETOOTHD.md).
 ├── app/                       the Speaka app (SwiftUI, Caz's design), packaged as Speaka.tipa / Speaka.ipa
 ├── layout/                    install scripts, the helper's launchd job, the Settings entry
 ├── tests/                     one file per part: test_tweak, test_audio, test_start_stop, test_settings_page,
-│                              test_app, test_build (many compile the real C sources)
-├── tools/                     offline scripts
+│                              test_app, test_aac, test_build (many compile the real C sources);
+│                              fakes/ stands in for AudioToolbox where Apple's SDK isn't available
+├── tools/                     offline scripts; device_test/, the kit for checks run on the phone over SSH
 ├── docs/                      CHANGELOG.md (every release), BLUETOOTHD.md (how each part of bluetoothd was found)
 └── .github/workflows/         CI: test, build, package, publish
 ```

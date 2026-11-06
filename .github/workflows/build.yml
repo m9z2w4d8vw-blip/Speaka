@@ -105,24 +105,19 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s tests -v
 
-      - name: Build the on-device AAC decode test (real iPhoneOS AudioToolbox)
-        run: |
-          set -euo pipefail
-          # Compiles Speaka's real AACDecoder.c / LATM.c / AACConfig.c against the actual iPhoneOS SDK and links the
-          # real AudioToolbox. This is the only build that exercises the AudioConverter path; it is signed and
-          # uploaded so it can be run on a device over SSH (tools/aac_decode_test/README.md).
-          make -C tools/aac_decode_test
-          file tools/aac_decode_test/aac_decode_test
-
-      - name: Upload the AAC decode test
-        uses: actions/upload-artifact@v4
-        with:
-          name: aac-decode-test
-          path: tools/aac_decode_test/aac_decode_test
-          if-no-files-found: error
-
       - name: Build and package
         run: make clean package FINALPACKAGE=1
+
+      - name: Record the helper's Mach-O and signature facts
+        # Evidence only, never a failure: a binary known to launch on the phone, to compare with the device test kit.
+        continue-on-error: true
+        run: |
+          f="$(find .theos/_ -name BTPSAudioHelper -type f | head -n 1)"
+          echo "== $f"
+          lipo -info "$f"
+          otool -arch all -l "$f" | grep -A4 LC_BUILD_VERSION
+          otool -arch all -L "$f"
+          codesign -dvvv "$f" 2>&1 | grep -E "Format|CodeDirectory|Hash|CDHash|Identifier" || true
 
       - name: Verify the package
         run: |
@@ -341,6 +336,71 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           overwrite: true
+
+
+  # ---------------------------------------------------------------------------------------------
+  # Experimental AAC: decode the fixture with the REAL AudioToolbox on macOS, and build the kit for the phone
+  # (launch-test binaries and the runner script). The release does not wait for this job, so a failure here
+  # never holds back an SBC release - but it is a visible red job.
+  # ---------------------------------------------------------------------------------------------
+  device-test:
+    name: AAC decode (real AudioToolbox) + device test kit
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_ENV_HINTS: '1'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: |
+          XCODE=/Applications/Xcode_16.4.app
+          if [ -d "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
+          xcodebuild -version
+          echo "iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Decode the AAC fixture with the real AudioToolbox
+        env:
+          CI: 'true'
+          SPEAKA_REAL_AAC: '1'
+        run: python3 -m unittest -v tests.test_aac.RealAudioToolbox tests.test_aac.SelfTestRuns tests.test_aac.DecoderContract tests.test_aac.LATMDepacketizer
+
+      - name: Build the iOS launch-test binaries
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          CC="$(xcrun --sdk iphoneos --find clang)"
+          mkdir -p kit
+          # The recipe of the build the phone killed (plain clang, arm64 only), on a program with no frameworks...
+          "$CC" -isysroot "$SDK" -arch arm64 -miphoneos-version-min=14.0 -O2 tools/device_test/smoke.c -o kit/speaka-smoke-arm64
+          # ...and with the arm64e slice the working helper has.
+          "$CC" -isysroot "$SDK" -arch arm64 -arch arm64e -miphoneos-version-min=15.0 -O2 tools/device_test/smoke.c -o kit/speaka-smoke-fat
+          ldid -S kit/speaka-smoke-arm64
+          ldid -S kit/speaka-smoke-fat
+          cp tools/device_test/speaka-device-test.sh kit/
+          echo "commit ${GITHUB_SHA::7}, run ${GITHUB_RUN_NUMBER}" > kit/BUILD.txt
+
+      - name: Record the binaries' Mach-O and signature facts
+        run: |
+          for f in kit/speaka-smoke-arm64 kit/speaka-smoke-fat; do
+            echo "== $f"
+            lipo -info "$f"
+            otool -arch all -l "$f" | grep -A4 LC_BUILD_VERSION
+            otool -arch all -L "$f"
+            codesign -dvvv "$f" 2>&1 | grep -E "Format|CodeDirectory|Hash|CDHash|Identifier" || true
+          done | tee kit/inspect.txt
+
+      - name: Upload the device test kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: speaka-device-test-${{ github.run_number }}
+          path: kit/
+          if-no-files-found: error
 
   # ---------------------------------------------------------------------------------------------
   # Publish. Only main and v* tags; only if the build job succeeded.

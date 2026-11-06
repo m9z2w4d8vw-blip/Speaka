@@ -87,6 +87,17 @@ unsigned aac_sampling_frequency_index(uint32_t sample_rate);
  * This is standard MPEG-4; a decoder (Apple's AudioConverter, or any other) initialises from it. */
 size_t aac_build_asc(const AACConfig *cfg, uint8_t out[2]);
 
+/* The reverse, for an in-band AudioSpecificConfig (LATM StreamMuxConfig): read AAC-LC object type, sampling index and
+ * channels from a 2-byte ASC. Returns 1 and fills out (object_type is set to MPEG-4 LC) only for an ASC this decoder
+ * supports: AAC-LC, 1024-sample frames, no core coder, no extension, 44.1/48 kHz, mono/stereo. 0 otherwise. */
+int aac_config_from_asc(const uint8_t *asc, size_t len, AACConfig *out);
+
+/* Build the MPEG-4 ESDS magic cookie (ISO/IEC 14496-1 ES_Descriptor > DecoderConfigDescriptor > DecoderSpecificInfo,
+ * plus SLConfigDescriptor) around an AudioSpecificConfig, in the 4-byte expandable-length layout Apple's own AAC
+ * cookies use. This is what AudioFileStream hands AudioConverter as kAudioConverterDecompressionMagicCookie.
+ * Returns the cookie length (39 for a 2-byte ASC), or 0 if cap is too small or asc_len is 0 or over 64. */
+size_t aac_build_esds(const uint8_t *asc, size_t asc_len, uint32_t avg_bitrate, uint8_t *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

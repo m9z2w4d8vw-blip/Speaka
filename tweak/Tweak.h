@@ -262,6 +262,10 @@ typedef struct {
 } StreamControl;
 /* Serialized by caller; direction 0=RX, 1=successfully queued TX.
  * -1=no change; 0=stop; 1=matched START accept. */
+/* The Media Codec capability of a SET_CONFIGURATION command (AVDTP 8.9/8.21): which codec the PC chose, and its
+ * codec-specific bytes. Returns 1 and fills the outputs, 0 if the PDU is not such a command. Pure; host-tested. */
+int avdtp_setconfig_media_codec(const uint8_t *p,size_t length,unsigned *acp_seid,unsigned *media_type,
+                                unsigned *codec_type,uint8_t *info,size_t info_cap,size_t *info_len);
 int stream_control_signal(StreamControl *,unsigned direction,uint64_t cid,
                     const uint8_t *,size_t length);
 #ifdef __cplusplus

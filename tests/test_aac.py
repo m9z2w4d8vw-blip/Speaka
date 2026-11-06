@@ -1,18 +1,22 @@
-"""AAC-LC support (experimental): the pure-C parts that run on this host.
+"""AAC-LC support (experimental).
 
-What is tested here, with the host C compiler and independently generated fixtures:
-  - the A2DP AAC Codec Specific Information: building Speaka's Sink capability, and parsing a chosen configuration;
-  - the MPEG-4 AudioSpecificConfig and the sampling-frequency index;
-  - the AVDTP media-codec record the tweak would advertise;
-  - the ADTS framing the helper wraps each packet in;
-  - the codec dispatch falling back to SBC.
+Run on every host:
+  - the A2DP AAC capability and configuration, the MPEG-4 AudioSpecificConfig, the ESDS magic cookie (checked
+    against the one ffmpeg's MP4 muxer writes);
+  - LATM depacketization against ffmpeg's own output, including truncated elements;
+  - the decoder's contract with AudioConverter, through tests/fakes (one bare access unit per packet, a packet
+    description, the software class description, the cookie), fragment reassembly and in-band config changes;
+  - the codec dispatch, which never decodes AAC as SBC;
+  - the on-device self-test (BTPSAudioHelper --aac-selftest): stages, markers, JSON.
 
-What is NOT tested here, because there is no Apple toolchain on the host and no device:
-  - AudioConverter actually decoding AAC to PCM (AACDecoder.c is compiled in CI, not run);
-  - that Windows negotiates AAC rather than SBC (that needs the on-device procedure and a packet capture).
-These are the AAC blockers; see docs/CHANGELOG.md. Every SBC test in test_audio.py still runs unchanged.
+Run only where the real AudioToolbox exists, in CI's device-test job (SPEAKA_REAL_AAC=1 on macOS):
+  - RealAudioToolbox: Apple's actual AAC decoder decodes the fixture, and the PCM matches ffmpeg's decode of it.
+The phone runs the same decoder through the self-test (tools/device_test).
 """
 import ctypes
+import importlib.util
+import json
+import math
 import os
 import shutil
 import sys
@@ -130,314 +134,600 @@ class AACCapabilityRecord(unittest.TestCase):
             self.assertEqual(out[2], 0xC0)                   # same CSI the capability builder makes
 
 
-class ADTSFraming(unittest.TestCase):
-    """The ADTS header AACDecoder wraps each packet in is pure bit-packing; check it directly by compiling the
-    builder in isolation (AudioConverter is not involved and not available on the host)."""
-    def test_adts_header_fields(self):
-        src = r'''
-        #include <stdint.h>
-        #include <stddef.h>
-        #define ADTS_HEADER_BYTES 7u
-        /* Copy of AACDecoder.c's build_adts, kept in sync; this is standard ISO/IEC 13818-7 bit-packing. */
-        void build(uint8_t header[7], unsigned freq_index, unsigned channels, size_t frame_len) {
-            size_t total = ADTS_HEADER_BYTES + frame_len; unsigned profile = 1u;
-            header[0]=0xffu; header[1]=0xf1u;
-            header[2]=(uint8_t)((profile<<6)|(freq_index<<2)|((channels>>2)&0x1u));
-            header[3]=(uint8_t)(((channels&0x3u)<<6)|((total>>11)&0x3u));
-            header[4]=(uint8_t)((total>>3)&0xffu);
-            header[5]=(uint8_t)(((total&0x7u)<<5)|0x1fu);
-            header[6]=0xfcu;
-        }'''
-        with tempfile.TemporaryDirectory() as tmp:
-            c = pathlib.Path(tmp) / "adts.c"
-            c.write_text(src)
-            lib = pathlib.Path(tmp) / "adts.so"
-            subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC",
-                            "-o", str(lib), str(c)], check=True)
-            build = ctypes.CDLL(str(lib)).build
-            build.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint, ctypes.c_uint, ctypes.c_size_t]
-            header = (ctypes.c_uint8 * 7)()
-            build(header, 3, 2, 357)                          # 48 kHz, stereo, 357-byte frame
-            self.assertEqual(header[0], 0xff)
-            self.assertEqual(header[1] & 0xf6, 0xf0)          # syncword + MPEG-4 + Layer 0
-            self.assertEqual((header[2] >> 2) & 0x0f, 3)      # freq index
-            total = 7 + 357
-            carried = ((header[3] & 0x03) << 11) | (header[4] << 3) | (header[5] >> 5)
-            self.assertEqual(carried, total)                  # frame length round-trips
-            # channel config spans byte2 bit0 and byte3 bits7-6.
-            chan = ((header[2] & 0x01) << 2) | (header[3] >> 6)
-            self.assertEqual(chan, 2)
+
+FAKES = ROOT / "tests/fakes"
+DECODER_SOURCES = ["audiohelper/AACDecoder.c", "shared/LATM.c", "shared/AACConfig.c"]
+IS_MAC = sys.platform == "darwin"
 
 
-class CodecDispatchFallback(unittest.TestCase):
-    """codec_decoder_begin falls back to SBC when AAC is off, mis-configured, or decoder setup fails.
+def compile_c(tmp, name, sources, *, real_audiotoolbox=False, shared=False, extra_includes=(), lenient=()):
+    """Build an executable or shared library from repo-relative sources. With real_audiotoolbox the real framework is
+    used (macOS only); otherwise tests/fakes stands in for it and is compiled in. `lenient` sources (upstream code)
+    build without -Werror; ours always build with it."""
+    out = pathlib.Path(tmp) / name
+    includes = ["-I", str(ROOT / "audiohelper"), "-I", str(ROOT)]
+    for inc in extra_includes:
+        includes += ["-I", str(inc)]
+    objects = []
+    for src in lenient:
+        obj = pathlib.Path(tmp) / (pathlib.Path(src).stem + ".lenient.o")
+        r = subprocess.run(["cc", "-std=gnu11", "-fPIC", "-O1", *includes, "-c", str(ROOT / src), "-o", str(obj)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise AssertionError("compile failed:\n" + r.stderr)
+        objects.append(str(obj))
+    cmd = ["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", *includes]
+    srcs = [str(ROOT / s) for s in sources] + objects
+    if real_audiotoolbox:
+        link = ["-framework", "AudioToolbox"]
+    else:
+        cmd += ["-I", str(FAKES)]
+        srcs.append(str(FAKES / "fake_audiotoolbox.c"))
+        link = [] if IS_MAC else ["-lm"]
+    if shared:
+        cmd += ["-shared", "-fPIC"]
+    r = subprocess.run(cmd + srcs + ["-o", str(out)] + link, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise AssertionError("compile failed:\n" + r.stderr)
+    return out
 
-    This compiles the real helper sources, so it is honest about linkage the way CI is:
-      - the real vendored libsbc (audiohelper/vendor_sbc), skipped if it has not been fetched (local runs without
-        tools/fetch_google_sbc.sh); CI fetches it before this step, so CI always runs this test;
-      - AudioToolbox: on a platform that has the real framework (macOS), link it and use its header; elsewhere a
-        small stub header with inline definitions, so there is nothing unresolved to link. The AAC decoder's
-        AudioConverter calls are never reached on the SBC-fallback assertions, but the library must link cleanly.
-    """
-    @classmethod
-    def setUpClass(cls):
-        vendor = ROOT / "audiohelper/vendor_sbc"
-        if not (vendor / "sbc.c").exists() or not (vendor / "bits.c").exists():
-            # Locally this is a legitimate skip (no fetch). In CI libsbc is always fetched first, so skipping there
-            # would hide a real link failure - fail loudly instead. (Phase 4: a test must not silently skip past a
-            # missing dependency that CI is supposed to provide.)
-            if os.environ.get("CI"):
-                raise AssertionError("vendored libsbc missing in CI; the fetch step must run before the tests")
-            raise unittest.SkipTest("vendored libsbc not present; run tools/fetch_google_sbc.sh (CI does)")
-        cls.have_audiotoolbox = sys.platform == "darwin"
 
-    def _build(self, tmp, *extra_sources, shim=None):
-        """Build a .so from the real helper sources plus libsbc, with AudioToolbox real-or-stubbed. Returns its path."""
-        t = pathlib.Path(tmp)
-        includes = ["-I" + str(ROOT), "-I" + str(ROOT / "audiohelper"),
-                    "-I" + str(ROOT / "audiohelper/vendor_sbc")]
-        link = []
-        if self.have_audiotoolbox:
-            link = ["-framework", "AudioToolbox"]
-        else:
-            (t / "AudioToolbox").mkdir(exist_ok=True)
-            (t / "AudioToolbox/AudioToolbox.h").write_text(
-                "#pragma once\n#include <stdint.h>\n#include <stddef.h>\ntypedef int32_t OSStatus;enum{noErr=0};\n"
-                "typedef uint32_t UInt32;typedef double Float64;\n"
-                "typedef struct{Float64 mSampleRate;UInt32 mFormatID,mFormatFlags,mBytesPerPacket,mFramesPerPacket,"
-                "mBytesPerFrame,mChannelsPerFrame,mBitsPerChannel,mReserved;}AudioStreamBasicDescription;\n"
-                "typedef struct{UInt32 mNumberChannels,mDataByteSize;void*mData;}AudioBuffer;"
-                "typedef struct{UInt32 mNumberBuffers;AudioBuffer mBuffers[1];}AudioBufferList;\n"
-                "typedef struct{int64_t mStartOffset;UInt32 mVariableFramesInPacket,mDataByteSize;}AudioStreamPacketDescription;\n"
-                "typedef struct X*AudioConverterRef;enum{kAudioFormatLinearPCM=1,kAudioFormatMPEG4AAC=2};\n"
-                "enum{kAudioFormatFlagIsSignedInteger=4,kAudioFormatFlagIsPacked=8,kMPEG4Object_AAC_LC=2};\n"
-                "typedef OSStatus(*AudioConverterComplexInputDataProc)(AudioConverterRef,UInt32*,AudioBufferList*,AudioStreamPacketDescription**,void*);\n"
-                "static inline OSStatus AudioConverterNew(const AudioStreamBasicDescription*a,const AudioStreamBasicDescription*b,AudioConverterRef*c){(void)a;(void)b;*c=(AudioConverterRef)1;return 0;}\n"
-                "static inline OSStatus AudioConverterDispose(AudioConverterRef c){(void)c;return 0;}\n"
-                "static inline OSStatus AudioConverterReset(AudioConverterRef c){(void)c;return 0;}\n"
-                "static inline OSStatus AudioConverterFillComplexBuffer(AudioConverterRef c,AudioConverterComplexInputDataProc p,void*x,UInt32*n,AudioBufferList*b,AudioStreamPacketDescription*d){(void)c;(void)p;(void)x;(void)b;(void)d;*n=0;return 0;}\n")
-            includes = ["-I" + str(t)] + includes
-        sources = [str(ROOT / "audiohelper/CodecDecoder.c"), str(ROOT / "audiohelper/AACDecoder.c"),
-                   str(ROOT / "audiohelper/SBCDecoder.c"), str(ROOT / "shared/AACConfig.c"),
-                   str(ROOT / "shared/LATM.c"),
-                   str(ROOT / "audiohelper/vendor_sbc/sbc.c"), str(ROOT / "audiohelper/vendor_sbc/bits.c")]
-        if shim:
-            (t / "shim.c").write_text(shim)
-            sources.append(str(t / "shim.c"))
-        lib = t / "dispatch.so"
-        # libsbc is upstream fixed-point C; build it without -Werror, our code with it.
-        objs = []
-        for i, src in enumerate(sources):
-            obj = str(t / ("%d.o" % i))
-            strict = [] if "/vendor_sbc/" in src else ["-Werror"]
-            r = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", *strict, "-fPIC", *includes, "-c", src, "-o", obj],
-                               capture_output=True, text=True)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            objs.append(obj)
-        r = subprocess.run(["cc", "-shared", "-fPIC", *objs, *link, "-o", str(lib)], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return str(lib)
+def fixture_elements():
+    """The ffmpeg LATM fixture as bare AudioMuxElements (LOAS framing stripped), and ffmpeg's ADTS access units."""
+    loas = (ROOT / "tests/fixtures/aac_latm_48k_stereo.loas").read_bytes()
+    elements, i = [], 0
+    while i + 3 <= len(loas):
+        word = (loas[i] << 8) | loas[i + 1]
+        if (word >> 5) != 0x2B7:
+            break
+        length = ((word & 0x1f) << 8) | loas[i + 2]
+        elements.append(loas[i + 3:i + 3 + length])
+        i += 3 + length
+    data = (ROOT / "tests/fixtures/aac_latm_48k_stereo.aus").read_bytes()
+    count, off, aus = struct.unpack_from("<I", data, 0)[0], 4, []
+    for _ in range(count):
+        length = struct.unpack_from("<I", data, off)[0]
+        aus.append(data[off + 4:off + 4 + length])
+        off += 4 + length
+    return elements, aus
 
-    def test_defaults_to_sbc_without_aac(self):
-        shim = r'''
-        #include "CodecDecoder.h"
-        unsigned begin_codec(unsigned codec, const unsigned char *csi, int aac_enabled) {
-            AudioRing h; h.codec = codec;
-            for (int i=0;i<8;i++) h.codec_config[i]=csi[i];
-            CodecDecoder d; unsigned used = codec_decoder_begin(&d, &h, aac_enabled, 0);
-            codec_decoder_end(&d); return used;
-        }'''
-        with tempfile.TemporaryDirectory() as tmp:
-            begin = ctypes.CDLL(self._build(tmp, shim=shim)).begin_codec
-            begin.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
-            begin.restype = ctypes.c_uint
-            SBC, AAC, DISABLED = 0x00, 0x02, 0xffffffff
-            lc_48_stereo = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x84, 0x80, 0, 0, 0, 0)
-            unsupported = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x14, 0x80, 0, 0, 0, 0)   # 96 kHz
-            self.assertEqual(begin(SBC, lc_48_stereo, 1), SBC)      # SBC session: SBC
-            # The key guarantee: AAC negotiated but undecodable must NOT fall back to SBC (that would decode AAC as
-            # noise). These two paths reject before the converter is ever built, so they are DISABLED on every
-            # platform, real AudioToolbox or the test's success-stub alike.
-            self.assertEqual(begin(AAC, lc_48_stereo, 0), DISABLED)  # switch off
-            self.assertEqual(begin(AAC, unsupported, 1), DISABLED)   # unsupported rate (rejected before converter)
-            # A good config builds a decoder and selects AAC. On macOS that is the real AudioConverter; on the host
-            # the test links a stub AudioConverterNew that succeeds, so the result is AAC either way. The contract
-            # that matters for safety is the two DISABLED cases above: AAC is never silently treated as SBC.
-            self.assertEqual(begin(AAC, lc_48_stereo, 1), AAC)
+
+class CreateStatus(ctypes.Structure):
+    _fields_ = [("specific_status", ctypes.c_int32), ("new_status", ctypes.c_int32), ("cookie_status", ctypes.c_int32),
+                ("used_software", ctypes.c_int), ("cookie_set", ctypes.c_int)]
+
+
+class Decoder:
+    """AACDecoder through tests/aac_decoder_driver.c."""
+    RAW, ADTS = 0, 1
+    ESDS, ASC, NONE = 0, 1, 2
+
+    def __init__(self, lib):
+        self.lib = lib
+        lib.drv_create.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint,
+                                   ctypes.POINTER(CreateStatus)]
+        lib.drv_create.restype = ctypes.c_void_p
+        lib.drv_decode.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_char_p,
+                                   ctypes.c_uint, ctypes.POINTER(ctypes.c_int16), ctypes.c_uint,
+                                   ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+        lib.drv_decode.restype = ctypes.c_int
+        lib.aac_decoder_destroy.argtypes = [ctypes.c_void_p]
+        for fn in ("aac_decoder_last_status", "aac_decoder_config_changes", "aac_decoder_fragments_joined",
+                   "aac_decoder_fragments_dropped"):
+            getattr(lib, fn).argtypes = [ctypes.c_void_p]
+        lib.aac_decoder_last_status.restype = ctypes.c_int32
+        assert lib.drv_create_status_size() == ctypes.sizeof(CreateStatus), "CreateStatus mirror is out of date"
+        self.handle = None
+
+    def create(self, framing=-1, cookie=-1, prefer_software=-1, rate=48000, channels=2):
+        self.status = CreateStatus()
+        self.handle = self.lib.drv_create(framing, cookie, prefer_software, rate, channels, ctypes.byref(self.status))
+        return self.handle
+
+    def decode(self, data, sequence, timestamp, generation=1):
+        pcm = (ctypes.c_int16 * 2048)()
+        samples, rate = ctypes.c_uint(), ctypes.c_uint()
+        r = self.lib.drv_decode(self.handle, generation, sequence, timestamp, bytes(data), len(data), pcm, 2048,
+                                ctypes.byref(samples), ctypes.byref(rate))
+        return r, samples.value, rate.value, pcm
+
+    def stat(self, name):
+        return getattr(self.lib, "aac_decoder_" + name)(self.handle)
+
+    def destroy(self):
+        if self.handle:
+            self.lib.aac_decoder_destroy(self.handle)
+            self.handle = None
 
 
 
-class LATMDepacketizer(unittest.TestCase):
-    """The LATM AudioMuxElement parser, checked against real ffmpeg output (not our own encoder).
-
-    Fixtures (generated once with ffmpeg, shipped so CI needs no ffmpeg):
-      aac_latm_48k_stereo.loas - ffmpeg `-f latm` output: LOAS-framed AudioMuxElements;
-      aac_latm_48k_stereo.aus  - ffmpeg `-f adts` output of the same audio, as raw AAC access units.
-    The test strips LOAS framing, runs each AudioMuxElement through latm_parse_audiomuxelement, and asserts the
-    extracted access units are byte-identical to the ADTS ones. That is an end-to-end check that depacketization
-    yields valid AAC access units, which the earlier ADTS-wrapping-the-raw-payload code did not.
-    """
+class ESDSAndASC(unittest.TestCase):
+    """The ESDS magic cookie against the esds box ffmpeg's MP4 muxer writes for the same stream, and the ASC reader."""
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        lib = pathlib.Path(cls.tmp.name) / "latm.so"
-        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC", "-I", str(ROOT),
-                        "-o", str(lib), str(ROOT / "shared/LATM.c")], check=True)
-        cls.lib = ctypes.CDLL(str(lib))
-        cls.lib.latm_parse_audiomuxelement.argtypes = [
-            ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t,
-            ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t, ctypes.c_void_p]
-        cls.lib.latm_parse_audiomuxelement.restype = ctypes.c_int
+        cls.lib = build_lib(cls.tmp.name, "shared/AACConfig.c")
+        cls.lib.aac_build_esds.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint32,
+                                           ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
+        cls.lib.aac_build_esds.restype = ctypes.c_size_t
+        cls.lib.aac_config_from_asc.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                                ctypes.POINTER(AACConfigParsing.AACConfig)]
+        cls.lib.aac_config_from_asc.restype = ctypes.c_int
 
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    # LATMFrame: asc[8], asc_len, au_len (size_t), used_same_mux.
-    class LATMFrame(ctypes.Structure):
-        _fields_ = [("asc", ctypes.c_uint8 * 8), ("asc_len", ctypes.c_uint),
-                    ("au_len", ctypes.c_size_t), ("used_same_mux", ctypes.c_uint)]
+    def esds(self, asc, bitrate=0, cap=64):
+        out = (ctypes.c_uint8 * 64)()
+        n = self.lib.aac_build_esds(asc, len(asc), bitrate, out, cap)
+        return bytes(out[:n])
 
-    def parse(self, element):
+    def test_esds_matches_ffmpeg_mp4_muxer(self):
+        mine = self.esds(bytes([0x11, 0x90]))
+        ffmpeg = (ROOT / "tests/fixtures/aac_esds_ffmpeg.bin").read_bytes()
+        self.assertEqual(len(mine), len(ffmpeg))
+        # Bytes 5-6: ES_ID, the MP4 track number in ffmpeg's box (0 in a cookie). Bytes 15-25: buffer size and
+        # bitrates, which ffmpeg measured from the stream. Everything else is the layout and must be identical.
+        masked = set(range(5, 7)) | set(range(15, 26))
+        for k, (a, b) in enumerate(zip(mine, ffmpeg)):
+            if k not in masked:
+                self.assertEqual(a, b, f"byte {k}")
+        self.assertEqual(mine[26:33], bytes([0x05, 0x80, 0x80, 0x80, 0x02, 0x11, 0x90]))   # the ASC inside
+
+    def test_esds_bitrate_and_limits(self):
+        cookie = self.esds(bytes([0x11, 0x90]), bitrate=256000)
+        self.assertEqual(struct.unpack(">II", cookie[18:26]), (256000, 256000))
+        self.assertEqual(self.esds(bytes([0x11, 0x90]), cap=38), b"")
+        self.assertEqual(self.esds(b""), b"")
+
+    def test_config_from_asc(self):
+        cfg = AACConfigParsing.AACConfig()
+        self.assertEqual(self.lib.aac_config_from_asc(bytes([0x11, 0x90]), 2, ctypes.byref(cfg)), 1)
+        self.assertEqual((cfg.sample_rate, cfg.channels), (48000, 2))
+        self.assertEqual(self.lib.aac_config_from_asc(bytes([0x12, 0x08]), 2, ctypes.byref(cfg)), 1)
+        self.assertEqual((cfg.sample_rate, cfg.channels), (44100, 1))
+        for bad in ([0x10, 0x10],    # 96 kHz
+                    [0x11, 0x94],    # 960-sample frames
+                    [0x29, 0x90],    # object type 5 (SBR), not AAC-LC
+                    [0x11]):         # too short
+            self.assertEqual(self.lib.aac_config_from_asc(bytes(bad), len(bad), ctypes.byref(cfg)), 0, bad)
+
+
+class FixtureHeaderInSync(unittest.TestCase):
+    def test_committed_header_matches_the_fixture(self):
+        spec = importlib.util.spec_from_file_location("make_aac_fixture_header",
+                                                      ROOT / "tools/make_aac_fixture_header.py")
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        self.assertEqual((ROOT / "audiohelper/AACSelfTestFixture.h").read_text(), gen.render(),
+                         "the fixture changed: run python3 tools/make_aac_fixture_header.py")
+
+
+class CodecDispatchFallback(unittest.TestCase):
+    """codec_decoder_begin: SBC sessions use SBC; an AAC session it can't decode goes DISABLED (silent), never SBC.
+    Compiles the real SBCDecoder.c with the real vendored libsbc; tests/fakes stands in for AudioToolbox."""
+    @classmethod
+    def setUpClass(cls):
+        vendor = ROOT / "audiohelper/vendor_sbc"
+        if not (vendor / "sbc.c").exists() or not (vendor / "bits.c").exists():
+            if os.environ.get("CI"):
+                raise AssertionError("vendored libsbc missing in CI; the fetch step must run before the tests")
+            raise unittest.SkipTest("vendored libsbc not present; run tools/fetch_google_sbc.sh (CI does)")
+        cls.tmp = tempfile.TemporaryDirectory()
+        shim = pathlib.Path(cls.tmp.name) / "shim.c"
+        shim.write_text(r"""
+            #include "CodecDecoder.h"
+            unsigned begin_codec(unsigned codec, const unsigned char *csi, int aac_enabled) {
+                AudioRing h; h.codec = codec;
+                for (int i = 0; i < 8; i++) h.codec_config[i] = csi[i];
+                CodecDecoder d; unsigned used = codec_decoder_begin(&d, &h, aac_enabled, 0);
+                codec_decoder_end(&d); return used;
+            }""")
+        lib = compile_c(cls.tmp.name, "dispatch.so",
+                        ["audiohelper/CodecDecoder.c", "audiohelper/SBCDecoder.c", *DECODER_SOURCES, str(shim)],
+                        shared=True, extra_includes=[vendor],
+                        lenient=["audiohelper/vendor_sbc/sbc.c", "audiohelper/vendor_sbc/bits.c"])
+        cls.begin = ctypes.CDLL(str(lib)).begin_codec
+        cls.begin.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
+        cls.begin.restype = ctypes.c_uint
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_never_decodes_aac_as_sbc(self):
+        SBC, AAC, DISABLED = 0x00, 0x02, 0xffffffff
+        lc_48_stereo = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x84, 0x80, 0, 0, 0, 0)
+        unsupported = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x14, 0x80, 0, 0, 0, 0)   # 96 kHz
+        self.assertEqual(self.begin(SBC, lc_48_stereo, 1), SBC)
+        self.assertEqual(self.begin(AAC, lc_48_stereo, 0), DISABLED)     # AAC negotiated, switch off
+        self.assertEqual(self.begin(AAC, unsupported, 1), DISABLED)      # rejected before any converter exists
+        self.assertEqual(self.begin(AAC, lc_48_stereo, 1), AAC)          # decodable: AAC
+        self.assertEqual(self.begin(0x7f, lc_48_stereo, 1), DISABLED)    # unknown codec: never guessed
+
+
+class LATMDepacketizer(unittest.TestCase):
+    """latm_parse_audiomuxelement against ffmpeg: the access units it extracts from ffmpeg's LATM stream must be
+    byte-identical to the ones in ffmpeg's ADTS encode of the same audio."""
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.lib = build_lib(cls.tmp.name, "shared/LATM.c")
+        cls.lib.latm_parse_audiomuxelement.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                                       ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t, ctypes.c_void_p]
+        cls.lib.latm_parse_audiomuxelement.restype = ctypes.c_int
+        cls.elements, cls.aus = fixture_elements()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    class LATMFrame(ctypes.Structure):
+        _fields_ = [("asc", ctypes.c_uint8 * 8), ("asc_len", ctypes.c_uint), ("au_len", ctypes.c_size_t),
+                    ("used_same_mux", ctypes.c_uint), ("truncated", ctypes.c_uint)]
+
+    def parse(self, element, cap=8192):
         au = (ctypes.c_uint8 * 8192)()
         fr = self.LATMFrame()
-        buf = (ctypes.c_uint8 * len(element)).from_buffer_copy(element)
-        ok = self.lib.latm_parse_audiomuxelement(buf, len(element), au, 8192, ctypes.byref(fr))
+        ok = self.lib.latm_parse_audiomuxelement(bytes(element), len(element), au, cap, ctypes.byref(fr))
         return ok, bytes(au[:fr.au_len]), fr
 
-    @staticmethod
-    def strip_loas(stream):
-        """ffmpeg LOAS: 0x2B7 (11-bit sync) + 13-bit length + AudioMuxElement."""
-        out, i = [], 0
-        while i + 3 <= len(stream):
-            word = (stream[i] << 8) | stream[i + 1]
-            if (word >> 5) != 0x2B7:
-                break
-            length = ((word & 0x1f) << 8) | stream[i + 2]
-            out.append(stream[i + 3:i + 3 + length])
-            i += 3 + length
-        return out
-
-    @staticmethod
-    def adts_aus(path):
-        import struct
-        data = path.read_bytes()
-        n = struct.unpack_from("<I", data, 0)[0]
-        aus, off = [], 4
-        for _ in range(n):
-            length = struct.unpack_from("<I", data, off)[0]; off += 4
-            aus.append(data[off:off + length]); off += length
-        return aus
-
     def test_extracts_access_units_matching_ffmpeg_adts(self):
-        loas = (ROOT / "tests/fixtures/aac_latm_48k_stereo.loas").read_bytes()
-        elements = self.strip_loas(loas)
-        self.assertGreater(len(elements), 10)
-        expected = self.adts_aus(ROOT / "tests/fixtures/aac_latm_48k_stereo.aus")
-        self.assertEqual(len(elements), len(expected))
+        self.assertEqual(len(self.elements), len(self.aus))
+        self.assertGreater(len(self.elements), 10)
         asc_frames = 0
-        for i, (element, want) in enumerate(zip(elements, expected)):
+        for i, (element, want) in enumerate(zip(self.elements, self.aus)):
             ok, au, fr = self.parse(element)
-            self.assertEqual(ok, 1, f"element {i} failed to parse")
-            self.assertEqual(au, want, f"access unit {i} does not match ffmpeg's ADTS AU")
+            self.assertEqual(ok, 1, f"element {i}")
+            self.assertEqual(au, want, f"access unit {i}")
             if fr.asc_len:
                 asc_frames += 1
-                self.assertEqual(bytes(fr.asc[:fr.asc_len]), bytes([0x11, 0x90]))  # 48 kHz stereo AAC-LC
-        self.assertGreaterEqual(asc_frames, 1)   # at least the first element carries StreamMuxConfig
+                self.assertEqual(bytes(fr.asc[:fr.asc_len]), bytes([0x11, 0x90]))
+        self.assertGreaterEqual(asc_frames, 1)
+
+    def test_truncated_elements_are_flagged_as_fragments(self):
+        for element in (self.elements[0], self.elements[1]):   # with and without a StreamMuxConfig
+            for cut in (1, 2, 3, 5, len(element) // 2, len(element) - 1):
+                ok, _, fr = self.parse(element[:cut])
+                self.assertEqual((ok, fr.truncated), (0, 1), f"cut at {cut} of {len(element)}")
 
     def test_rejects_malformed_and_out_of_scope(self):
-        # Empty, and a single byte that claims useSameStreamMux=1 then truncates before PayloadLengthInfo.
         self.assertEqual(self.parse(b"")[0], 0)
-        self.assertEqual(self.parse(b"\x80")[0], 0)              # useSameStreamMux=1, no length info
-        # useSameStreamMux=0 then an audioMuxVersion=1 (unsupported): first two bits 0 1...
-        self.assertEqual(self.parse(bytes([0x40, 0x00, 0x00]))[0], 0)
-        # A valid element truncated mid-AU: take a real one and cut its last byte.
-        loas = (ROOT / "tests/fixtures/aac_latm_48k_stereo.loas").read_bytes()
-        element = self.strip_loas(loas)[1]                       # a useSameStreamMux=1 frame
-        self.assertEqual(self.parse(element[:-1])[0], 0)         # claimed AU length now overruns
+        ok, _, fr = self.parse(bytes([0x40, 0x00, 0x00]))      # audioMuxVersion 1: out of scope, not a fragment
+        self.assertEqual((ok, fr.truncated), (0, 0))
 
     def test_au_capacity_is_respected(self):
-        loas = (ROOT / "tests/fixtures/aac_latm_48k_stereo.loas").read_bytes()
-        element = self.strip_loas(loas)[0]
-        au = (ctypes.c_uint8 * 16)()                             # far too small for a 288-byte AU
-        fr = self.LATMFrame()
-        buf = (ctypes.c_uint8 * len(element)).from_buffer_copy(element)
-        ok = self.lib.latm_parse_audiomuxelement(buf, len(element), au, 16, ctypes.byref(fr))
-        self.assertEqual(ok, 0)                                  # refuses rather than overflowing
+        ok, _, fr = self.parse(self.elements[0], cap=16)       # far too small for a 288-byte access unit
+        self.assertEqual((ok, fr.truncated), (0, 0))
 
 
+class DecoderContract(unittest.TestCase):
+    """What AACDecoder hands AudioConverter, recorded by tests/fakes: the converter must get exactly ffmpeg's access
+    units, one per packet, with a packet description, from Apple's software decoder class, with the ESDS cookie."""
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.lib = ctypes.CDLL(str(compile_c(cls.tmp.name, "decoder.so", [*DECODER_SOURCES, "tests/aac_decoder_driver.c"],
+                                            shared=True)))
+        cls.elements, cls.aus = fixture_elements()
 
-class OnDeviceHarnessBuilds(unittest.TestCase):
-    """The on-device AAC decode harness (tools/aac_decode_test) must stay buildable and correct. CI builds it against
-    the real iPhoneOS SDK, but that build is far from the test step, so a missing source, a changed decoder
-    signature, or a broken fixture would only surface late. This compiles the harness logic as C on the host against
-    a linkable fake AudioConverter that emits 1024 frames per access unit, runs it over the real fixture, and checks
-    the accounting. It exercises the real AACDecoder.c, LATM.c, AACConfig.c and the real fixture - only AudioToolbox
-    is faked, which the host cannot provide. A real-decoder run happens on the device (README.md)."""
-    def test_harness_compiles_and_accounts_correctly(self):
-        cc = shutil.which("cc")
-        self.assertIsNotNone(cc)
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = pathlib.Path(tmp)
-            # Regenerate the embedded fixture header from the shipped fixtures.
-            gen = subprocess.run([sys.executable, str(ROOT / "tools/aac_decode_test/make_fixture_header.py")],
-                                 capture_output=True, text=True)
-            self.assertEqual(gen.returncode, 0, gen.stderr)
-            self.assertTrue((ROOT / "tools/aac_decode_test/fixture_data.h").exists())
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
 
-            # A C-compilable copy of the harness: drop the two Objective-C constructs (Foundation import and
-            # @autoreleasepool), and make the relative includes absolute.
-            src = (ROOT / "tools/aac_decode_test/aac_decode_test.m").read_text()
-            src = src.replace("#import <Foundation/Foundation.h>", "")
-            src = src.replace("    @autoreleasepool {", "    {")
-            src = src.replace('#include "../../shared/AACConfig.h"', '#include "%s/shared/AACConfig.h"' % ROOT)
-            src = src.replace('#include "../../shared/AudioRing.h"', '#include "%s/shared/AudioRing.h"' % ROOT)
-            src = src.replace('#include "../../audiohelper/AACDecoder.h"', '#include "%s/audiohelper/AACDecoder.h"' % ROOT)
-            src = src.replace('#include "fixture_data.h"', '#include "%s/tools/aac_decode_test/fixture_data.h"' % ROOT)
-            (tmp / "harness.c").write_text(src)
+    def setUp(self):
+        for name in ("fake_at_fail_specific", "fake_at_reject_cookie"):
+            ctypes.c_int.in_dll(self.lib, name).value = 0
+        for name in ("fake_at_created", "fake_at_disposed", "fake_at_packets", "fake_at_bad_desc",
+                     "fake_at_extra_packets", "fake_at_cookie_len", "fake_at_packet_log_len"):
+            ctypes.c_uint.in_dll(self.lib, name).value = 0
+        self.dec = Decoder(self.lib)
 
-            # A linkable fake AudioConverter emitting a quiet non-silent ramp, 1024 frames per access unit.
-            (tmp / "AudioToolbox").mkdir()
-            (tmp / "AudioToolbox/AudioToolbox.h").write_text(
-                "#pragma once\n#include <stdint.h>\ntypedef int32_t OSStatus;enum{noErr=0};\n"
-                "typedef uint32_t UInt32;typedef double Float64;\n"
-                "typedef struct{Float64 mSampleRate;UInt32 mFormatID,mFormatFlags,mBytesPerPacket,mFramesPerPacket,"
-                "mBytesPerFrame,mChannelsPerFrame,mBitsPerChannel,mReserved;}AudioStreamBasicDescription;\n"
-                "typedef struct{UInt32 mNumberChannels,mDataByteSize;void*mData;}AudioBuffer;"
-                "typedef struct{UInt32 mNumberBuffers;AudioBuffer mBuffers[1];}AudioBufferList;\n"
-                "typedef struct{int64_t mStartOffset;UInt32 mVariableFramesInPacket,mDataByteSize;}AudioStreamPacketDescription;\n"
-                "typedef struct X*AudioConverterRef;enum{kAudioFormatLinearPCM=1,kAudioFormatMPEG4AAC=2};\n"
-                "enum{kAudioFormatFlagIsSignedInteger=4,kAudioFormatFlagIsPacked=8,kMPEG4Object_AAC_LC=2};\n"
-                "typedef OSStatus(*AudioConverterComplexInputDataProc)(AudioConverterRef,UInt32*,AudioBufferList*,AudioStreamPacketDescription**,void*);\n"
-                "OSStatus AudioConverterNew(const AudioStreamBasicDescription*,const AudioStreamBasicDescription*,AudioConverterRef*);\n"
-                "OSStatus AudioConverterDispose(AudioConverterRef);\n"
-                "OSStatus AudioConverterReset(AudioConverterRef);\n"
-                "OSStatus AudioConverterFillComplexBuffer(AudioConverterRef,AudioConverterComplexInputDataProc,void*,UInt32*,AudioBufferList*,AudioStreamPacketDescription*);\n")
-            (tmp / "fake_at.c").write_text(
-                '#include "AudioToolbox/AudioToolbox.h"\n'
-                "OSStatus AudioConverterNew(const AudioStreamBasicDescription*a,const AudioStreamBasicDescription*b,AudioConverterRef*c){(void)a;(void)b;*c=(AudioConverterRef)1;return 0;}\n"
-                "OSStatus AudioConverterDispose(AudioConverterRef c){(void)c;return 0;}\n"
-                "OSStatus AudioConverterReset(AudioConverterRef c){(void)c;return 0;}\n"
-                "OSStatus AudioConverterFillComplexBuffer(AudioConverterRef c,AudioConverterComplexInputDataProc p,void*x,UInt32*io,AudioBufferList*o,AudioStreamPacketDescription*d){"
-                "(void)c;(void)p;(void)x;(void)d;UInt32 n=*io;if(n>1024)n=1024;int16_t*b=o->mBuffers[0].mData;"
-                "for(UInt32 i=0;i<n*2;i++)b[i]=(int16_t)((i%256)*4);*io=n;o->mBuffers[0].mDataByteSize=n*4;return 0;}\n")
+    def tearDown(self):
+        self.dec.destroy()
 
-            exe = tmp / "harness"
-            build = subprocess.run(
-                [cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I", str(tmp),
-                 str(tmp / "harness.c"), str(ROOT / "audiohelper/AACDecoder.c"),
-                 str(ROOT / "shared/LATM.c"), str(ROOT / "shared/AACConfig.c"), str(tmp / "fake_at.c"),
-                 "-lm", "-o", str(exe)], capture_output=True, text=True)
-            self.assertEqual(build.returncode, 0, build.stderr)
-            run = subprocess.run([str(exe)], capture_output=True, text=True)
-            # pass==true only if the harness walked all 25 elements and accounted 25*1024 frames.
-            self.assertIn('"elements": 25', run.stdout)
-            self.assertIn('"decoded_ok": 25', run.stdout)
-            self.assertIn('"errors": 0', run.stdout)
-            self.assertIn('"pcm_frames": 25600', run.stdout)
-            self.assertIn('"decoded_rate": 48000', run.stdout)
-            self.assertIn('"pass": true', run.stdout)
-            self.assertEqual(run.returncode, 0, run.stdout)
+    def fake(self, name):
+        return ctypes.c_uint.in_dll(self.lib, name).value
+
+    def packets(self):
+        lens = (ctypes.c_uint * 256).in_dll(self.lib, "fake_at_packet_lens")
+        log = (ctypes.c_uint8 * 65536).in_dll(self.lib, "fake_at_packet_log")
+        out, off = [], 0
+        for i in range(min(self.fake("fake_at_packets"), 256)):
+            out.append(bytes(log[off:off + lens[i]]))
+            off += lens[i]
+        return out
+
+    def cookie(self):
+        return bytes((ctypes.c_uint8 * 256).in_dll(self.lib, "fake_at_cookie")[:self.fake("fake_at_cookie_len")])
+
+    def decode_all(self, elements, expect=0):
+        for i, element in enumerate(elements):
+            r, samples, rate, _ = self.dec.decode(element, i, i * 1024)
+            self.assertEqual(r, expect, f"element {i}")
+            if expect == 0:
+                self.assertEqual((samples, rate), (1024, 48000))
+
+    def test_raw_access_units_software_decoder_and_esds_cookie(self):
+        self.assertTrue(self.dec.create())
+        st = self.dec.status
+        self.assertEqual((st.used_software, st.cookie_set, st.specific_status, st.new_status), (1, 1, 0, 0))
+        self.assertEqual((self.fake("fake_at_class_type"), self.fake("fake_at_class_subtype"),
+                          self.fake("fake_at_class_mfr")), (0x61646563, 0x61616320, 0x6170706c))   # adec, aac , appl
+        esds = (ROOT / "tests/fixtures/aac_esds_ffmpeg.bin").read_bytes()
+        self.assertEqual(self.cookie()[:5], esds[:5])
+        self.assertEqual(self.cookie()[26:33], bytes([0x05, 0x80, 0x80, 0x80, 0x02, 0x11, 0x90]))
+        self.decode_all(self.elements)
+        self.assertEqual(self.packets(), self.aus)            # the bare access units, nothing more, nothing less
+        self.assertEqual((self.fake("fake_at_bad_desc"), self.fake("fake_at_extra_packets")), (0, 0))
+
+    def test_adts_framing_prefixes_a_valid_header(self):
+        self.assertTrue(self.dec.create(framing=Decoder.ADTS, cookie=Decoder.NONE))
+        self.assertEqual(self.cookie(), b"")
+        self.decode_all(self.elements)
+        for packet, au in zip(self.packets(), self.aus):
+            self.assertEqual(packet[7:], au)
+            self.assertEqual(packet[0], 0xff)
+            self.assertEqual(packet[1] & 0xf6, 0xf0)
+            self.assertEqual(((packet[3] & 3) << 11) | (packet[4] << 3) | (packet[5] >> 5), 7 + len(au))
+
+    def test_asc_cookie(self):
+        self.assertTrue(self.dec.create(cookie=Decoder.ASC))
+        self.assertEqual(self.cookie(), bytes([0x11, 0x90]))
+
+    def test_falls_back_when_the_software_decoder_is_unavailable(self):
+        ctypes.c_int.in_dll(self.lib, "fake_at_fail_specific").value = 1
+        self.assertTrue(self.dec.create())
+        st = self.dec.status
+        self.assertEqual((st.used_software, st.specific_status, st.new_status), (0, 0x666d743f, 0))   # 'fmt?'
+        self.decode_all(self.elements[:3])
+
+    def test_a_refused_cookie_is_not_fatal(self):
+        ctypes.c_int.in_dll(self.lib, "fake_at_reject_cookie").value = 1
+        self.assertTrue(self.dec.create())
+        self.assertEqual((self.dec.status.cookie_set, self.dec.status.cookie_status), (0, 0x21646174))  # '!dat'
+        self.decode_all(self.elements[:3])
+
+    def test_fragments_are_reassembled(self):
+        self.assertTrue(self.dec.create())
+        sequence = 0
+        for i, element in enumerate(self.elements):
+            third = len(element) // 3
+            for k, piece in enumerate((element[:third], element[third:2 * third], element[2 * third:])):
+                r, samples, rate, _ = self.dec.decode(piece, sequence, i * 1024)
+                sequence += 1
+                self.assertEqual(r, 0 if k == 2 else 1, f"element {i} fragment {k}")
+        self.assertEqual(self.packets(), self.aus)
+        self.assertEqual((self.dec.stat("fragments_joined"), self.dec.stat("fragments_dropped")),
+                         (len(self.elements), 0))
+
+    def test_a_lost_fragment_costs_only_its_element(self):
+        self.assertTrue(self.dec.create())
+        sequence = 0
+        for i, element in enumerate(self.elements):
+            half = len(element) // 2
+            for k, piece in enumerate((element[:half], element[half:])):
+                if not (i == 5 and k == 1):                  # lose the second half of element 5
+                    self.dec.decode(piece, sequence, i * 1024)
+                sequence += 1
+        self.assertEqual(self.packets(), self.aus[:5] + self.aus[6:])   # every other access unit, exactly
+
+    def test_in_band_config_change_rebuilds_the_converter(self):
+        self.assertTrue(self.dec.create())
+        first = bytearray(self.elements[0])
+        self.assertEqual(first[2:4], bytes([0x11, 0x90]))    # the StreamMuxConfig's ASC is byte-aligned here
+        first[2:4] = bytes([0x12, 0x10])                      # 44.1 kHz stereo
+        r, samples, rate, _ = self.dec.decode(first, 0, 0)
+        self.assertEqual((r, rate, self.dec.stat("config_changes")), (0, 44100, 1))
+        later = next(i for i, e in enumerate(self.elements) if i > 0 and not e[0] >> 7)   # the next StreamMuxConfig
+        for i in range(1, later + 1):
+            r, samples, rate, _ = self.dec.decode(self.elements[i], i, i * 1024)
+            self.assertEqual(r, 0)
+        self.assertEqual((rate, self.dec.stat("config_changes")), (48000, 2))
+
+    def test_unsupported_in_band_config_is_refused(self):
+        self.assertTrue(self.dec.create())
+        first = bytearray(self.elements[0])
+        first[2:4] = bytes([0x10, 0x10])                      # 96 kHz: not supported
+        self.assertEqual(self.dec.decode(first, 0, 0)[0], -14)
+        self.assertEqual(self.packets(), [])                 # nothing reached the converter
+
+    def test_malformed_element_is_an_error(self):
+        self.assertTrue(self.dec.create())
+        self.assertEqual(self.dec.decode(bytes([0x40, 0x00, 0x00]), 0, 0)[0], -11)
+
+
+class SelfTestRuns(unittest.TestCase):
+    """BTPSAudioHelper --aac-selftest (AACSelfTest.c), built with the helper's dispatch (tests/aac_selftest_main.c).
+    With tests/fakes everywhere: stages, markers, JSON, and that its checks reject bad audio. On macOS also linked
+    against the real AudioToolbox, to prove it builds and creates a converter there."""
+    SOURCES = ["tests/aac_selftest_main.c", "audiohelper/AACSelfTest.c"] + DECODER_SOURCES
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.exe = compile_c(cls.tmp.name, "selftest-fake", cls.SOURCES)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def run_selftest(self, *args, exe=None, env=None):
+        return subprocess.run([str(exe or self.exe), "--aac-selftest", *args], capture_output=True, text=True,
+                              timeout=300, env={**os.environ, **(env or {})})
+
+    def test_stages_markers_and_json(self):
+        r = self.run_selftest("--stage=entry")
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        self.assertIn("STAGE entry", r.stderr)
+        r = self.run_selftest("--stage=create")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("created=1", r.stderr)
+        r = self.run_selftest("--stage=decode1")
+        report = json.loads(r.stdout)
+        self.assertEqual((r.returncode, report["pass"], report["results"][0]["elements"]), (0, None, 1))
+        r = self.run_selftest()
+        report = json.loads(r.stdout)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([x["strategy"] for x in report["results"]], ["raw-esds", "raw-asc", "raw-none", "adts-none"])
+        self.assertEqual((report["production_strategy"], report["pass"]), ("raw-esds", True))
+        for marker in ("SPEAKA_SELFTEST BEGIN", "STAGE fixture bytes=8563 elements=25 expected=25",
+                       "STAGE before_first_decode strategy=raw-esds", "STAGE json", "STAGE exit code=0"):
+            self.assertIn(marker, r.stderr)
+        self.assertEqual(sum(line.startswith("DECODE ") for line in r.stderr.splitlines()), 100)
+
+    def test_its_checks_reject_bad_audio(self):
+        r = self.run_selftest(env={"FAKE_AT_OUTPUT": "noise"})
+        report = json.loads(r.stdout)
+        self.assertEqual((r.returncode, report["pass"], report["working_strategies"]), (1, False, []))
+        self.assertLess(report["results"][0]["tone_snr_db"], 20.0)
+
+    def test_single_strategy_and_usage_errors(self):
+        report = json.loads(self.run_selftest("--strategy=raw-asc").stdout)
+        self.assertEqual([x["strategy"] for x in report["results"]], ["raw-asc"])
+        for bad in (["--bogus"], ["--stage=nope"], ["--strategy=nope"]):
+            self.assertEqual(self.run_selftest(*bad).returncode, 2, bad)
+
+    @unittest.skipUnless(IS_MAC, "the real AudioToolbox exists only on macOS")
+    def test_links_and_creates_a_converter_with_the_real_audiotoolbox(self):
+        exe = compile_c(self.tmp.name, "selftest-real", self.SOURCES, real_audiotoolbox=True)
+        r = self.run_selftest("--stage=create", exe=exe)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("created=1", r.stderr)
+
+
+class RealAudioToolbox(unittest.TestCase):
+    """Apple's real AAC decoder on the fixture: the self-test must pass with the production strategy, and the PCM must
+    match ffmpeg's decode of the same stream. Runs in CI's device-test job (SPEAKA_REAL_AAC=1 on macOS) and fails
+    there rather than skipping if it cannot run."""
+    @classmethod
+    def setUpClass(cls):
+        if not os.environ.get("SPEAKA_REAL_AAC"):
+            raise unittest.SkipTest("runs in CI's device-test job (SPEAKA_REAL_AAC=1, macOS)")
+        if not IS_MAC:
+            raise AssertionError("SPEAKA_REAL_AAC=1 needs macOS and the real AudioToolbox")
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.selftest = compile_c(cls.tmp.name, "selftest-real", SelfTestRuns.SOURCES, real_audiotoolbox=True)
+        cls.lib = ctypes.CDLL(str(compile_c(cls.tmp.name, "decoder.dylib",
+                                            [*DECODER_SOURCES, "tests/aac_decoder_driver.c"],
+                                            real_audiotoolbox=True, shared=True)))
+        cls.elements, _ = fixture_elements()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_selftest_passes_with_apples_decoder(self):
+        r = subprocess.run([str(self.selftest), "--aac-selftest"], capture_output=True, text=True, timeout=300)
+        for line in r.stderr.splitlines():
+            if "after_create" in line or "strategy_done" in line:
+                print(line)                                  # which strategies Apple's decoder accepts, in the log
+        report = json.loads(r.stdout)
+        self.assertTrue(report["pass"], "production strategy failed; working: %s" % report["working_strategies"])
+
+    def test_pcm_matches_ffmpegs_decode(self):
+        dec = Decoder(self.lib)
+        self.assertTrue(dec.create())
+        left = []
+        for i, element in enumerate(self.elements):
+            r, samples, rate, pcm = dec.decode(element, i, i * 1024)
+            self.assertIn(r, (0, 1), f"element {i}: status {dec.stat('last_status')}")
+            left += pcm[0:samples * 2:2]
+        dec.destroy()
+        raw = (ROOT / "tests/fixtures/aac_latm_48k_stereo_ffmpeg.s16").read_bytes()
+        ref = list(struct.unpack("<%dh" % (len(raw) // 2), raw))[0::2]
+        onset = lambda x: next(i for i, v in enumerate(x) if abs(v) > 64)
+        guess, start, length = onset(left) - onset(ref), 4096, 12000
+        self.assertGreater(len(left), start + length + 2048)
+        best = (-2.0, 0)
+        for lag in range(guess - 64, guess + 65):           # decoders differ in delay: align before comparing
+            a = left[start + lag:start + lag + length]
+            b = ref[start:start + length]
+            if len(a) < length:
+                continue
+            dot = sum(x * y for x, y in zip(a, b))
+            norm = math.sqrt(sum(x * x for x in a) * sum(y * y for y in b)) or 1.0
+            best = max(best, (dot / norm, lag))
+        a = left[start + best[1]:start + best[1] + length]
+        b = ref[start:start + length]
+        ratio = math.sqrt(sum(x * x for x in a) / max(1, sum(y * y for y in b)))
+        print("apple vs ffmpeg: correlation %.4f at lag %d, rms ratio %.3f" % (best[0], best[1], ratio))
+        self.assertGreater(best[0], 0.95)
+        self.assertTrue(0.7 < ratio < 1.4, ratio)
+
+
+class ConfiguredCodec(unittest.TestCase):
+    """Which codec the PC chose, read from its AVDTP SET_CONFIGURATION (AVDTP 8.9 / 8.21) - protocol bytes the RX
+    signaling hook already copies - instead of assuming SBC. PDUs here are built from the spec, byte by byte."""
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.lib = build_lib(cls.tmp.name, "tweak/StreamControl.c", extra=("-I", str(ROOT)))
+        fn = cls.lib.avdtp_setconfig_media_codec
+        fn.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint),
+                       ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t,
+                       ctypes.POINTER(ctypes.c_size_t)]
+        fn.restype = ctypes.c_int
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    @staticmethod
+    def setconfig(acp, intp, *capabilities, tx=5):
+        body = b"".join(bytes([category, len(data)]) + bytes(data) for category, data in capabilities)
+        return bytes([tx << 4 | 0x00, 0x03, acp << 2, intp << 2]) + body   # single packet, command, SET_CONFIGURATION
+
+    def parse(self, pdu):
+        seid, media, codec, n = ctypes.c_uint(), ctypes.c_uint(), ctypes.c_uint(), ctypes.c_size_t()
+        info = (ctypes.c_uint8 * 16)()
+        ok = self.lib.avdtp_setconfig_media_codec(pdu, len(pdu), ctypes.byref(seid), ctypes.byref(media),
+                                                  ctypes.byref(codec), info, 16, ctypes.byref(n))
+        return ok, seid.value, media.value, codec.value, bytes(info[:n.value])
+
+    MEDIA_TRANSPORT = (0x01, b"")
+    SBC = (0x07, bytes([0x00, 0x00, 0x21, 0x15, 0x02, 0x35]))        # audio, SBC, 44.1k joint stereo, bitpool 2..53
+    AAC = (0x07, bytes([0x00, 0x02, 0x40, 0x00, 0x84, 0x80, 0x00, 0x00]))   # audio, AAC: MPEG-4 LC, 48k, stereo, VBR
+
+    def test_reads_sbc(self):
+        self.assertEqual(self.parse(self.setconfig(7, 1, self.MEDIA_TRANSPORT, self.SBC)),
+                         (1, 7, 0, 0x00, bytes([0x21, 0x15, 0x02, 0x35])))
+
+    def test_reads_aac_and_its_codec_specific_bytes(self):
+        ok, seid, media, codec, info = self.parse(self.setconfig(7, 1, self.MEDIA_TRANSPORT, self.AAC))
+        self.assertEqual((ok, seid, media, codec), (1, 7, 0, 0x02))
+        self.assertEqual(info, bytes([0x40, 0x00, 0x84, 0x80, 0x00, 0x00]))   # what aac_parse_config reads
+
+    def test_media_codec_need_not_come_first(self):
+        delay_reporting = (0x08, b"")
+        content_protection = (0x04, bytes([0x02, 0x00]))
+        self.assertEqual(self.parse(self.setconfig(7, 1, self.MEDIA_TRANSPORT, content_protection, delay_reporting,
+                                                   self.AAC))[3], 0x02)
+
+    def test_rejects_what_is_not_a_set_configuration_with_a_codec(self):
+        good = self.setconfig(7, 1, self.MEDIA_TRANSPORT, self.SBC)
+        self.assertEqual(self.parse(good[:-1])[0], 0)                     # a capability runs past the PDU
+        self.assertEqual(self.parse(bytes([good[0] | 0x02]) + good[1:])[0], 0)   # a response, not a command
+        self.assertEqual(self.parse(bytes([good[0] | 0x04]) + good[1:])[0], 0)   # the start of a fragmented PDU
+        self.assertEqual(self.parse(bytes([good[0], 0x07]) + good[2:])[0], 0)    # START, not SET_CONFIGURATION
+        self.assertEqual(self.parse(self.setconfig(7, 1, self.MEDIA_TRANSPORT))[0], 0)   # no Media Codec at all
+        self.assertEqual(self.parse(good[:3])[0], 0)
+
+    def test_the_hooks_publish_the_configured_codec(self):
+        hooks = (ROOT / "tweak/Hooks.xm").read_text()
+        rx = hooks.split("static uint64_t hook_receive_signal(", 1)[1].split("static void install_signal_rx", 1)[0]
+        # The RX hook parses the very SET_CONFIGURATION for SEID 7 it already recognises, before bluetoothd's own
+        # handler runs (and so before SetConfigInd).
+        self.assertLess(rx.index("(control[1]&63u)==3u && (control[2]>>2)==7u"),
+                        rx.index("note_pc_configuration(control,(size_t)length)"))
+        setconfig = hooks.split("static uint64_t hook_setconfigind(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("AudioRelaySetCodec(A2DP_CODEC_AAC,g_pc_config.info,AAC_CSI_BYTES)", setconfig)
+        self.assertIn("AudioRelaySetCodec(codec,g_pc_config.info,g_pc_config.info_len)", setconfig)
+        self.assertIn("unsigned codec=g_pc_config.valid?g_pc_config.codec:A2DP_CODEC_SBC;", setconfig)
+        # The parsed codec is written and read under the stream lock.
+        note = hooks.split("static void note_pc_configuration(", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(note.index("pthread_mutex_lock(&g_stream_control_lock)"), note.index("g_pc_config.valid=1"))
 
 
 if __name__ == "__main__":

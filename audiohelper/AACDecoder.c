@@ -1,34 +1,53 @@
-/* AACDecoder.c - see AACDecoder.h. Decodes AAC-LC to interleaved stereo PCM with AudioToolbox's AudioConverter,
- * a public API. Everything Apple-specific here is documented AudioToolbox; nothing is reverse-engineered.
+/* AACDecoder.c - see AACDecoder.h. Decodes AAC-LC to interleaved stereo PCM with AudioToolbox's AudioConverter, a
+ * public API. Everything Apple-specific here is documented AudioToolbox; nothing is reverse-engineered.
  *
- * NOT YET VALIDATED ON A DEVICE. There is no Apple toolchain on the build host, so this file is compiled but not run
- * by CI; the host tests cover the pure-C framing and the AACConfig parsing, not AudioConverter itself. Until a device
- * test confirms AAC is negotiated and decoded (see the on-device procedure in docs/CHANGELOG.md / the PR notes), AAC
- * stays behind the SpeakaAAC experiment switch and SBC remains the default. */
+ * Validation: the LATM extraction is checked on the host against ffmpeg; the AudioConverter stage runs for real on
+ * macOS in CI (tests/test_aac.py, RealAudioToolbox) and on the phone through `BTPSAudioHelper --aac-selftest`. AAC
+ * stays behind the SpeakaAAC switch until a real Bluetooth AAC stream has been decoded on the device. */
 #include "AACDecoder.h"
 #include <AudioToolbox/AudioToolbox.h>
 #include "../shared/LATM.h"
 #include <stdlib.h>
 #include <string.h>
 
-/* An ADTS header is 7 bytes (no CRC). We rebuild one per frame from the negotiated config so AudioConverter sees a
- * self-describing AAC stream, independent of exactly how the SRC framed LATM/LOAS. ISO/IEC 13818-7. */
 #define ADTS_HEADER_BYTES 7u
+/* AAC-LC allows 6144 bits per channel per frame (768 bytes); 8 KiB covers stereo and any LATM overhead. */
+#define AAC_MAX_ELEMENT_BYTES 8192u
+/* 'adec' and 'appl' (kAudioDecoderComponentType, kAppleSoftwareAudioCodecManufacturer), as plain numbers so the file
+ * also compiles where four-character constants are warned about. */
+#define SPK_AUDIO_DECODER_TYPE 0x61646563u
+#define SPK_APPLE_SOFTWARE_MFR 0x6170706cu
+/* Our input callback's "no more input for now" status: a distinctive value, never a real AudioToolbox error. */
+#define SPK_NO_MORE_INPUT ((OSStatus)0x6e6d6f72) /* 'nmor' */
 
 struct AACDecoder {
     AudioConverterRef converter;
     AACConfig config;
+    AACDecoderOptions options;
     unsigned freq_index;
+    uint8_t asc[2];                 /* the AudioSpecificConfig the converter was built for */
     AudioStreamBasicDescription out_format;
     uint64_t generation;
     unsigned next_sequence, seen;
-    /* The current input frame for the AudioConverter pull callback. */
-    const uint8_t *in_data;
+    const uint8_t *in_data;         /* the one packet the input callback hands over */
     size_t in_size;
     AudioStreamPacketDescription in_packet_desc;
     int in_consumed;
-    uint8_t framed[ADTS_HEADER_BYTES + AUDIO_RING_PAYLOAD];   /* one ADTS-wrapped access unit */
+    OSStatus last_status;
+    unsigned config_changes, fragments_joined, fragments_dropped;
+    uint8_t reasm[AAC_MAX_ELEMENT_BYTES];   /* an AudioMuxElement being reassembled from fragments */
+    size_t reasm_len;
+    uint32_t reasm_timestamp;
+    int reasm_active;
+    uint8_t framed[ADTS_HEADER_BYTES + AAC_MAX_ELEMENT_BYTES];  /* [ADTS header][access unit] */
+    int16_t scratch[1024 * 2];
 };
+
+void aac_decoder_default_options(AACDecoderOptions *o) {
+    o->framing = AAC_FRAMING_RAW;
+    o->cookie = AAC_COOKIE_ESDS;
+    o->prefer_software = 1;
+}
 
 static void build_adts(const AACDecoder *d, uint8_t header[ADTS_HEADER_BYTES], size_t frame_len) {
     size_t total = ADTS_HEADER_BYTES + frame_len;
@@ -43,13 +62,14 @@ static void build_adts(const AACDecoder *d, uint8_t header[ADTS_HEADER_BYTES], s
     header[6] = 0xfcu;                            /* buffer fullness 0x7ff, 0 frames-1 */
 }
 
-/* AudioConverter pulls input through this callback. We hand it exactly one ADTS frame, then report "no more data"
- * (so one FillComplexBuffer call decodes one frame). */
+/* AudioConverter pulls input through this callback: exactly one packet, then "no more input for now", so one
+ * FillComplexBuffer call decodes one access unit. Returning a non-zero status with zero packets is the documented
+ * way to pause; the converter keeps its state for the next call. */
 static OSStatus pull_input(AudioConverterRef conv, UInt32 *packets, AudioBufferList *buffers,
                            AudioStreamPacketDescription **desc, void *context) {
     (void)conv;
     AACDecoder *d = (AACDecoder *)context;
-    if (d->in_consumed || !d->in_data || !d->in_size) { *packets = 0; return 1; }  /* 1: our private end marker */
+    if (d->in_consumed || !d->in_data || !d->in_size) { *packets = 0; return SPK_NO_MORE_INPUT; }
     buffers->mNumberBuffers = 1;
     buffers->mBuffers[0].mNumberChannels = d->config.channels;
     buffers->mBuffers[0].mDataByteSize = (UInt32)d->in_size;
@@ -63,35 +83,80 @@ static OSStatus pull_input(AudioConverterRef conv, UInt32 *packets, AudioBufferL
     return noErr;
 }
 
-AACDecoder *aac_decoder_create(const AACConfig *cfg) {
-    if (!aac_config_supported(cfg)) return NULL;
-    AACDecoder *d = calloc(1, sizeof *d);
-    if (!d) return NULL;
-    d->config = *cfg;
-    d->freq_index = aac_sampling_frequency_index(cfg->sample_rate);
-    if (d->freq_index == 0xfu) { free(d); return NULL; }
+/* (Re)build the converter for d->config and d->options. Fills st with every status. Returns noErr on success. */
+static OSStatus build_converter(AACDecoder *d, AACDecoderCreateStatus *st) {
+    AACDecoderCreateStatus local;
+    memset(&local, 0, sizeof local);
+    if (!st) st = &local;
+    memset(st, 0, sizeof *st);
 
     AudioStreamBasicDescription in = {0};
-    in.mSampleRate = cfg->sample_rate;
+    in.mSampleRate = d->config.sample_rate;
     in.mFormatID = kAudioFormatMPEG4AAC;
     in.mFormatFlags = kMPEG4Object_AAC_LC;
-    in.mChannelsPerFrame = cfg->channels;
-    in.mFramesPerPacket = 1024;                  /* AAC-LC: 1024 PCM samples per frame */
+    in.mChannelsPerFrame = d->config.channels;
+    in.mFramesPerPacket = 1024;                  /* AAC-LC: 1024 PCM frames per access unit */
 
     AudioStreamBasicDescription out = {0};
-    out.mSampleRate = cfg->sample_rate;
+    out.mSampleRate = d->config.sample_rate;
     out.mFormatID = kAudioFormatLinearPCM;
     out.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-    out.mChannelsPerFrame = cfg->channels;
+    out.mChannelsPerFrame = d->config.channels;
     out.mBitsPerChannel = 16;
-    out.mBytesPerFrame = (UInt32)(2u * cfg->channels);
+    out.mBytesPerFrame = (UInt32)(2u * d->config.channels);
     out.mFramesPerPacket = 1;
     out.mBytesPerPacket = out.mBytesPerFrame;
     d->out_format = out;
 
-    if (AudioConverterNew(&in, &out, &d->converter) != noErr || !d->converter) { free(d); return NULL; }
+    AudioConverterRef conv = NULL;
+    if (d->options.prefer_software) {
+        AudioClassDescription cls;
+        cls.mType = SPK_AUDIO_DECODER_TYPE;
+        cls.mSubType = kAudioFormatMPEG4AAC;
+        cls.mManufacturer = SPK_APPLE_SOFTWARE_MFR;
+        st->specific_status = AudioConverterNewSpecific(&in, &out, 1, &cls, &conv);
+        if (st->specific_status == noErr && conv) st->used_software = 1;
+        else conv = NULL;
+    }
+    if (!conv) {
+        st->new_status = AudioConverterNew(&in, &out, &conv);
+        if (st->new_status != noErr) conv = NULL;
+    }
+    if (!conv) return st->new_status ? st->new_status : (st->specific_status ? st->specific_status : -1);
+
+    if (d->options.cookie != AAC_COOKIE_NONE) {
+        uint8_t cookie[64];
+        size_t n = 0;
+        if (d->options.cookie == AAC_COOKIE_ESDS) n = aac_build_esds(d->asc, 2, d->config.bitrate, cookie, sizeof cookie);
+        else { cookie[0] = d->asc[0]; cookie[1] = d->asc[1]; n = 2; }
+        st->cookie_status = n ? AudioConverterSetProperty(conv, kAudioConverterDecompressionMagicCookie, (UInt32)n, cookie)
+                              : -1;
+        /* A refused cookie is not fatal: the converter already has the rate, channels and object type. */
+        st->cookie_set = st->cookie_status == noErr;
+    }
+    d->converter = conv;
+    return noErr;
+}
+
+static int adopt_config(AACDecoder *d, const AACConfig *cfg) {
+    unsigned freq_index = aac_sampling_frequency_index(cfg->sample_rate);
+    if (freq_index == 0xfu || aac_build_asc(cfg, d->asc) != 2u) return 0;
+    d->config = *cfg;
+    d->freq_index = freq_index;
+    return 1;
+}
+
+AACDecoder *aac_decoder_create_ex(const AACConfig *cfg, const AACDecoderOptions *opt, AACDecoderCreateStatus *st) {
+    if (st) memset(st, 0, sizeof *st);
+    if (!aac_config_supported(cfg)) return NULL;
+    AACDecoder *d = calloc(1, sizeof *d);
+    if (!d) return NULL;
+    if (opt) d->options = *opt; else aac_decoder_default_options(&d->options);
+    if (!adopt_config(d, cfg) || build_converter(d, st) != noErr) { free(d); return NULL; }
     return d;
 }
+
+AACDecoder *aac_decoder_create(const AACConfig *cfg) { return aac_decoder_create_ex(cfg, NULL, NULL); }
 
 void aac_decoder_destroy(AACDecoder *d) {
     if (!d) return;
@@ -104,12 +169,19 @@ void aac_decoder_reset(AACDecoder *d) {
     if (d->converter) AudioConverterReset(d->converter);
     d->seen = 0;
     d->next_sequence = 0;
+    d->reasm_active = 0;
+    d->reasm_len = 0;
 }
+
+int32_t aac_decoder_last_status(const AACDecoder *d) { return d ? (int32_t)d->last_status : 0; }
+unsigned aac_decoder_config_changes(const AACDecoder *d) { return d ? d->config_changes : 0; }
+unsigned aac_decoder_fragments_joined(const AACDecoder *d) { return d ? d->fragments_joined : 0; }
+unsigned aac_decoder_fragments_dropped(const AACDecoder *d) { return d ? d->fragments_dropped : 0; }
 
 int aac_decoder_decode(AACDecoder *d, const AudioPacket *p, int16_t *pcm,
                        size_t capacity, unsigned *frames, unsigned *samples, unsigned *rate) {
     *frames = *samples = *rate = 0;
-    if (!d || !d->converter) return -1;
+    if (!d || !p || !pcm || capacity < 2u) return -1;
     if (!p->length || p->length > AUDIO_RING_PAYLOAD) return -1;
     if (d->generation != p->generation || (d->seen && d->next_sequence != p->sequence)) {
         aac_decoder_reset(d);
@@ -117,39 +189,86 @@ int aac_decoder_decode(AACDecoder *d, const AudioPacket *p, int16_t *pcm,
     }
     d->seen = 1;
     d->next_sequence = (uint16_t)(p->sequence + 1);
+    if (!d->converter && build_converter(d, NULL) != noErr) return -15;
 
-    /* A2DP AAC payload is an MPEG-4 LATM AudioMuxElement, not a bare access unit. Depacketize it to the AAC access
-     * unit (PayloadMux), then ADTS-wrap THAT for AudioConverter. Wrapping the raw payload (the earlier bug) fed LATM
-     * bytes to the decoder as if they were an access unit and produced garbage. A malformed element is a decode
-     * error (negative return), which the caller treats as a failed AAC frame, never as SBC. */
+    /* Reassembly (RFC 3016): every fragment of one AudioMuxElement carries the same RTP timestamp. A fragment of a
+     * different timestamp means the earlier element lost a piece; abandon it and parse the new packet on its own. */
+    const uint8_t *element = p->data;
+    size_t element_len = p->length;
+    if (d->reasm_active) {
+        if (p->timestamp == d->reasm_timestamp && d->reasm_len + p->length <= sizeof d->reasm) {
+            memcpy(d->reasm + d->reasm_len, p->data, p->length);
+            d->reasm_len += p->length;
+            element = d->reasm;
+            element_len = d->reasm_len;
+        } else {
+            d->reasm_active = 0;
+            d->reasm_len = 0;
+            d->fragments_dropped++;
+        }
+    }
+
     LATMFrame frame;
-    /* Depacketize straight into the ADTS payload area, leaving room for the 7-byte header in front. */
+    uint8_t *au = d->framed + ADTS_HEADER_BYTES;
     size_t au_cap = sizeof d->framed - ADTS_HEADER_BYTES;
-    if (!latm_parse_audiomuxelement(p->data, p->length, d->framed + ADTS_HEADER_BYTES, au_cap, &frame))
-        return -11;   /* not a valid AudioMuxElement */
-    build_adts(d, d->framed, frame.au_len);
-    d->in_data = d->framed;
-    d->in_size = ADTS_HEADER_BYTES + frame.au_len;
+    if (!latm_parse_audiomuxelement(element, element_len, au, au_cap, &frame)) {
+        if (frame.truncated && element_len < sizeof d->reasm) {
+            if (!d->reasm_active) {                    /* the first fragment: keep it and wait for the rest */
+                memcpy(d->reasm, p->data, p->length);
+                d->reasm_len = p->length;
+                d->reasm_timestamp = p->timestamp;
+                d->reasm_active = 1;
+            }
+            return 1;
+        }
+        d->reasm_active = 0;
+        d->reasm_len = 0;
+        return -11;
+    }
+    if (element == d->reasm) d->fragments_joined++;
+    d->reasm_active = 0;
+    d->reasm_len = 0;
+
+    /* The in-band configuration is the stream's own: if it differs from what the converter was built for, follow it.
+     * A rate change reaches the helper through *rate, which already restarts its output on a new rate. */
+    if (frame.asc_len >= 2u && (frame.asc[0] != d->asc[0] || frame.asc[1] != d->asc[1])) {
+        AACConfig next;
+        if (!aac_config_from_asc(frame.asc, frame.asc_len, &next)) return -14;
+        next.vbr = d->config.vbr;
+        next.bitrate = d->config.bitrate;
+        if (d->converter) { AudioConverterDispose(d->converter); d->converter = NULL; }
+        if (!adopt_config(d, &next) || build_converter(d, NULL) != noErr) return -15;
+        d->config_changes++;
+    }
+
+    if (d->options.framing == AAC_FRAMING_ADTS) {
+        build_adts(d, d->framed, frame.au_len);
+        d->in_data = d->framed;
+        d->in_size = ADTS_HEADER_BYTES + frame.au_len;
+    } else {
+        d->in_data = au;                               /* the bare access unit */
+        d->in_size = frame.au_len;
+    }
     d->in_consumed = 0;
 
-    /* AAC-LC yields 1024 frames per packet. Decode into a stereo-or-mono scratch, then widen mono to stereo. */
     UInt32 out_frames = 1024;
     if ((size_t)out_frames * 2u > capacity) out_frames = (UInt32)(capacity / 2u);
-    static int16_t scratch[1024 * 2];
     AudioBufferList out_list;
     out_list.mNumberBuffers = 1;
     out_list.mBuffers[0].mNumberChannels = d->config.channels;
     out_list.mBuffers[0].mDataByteSize = out_frames * d->out_format.mBytesPerFrame;
-    out_list.mBuffers[0].mData = scratch;
+    out_list.mBuffers[0].mData = d->scratch;
 
     OSStatus status = AudioConverterFillComplexBuffer(d->converter, pull_input, d, &out_frames, &out_list, NULL);
-    if (status != noErr && status != 1) return -6;     /* 1 is our pull callback's benign end marker */
-    if (out_frames == 0) return 1;                     /* buffered, nothing emitted yet */
+    d->last_status = status;
+    d->in_data = NULL;
+    if (status != noErr && status != SPK_NO_MORE_INPUT) return -6;
+    if (out_frames == 0) return 1;                     /* priming: nothing emitted yet */
 
     if (d->config.channels == 2) {
-        memcpy(pcm, scratch, (size_t)out_frames * 2u * sizeof(int16_t));
+        memcpy(pcm, d->scratch, (size_t)out_frames * 2u * sizeof(int16_t));
     } else {
-        for (UInt32 i = 0; i < out_frames; ++i) { pcm[i * 2] = scratch[i]; pcm[i * 2 + 1] = scratch[i]; }
+        for (UInt32 i = 0; i < out_frames; ++i) { pcm[i * 2] = d->scratch[i]; pcm[i * 2 + 1] = d->scratch[i]; }
     }
     *samples = out_frames;
     *frames = 1;
