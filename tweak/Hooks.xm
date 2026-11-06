@@ -232,6 +232,10 @@ PASSTHROUGH_OBSERVER(hook_publish,       HOOK_PUBLISH)
 static volatile unsigned g_native_source_success = 0;
 /* Trial requires BOTH separate one-shot preferences. Never retry automatically. */
 static int g_sink_armed = 0;
+/* v9.3 AAC experiment: when on, SEID 7 advertises AAC-LC capabilities instead of SBC.
+ * Does NOT register a second endpoint; just swaps the codec bytes in the one existing Sink SEP.
+ * Fallback: if AAC negotiation fails (or Windows keeps sending SBC), set SpeakaAACSink=NO and restart BT. */
+static int g_aac_sink_mode = 0;
 static volatile unsigned g_sink_attempted = 0;
 static SinkCapabilities g_sink_caps;
 static volatile unsigned g_sink_caps_ready = 0;
@@ -705,6 +709,14 @@ static void install_config_hook(uintptr_t base, int uuid_ok)
     g_seven_armed = consume_seven_slots_arm();
     int decisive_requested = consume_sink_arm();
     g_sink_armed = decisive_requested && g_seven_armed && !SpeakaExperimentsEnabled();
+    /* AAC sink experiment: read once and log; never changes within a session. */
+    {
+        CFPropertyListRef aac_pref = CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_AAC_SINK), CFSTR(SPEAKA_PREFS_DOMAIN));
+        g_aac_sink_mode = (aac_pref && CFGetTypeID(aac_pref) == CFBooleanGetTypeID() &&
+                           CFBooleanGetValue((CFBooleanRef)aac_pref)) ? 1 : 0;
+        if (aac_pref) CFRelease(aac_pref);
+        SpeakaLogNow("V93 CODEC_MODE %s", g_aac_sink_mode ? "AAC-sink (SEID 7 will advertise AAC-LC)" : "SBC-sink (default)");
+    }
     SpeakaSetStatus("diag.v82.trial", g_sink_armed ?
         "ARMED: one-shot seven slots + one Sink SEP + local SDP candidate + signaling RX" :
         (decisive_requested ? "REFUSED: seven-slot arm absent or legacy ON" : "OFF (default)"));
@@ -1126,10 +1138,24 @@ static void register_sink_after_sources(uint64_t audio_context)
     if (new_caps[0] != 1u || new_caps[16] != 7u || new_caps[18] != 0u ||
         new_caps[19] != 4u || new_caps[32] != 8u ||
         cap_context != audio_context) goto reject_before_swap;
-    /* Entry 7 alone owns the SBC codec bytes. The native Source codec
-       object points at audio_context (11 15 02 FA); do NOT edit it.
-       A 4-byte tail in the same new_caps allocation keeps one owner/free. */
-    {
+    /* Entry 7 alone owns the codec bytes. The native Source codec object points at audio_context; do NOT edit it.
+     * In SBC mode (the default): copy the standard A2DP SBC Sink capability bytes.
+     * In AAC mode (SpeakaAACSink=YES): copy the 6-byte AAC-LC capability instead, and patch the codec-type and
+     *   length fields in the capability record so bluetoothd advertises AAC. The allocation adds 2 extra bytes for
+     *   the AAC capability (6 vs SBC's 4); the alloc already has a 4-byte tail so the 2 extra bytes fit safely.
+     * Either way: only our private new_caps buffer is written; Apple's native tables are never modified. */
+    if (g_aac_sink_mode) {
+        uint8_t kSinkAAC[6];
+        aac_build_sink_capability(kSinkAAC);
+        memcpy(new_caps + 3u * 16u, kSinkAAC, sizeof kSinkAAC);
+        uint64_t sink_codec_ptr = (uint64_t)(uintptr_t)(new_caps + 3u * 16u);
+        memcpy(new_caps + 0x18u, &sink_codec_ptr, sizeof sink_codec_ptr);
+        /* codec-type byte: 0x02 = AAC; codec data length: 6 (was 4 for SBC). */
+        new_caps[18] = A2DP_CODEC_AAC;
+        new_caps[19] = 6u;
+        SpeakaLogNow("V93 SEP CAPS: AAC-LC mode (codec_type=0x02 len=6): %02x %02x %02x %02x %02x %02x",
+            kSinkAAC[0], kSinkAAC[1], kSinkAAC[2], kSinkAAC[3], kSinkAAC[4], kSinkAAC[5]);
+    } else {
         static const uint8_t kSinkSBC[4] = {0x31u, 0x15u, 0x02u, 0xfau};
         memcpy(new_caps + 3u * 16u, kSinkSBC, sizeof kSinkSBC);
         uint64_t sink_codec_ptr = (uint64_t)(uintptr_t)(new_caps + 3u * 16u);
@@ -1165,8 +1191,8 @@ static void register_sink_after_sources(uint64_t audio_context)
         uint32_t assigned_seid = 0;
         memcpy(&assigned_seid, e7 + 4u, sizeof assigned_seid);
         g_sink_caps.assigned_seid = (uint8_t)assigned_seid;
-        SpeakaLogNow("V83 SEP RESULT ret=%#llx seid=%u type=SNK(1) audio_table=7; PEER validation required",
-            (unsigned long long)ret, assigned_seid);
+        SpeakaLogNow("V83 SEP RESULT ret=%#llx seid=%u type=SNK(1) audio_table=7 codec_mode=%s; PEER validation required",
+            (unsigned long long)ret, assigned_seid, g_aac_sink_mode ? "AAC-LC" : "SBC");
         if (ret != 0) {
             /* The native routine did not register an endpoint. Restore the
                previous pointer/counts and release only our two new blocks.

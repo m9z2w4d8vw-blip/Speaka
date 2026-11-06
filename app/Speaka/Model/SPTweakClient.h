@@ -71,6 +71,11 @@ typedef NS_ENUM(NSInteger, SPRequestState) {
 /// The app's own settings (v9.7), in the app's own preferences, never com.apple.bluetooth's: whether Settings > Update
 /// notifications is on, and the last release a notification announced, so each is announced once.
 + (BOOL)updateNotificationsEnabled NS_SWIFT_NAME(updateNotificationsEnabled());
++ (BOOL)aacDecodeEnabled NS_SWIFT_NAME(aacDecodeEnabled());
++ (void)setAACDecodeEnabled:(BOOL)on NS_SWIFT_NAME(setAACDecodeEnabled(_:));
++ (BOOL)aacSinkEnabled NS_SWIFT_NAME(aacSinkEnabled());
++ (void)setAACsinkEnabled:(BOOL)on NS_SWIFT_NAME(setAACsinkEnabled(_:));
+// SPEAKA_KEY_AAC_SINK: written via setAACsinkEnabled(_:); the tweak reads it at every Bluetooth restart.
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled NS_SWIFT_NAME(setUpdateNotificationsEnabled(_:));
 
 /// Uninstall (v9.8): every key Speaka keeps in com.apple.bluetooth (all start with "Speaka", shared/SpeakaShared.h) and the

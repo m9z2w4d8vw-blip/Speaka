@@ -21,6 +21,7 @@
 #define SPEAKA_KEY_CONFIG_OBSERVER "SpeakaV80ConfigLookupObserver" /* OFF: pass-through getter timing observer */
 #define SPEAKA_KEY_EXPERIMENTS  "SpeakaExperiments"   /* boolean, flipped by the switch in the Settings pane */
 #define SPEAKA_KEY_AAC          "SpeakaAAC"           /* boolean, OFF by default: offer AAC-LC alongside SBC (experimental) */
+#define SPEAKA_KEY_AAC_SINK     "SpeakaAACSink"       /* boolean, OFF by default: advertise SEID 7 as AAC-LC instead of SBC (experimental; requires a Bluetooth restart to take effect) */
 
 #define SPEAKA_LOG_DIR      "/tmp/FTABHarvest"
 #define SPEAKA_LOG_FILE     "/tmp/FTABHarvest/Speaka.log"

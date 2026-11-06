@@ -343,6 +343,31 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
     return [[NSUserDefaults standardUserDefaults] boolForKey:SPUpdateNotificationsKey];
 }
 
++ (BOOL)aacDecodeEnabled
+{
+    CFStringRef domain = (__bridge CFStringRef)SPPreferencesDomain;
+    id val = (__bridge id)CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_AAC), domain);
+    return [val isKindOfClass:[NSNumber class]] && [val boolValue];
+}
++ (void)setAACDecodeEnabled:(BOOL)on
+{
+    CFStringRef domain = (__bridge CFStringRef)SPPreferencesDomain;
+    CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_AAC), (__bridge CFPropertyListRef)@(on), domain);
+    CFPreferencesAppSynchronize(domain);
+}
++ (BOOL)aacSinkEnabled
+{
+    CFStringRef domain = (__bridge CFStringRef)SPPreferencesDomain;
+    id val = (__bridge id)CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_AAC_SINK), domain);
+    return [val isKindOfClass:[NSNumber class]] && [val boolValue];
+}
++ (void)setAACsinkEnabled:(BOOL)on
+{
+    CFStringRef domain = (__bridge CFStringRef)SPPreferencesDomain;
+    CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_AAC_SINK), (__bridge CFPropertyListRef)@(on), domain);
+    CFPreferencesAppSynchronize(domain);
+}
+
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled
 {
     [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:SPUpdateNotificationsKey];

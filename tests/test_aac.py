@@ -730,5 +730,54 @@ class ConfiguredCodec(unittest.TestCase):
         self.assertLess(note.index("pthread_mutex_lock(&g_stream_control_lock)"), note.index("g_pc_config.valid=1"))
 
 
+class AACsinkMode(unittest.TestCase):
+    """The AAC-only endpoint experiment: SEID 7 advertises AAC-LC capabilities instead of SBC."""
+
+    def test_preference_key_name(self):
+        # SpeakaShared.h must define the macro (checked by the test below via the value inside it).
+        shared = (ROOT / "shared/SpeakaShared.h").read_text()
+        self.assertIn('"SpeakaAACSink"', shared)                       # the macro's string value
+        # SPTweakClient.m must use the macro, not the bare string (enforced by test_app_speaks_the_tweaks_protocol).
+        tweakc = (ROOT / "app/Speaka/Model/SPTweakClient.m").read_text()
+        self.assertIn("SPEAKA_KEY_AAC_SINK", tweakc)                   # the macro name
+        self.assertNotIn('"SpeakaAACSink"', tweakc)                    # not the bare string
+
+    def test_aac_sink_capability_bytes(self):
+        """In AAC mode the caps record gets codec_type=0x02, codec_data_len=6, then the AAC-LC CSI."""
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = build_lib(tmp, "shared/AACConfig.c")
+            cap = (ctypes.c_uint8 * 6)()
+            lib.aac_build_sink_capability.argtypes = [ctypes.POINTER(ctypes.c_uint8)]
+            lib.aac_build_sink_capability.restype = ctypes.c_size_t
+            self.assertEqual(lib.aac_build_sink_capability(cap), 6)
+            self.assertEqual(cap[0] & 0xC0, 0xC0)  # MPEG-2 LC | MPEG-4 LC object types
+        hooks = (ROOT / "tweak/Hooks.xm").read_text()
+        aac_block = hooks.split("if (g_aac_sink_mode) {", 1)[1].split("} else {", 1)[0]
+        self.assertIn("new_caps[18] = A2DP_CODEC_AAC;", aac_block)
+        self.assertIn("new_caps[19] = 6u;", aac_block)
+        self.assertIn("aac_build_sink_capability(kSinkAAC);", aac_block)
+
+    def test_sbc_path_unchanged_when_aac_mode_off(self):
+        hooks = (ROOT / "tweak/Hooks.xm").read_text()
+        marker = "} else {\n        static const uint8_t kSinkSBC"
+        sbc_block = hooks.split(marker, 1)[1].split("    }", 1)[0]
+        self.assertIn("{0x31u, 0x15u, 0x02u, 0xfau}", sbc_block)
+        self.assertNotIn("new_caps[18]", sbc_block)
+        self.assertNotIn("new_caps[19]", sbc_block)
+
+    def test_startup_reads_aac_sink_preference_and_logs(self):
+        hooks = (ROOT / "tweak/Hooks.xm").read_text()
+        self.assertIn("SPEAKA_KEY_AAC_SINK", hooks)
+        self.assertIn("V93 CODEC_MODE", hooks)
+        self.assertIn("V93 SEP CAPS: AAC-LC mode", hooks)
+        self.assertIn("codec_mode=%s", hooks)
+
+    def test_rollback_path_is_complete(self):
+        """g_aac_sink_mode is re-read from preferences at every Bluetooth restart."""
+        hooks = (ROOT / "tweak/Hooks.xm").read_text()
+        config_hook_body = hooks.split("static void install_config_hook(", 1)[1].split("\n}\n\n", 1)[0]
+        self.assertIn("g_aac_sink_mode", config_hook_body,
+                      "g_aac_sink_mode must be set inside install_config_hook (re-read on every BT restart)")
+
 if __name__ == "__main__":
     unittest.main()

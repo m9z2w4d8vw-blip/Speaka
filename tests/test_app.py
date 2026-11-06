@@ -211,7 +211,8 @@ class SpeakaApp(unittest.TestCase):
         self.assertEqual(pinned, {"outputModes", "readStatus", "setOutputMode", "sendAction", "pollRequest",
                                   "connectedComputerName", "pairedComputerName", "lookupSummary",
                                   "updateNotificationsEnabled", "setUpdateNotificationsEnabled", "notifiedVersion",
-                                  "setNotifiedVersion", "removeLeftoverPreferences"})
+                                  "setNotifiedVersion", "removeLeftoverPreferences",
+                                  "aacDecodeEnabled", "setAACDecodeEnabled", "aacSinkEnabled", "setAACsinkEnabled"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -1258,7 +1259,7 @@ class SpeakaApp(unittest.TestCase):
             # SwiftUI and Combine
             "App", "Scene", "WindowGroup", "View", "ViewBuilder", "Content", "Context", "Text", "Image", "Font",
             "Color", "Button", "ButtonStyle", "Configuration", "VStack", "HStack", "ZStack", "Spacer", "ForEach",
-            "List", "Section", "ScrollView", "GeometryReader", "Group", "Animation", "Shape", "Path", "Capsule", "Circle", "Rectangle", "RoundedRectangle",
+            "List", "Section", "ScrollView", "GeometryReader", "Group", "Animation", "Shape", "Path", "Capsule", "Circle", "Rectangle", "RoundedRectangle", "Divider",
             "LinearGradient", "StrokeStyle", "TimelineView", "EdgeInsets", "Namespace", "State", "StateObject",
             "ObservedObject", "Environment", "Published", "ObservableObject", "UIViewRepresentable",
             # UIKit, CoreText and AVKit
@@ -1381,9 +1382,9 @@ class SettingsWindow(unittest.TestCase):
     def test_smaller_and_without_descriptions(self):
         windows = read(SPEAKA_SOURCES / "Windows.swift")
         settings = block_until(windows, "struct SettingsWindow: View {")
-        self.assertEqual(settings.count(".frame(height: 44)"), 2)
-        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 2)
-        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 2)
+        self.assertEqual(settings.count(".frame(height: 44)"), 3)   # Kill BT, Update notifs, AAC decode
+        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 3)   # the two standard rows + the AAC group
+        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 4)   # +2 for the AAC section's labels
         self.assertIn("VStack(spacing: 10)", settings)
         self.assertIn(".scaleEffect(0.85)\n                        .frame(width: 51 * 0.85, height: 31 * 0.85)", settings)
         for gone in ("Every 2 minutes", ".frame(height: 50)", "size: 17", "size: 13"):

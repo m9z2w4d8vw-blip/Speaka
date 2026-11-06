@@ -89,6 +89,10 @@ final class SpeakaModel: ObservableObject {
     @Published private(set) var killResult: String? = nil
     /// Settings > Update notifications, and whether iOS refused permission the last time it was turned on.
     @Published private(set) var updateNotifications = SPTweakClient.updateNotificationsEnabled()
+    @Published var aacDecode: Bool = SPTweakClient.aacDecodeEnabled() {
+        didSet { SPTweakClient.setAACDecodeEnabled(aacDecode) } }
+    @Published var aacSink: Bool = SPTweakClient.aacSinkEnabled() {
+        didSet { SPTweakClient.setAACsinkEnabled(aacSink) } }
     @Published private(set) var notificationsRefused = false
 
     private let client = SPTweakClient()
