@@ -122,6 +122,15 @@ int AudioRelaySinkHealthy(void) {
         healthy_generation==generation;
 }
 
+void AudioRelaySetCodec(uint32_t codec,const uint8_t *codec_config,size_t len) {
+    AudioRing *s=__atomic_load_n(&g_shared,__ATOMIC_ACQUIRE);
+    if(!s) return;
+    /* Written before the generation turns active (AudioRelaySetActive), which the helper reads with acquire order,
+     * so a plain store is ordered ahead of it. */
+    memset(s->codec_config,0,sizeof s->codec_config);
+    if(codec_config && len && len<=sizeof s->codec_config) memcpy(s->codec_config,codec_config,len);
+    __atomic_store_n(&s->codec,codec,__ATOMIC_RELEASE);
+}
 void AudioRelaySetActive(int active) {
     AudioRing *s=__atomic_load_n(&g_shared,__ATOMIC_ACQUIRE);
     if(!s) return;

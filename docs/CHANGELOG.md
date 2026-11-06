@@ -5,6 +5,38 @@ number (9.8.74 is a push of 9.8), so the versions below are the ones where somet
 notes, with its device-test steps, are in the git history (`docs/history/`, before v9.8's cleanup). How each part of
 `bluetoothd` was found is in [BLUETOOTHD.md](BLUETOOTHD.md).
 
+## Unreleased - experimental AAC-LC (behind the SpeakaAAC switch, off by default)
+
+Groundwork for receiving AAC-LC as well as SBC. SBC is unchanged and remains the only codec used until the native
+blocker below is resolved; the AAC paths only run when the **SpeakaAAC** preference is on, and the helper always
+falls back to SBC if AAC setup fails.
+
+**What is implemented and tested (pure protocol and decoding, from the public A2DP AAC and MPEG-4 specs):**
+- `shared/AACConfig.c/.h`: the AAC Codec Specific Information - building Speaka's Sink capability (AAC-LC, 44.1/48
+  kHz, mono/stereo), parsing a negotiated configuration, the MPEG-4 AudioSpecificConfig and sampling-frequency index.
+- `audiohelper/AACDecoder.c/.h`: an AAC-LC decoder over AudioToolbox's public `AudioConverter` API, reframing each
+  A2DP media payload to ADTS, mirroring the SBC decoder's interface.
+- `audiohelper/CodecDecoder.c/.h`: one handle over the SBC and AAC decoders; reads the codec from the ring header and
+  falls back to SBC when AAC is off, mis-configured, or the converter fails.
+- The shared ring gained a `codec` field and `codec_config` in its **header** (not the packet), so the packet ABI is
+  unchanged and an older helper still reads a session as SBC. `AudioRelaySetCodec` publishes it; the CONFIGURE hook
+  calls it (with SBC today).
+- `sink_build_aac_codec_record` builds the AVDTP media-codec capability record for AAC-LC.
+- `tests/test_aac.py`: 8 tests for the config parsing, the capability record, the ASC, the ADTS framing and the
+  SBC fallback. All of `test_audio.py`'s SBC tests still pass unchanged.
+
+**Blockers - what AAC still needs, and why it is not done here:**
+- *Registering a second (AAC) endpoint in `bluetoothd`.* The SBC Sink is registered by writing recovered native
+  structures at specific offsets in one exact `bluetoothd` build. A second, AAC endpoint needs the same native
+  layout for AAC, which would require disassembling Apple's signed binaries to recover. That reverse engineering is
+  out of scope, so no AAC SEP is registered and Windows will keep negotiating SBC. This is isolated behind
+  `sink_build_aac_codec_record` (the record is built; nothing advertises it).
+- *Confirming the decode on a device.* There is no Apple toolchain on the build host, so `AACDecoder.c` is compiled
+  by CI but never run by the tests; `AudioConverter` decoding AAC to PCM is unverified until a device test. A packet
+  capture can confirm which codec was negotiated, but not the native endpoint layout.
+
+On-device steps and how to read the codec line: [AAC-TESTING.md](AAC-TESTING.md).
+
 ## v9.8
 
 - **Caz's four-row menu:** Settings, Audio Output, Uninstall, Credits, at Caz's exact sizes and positions.

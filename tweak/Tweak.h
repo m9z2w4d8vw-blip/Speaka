@@ -128,6 +128,13 @@ typedef struct {
 /* Returns zero on success; never reads beyond raw[48]/codec[4]. */
 int sink_prepare_caps(SinkCapabilities *dst,
                                const uint8_t raw[48],const uint8_t codec[4]);
+
+/* v9.3 experimental, AAC. Build the AVDTP media-codec capability record Speaka would advertise for AAC-LC: the
+ * 2-byte record header (media type audio = 0x00, codec type AAC = 0x02) followed by the 6-byte AAC Codec Specific
+ * Information (AACConfig.h). This is the protocol-level record, from the public A2DP AAC spec. Writes 8 bytes to
+ * out and returns 8. It does NOT register an endpoint; wiring a second SEP into bluetoothd's table is the native
+ * side and is not implemented (see the AAC blockers in docs/CHANGELOG.md). */
+size_t sink_build_aac_codec_record(uint8_t out[8]);
 #ifdef __cplusplus
 }
 #endif
@@ -267,6 +274,12 @@ extern "C" {
 #endif
 int AudioRelayPrepare(void);
 void AudioRelaySetActive(int active);
+/* v9.3 experimental, AAC: publish the negotiated codec (A2DP_CODEC_SBC / A2DP_CODEC_AAC, AACConfig.h) and, for AAC,
+ * its 6-byte Codec Specific Information into the ring header, so the helper builds the right decoder. Call before
+ * AudioRelaySetActive(1). codec_config may be NULL for SBC. Today the tweak only ever negotiates SBC (a second,
+ * AAC endpoint is not registered - see the AAC blockers in docs/CHANGELOG.md), so this is called with SBC; the
+ * path exists so the helper and the protocol are ready the moment an AAC endpoint lands. */
+void AudioRelaySetCodec(uint32_t codec, const uint8_t *codec_config, size_t len);
 /* Control/idle-check threads only; queries a short worker-issued health lease. */
 int AudioRelaySinkHealthy(void);
 /* The sole media callback path; length is native w4, not an RTP length. */

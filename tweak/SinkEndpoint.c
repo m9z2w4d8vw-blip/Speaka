@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "../shared/AACConfig.h"
 
 /* ---- the capability list ---- */
 int sink_prepare_caps(SinkCapabilities *dst,
@@ -26,6 +27,15 @@ int sink_prepare_caps(SinkCapabilities *dst,
     /* The codec descriptor begins at raw offset 16, its data pointer +8. */
     memcpy((uint8_t*)dst->caps_words + 24u, &owned_ptr, sizeof owned_ptr);
     return 0;
+}
+
+/* v9.3 experimental, AAC: the protocol-level media-codec capability record for AAC-LC. Pure data from the public
+ * A2DP AAC spec; advertises nothing by itself. */
+size_t sink_build_aac_codec_record(uint8_t out[8]) {
+    out[0] = 0x00u;                 /* media type: audio (AVDTP) */
+    out[1] = A2DP_CODEC_AAC;        /* codec type: MPEG-2/4 AAC */
+    aac_build_sink_capability(out + 2);
+    return 8u;
 }
 
 /* ---- bluetoothd's endpoint table, before it grows ---- */

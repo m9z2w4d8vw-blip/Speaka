@@ -27,6 +27,11 @@ enum { RING_EVENT_FORWARD=1, RING_EVENT_DECODE=2, RING_EVENT_AUDIO=3,
        RING_EVENT_HEALTH=7 };
 typedef struct { uint32_t kind, bytes, frames; int32_t result; } AudioRingEvent;
 typedef struct { uint64_t turn; AudioRingEvent value; } AudioRingEventSlot;
+/* The codec the tweak negotiated for this session, published in the header (not per packet, so the packet ABI is
+ * unchanged). codec is A2DP_CODEC_SBC or A2DP_CODEC_AAC (AACConfig.h); codec_config holds the 6-byte AAC Codec
+ * Specific Information when codec is AAC, so the helper builds its decoder without parsing native structures. Both
+ * are written before AudioRelaySetActive(1) and read by the helper when the generation turns active. SBC leaves them
+ * zero, which the helper reads as SBC, so an old helper and a new tweak still agree on SBC. */
 typedef struct {
     uint32_t magic, version, size, pid;
     uint64_t token;
@@ -35,6 +40,8 @@ typedef struct {
     AudioRingQueue media, forward_log, decode_log;
     AudioPacketSlot packets[AUDIO_RING_SLOTS];
     AudioRingEventSlot forwarded[AUDIO_RING_EVENTS], decoded[AUDIO_RING_EVENTS];
+    uint32_t codec;              /* 0 (==A2DP_CODEC_SBC) unless AAC was negotiated */
+    uint8_t codec_config[8];     /* AAC Codec Specific Information (6 bytes used); zero for SBC */
 } AudioRing;
 typedef struct {
     uint32_t magic, version, size, pid;

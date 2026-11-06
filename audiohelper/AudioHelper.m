@@ -7,7 +7,7 @@
  * re-activates its audio session faster than the rearm wait on its own: every session change re-routes iOS, which
  * made bluetoothd START or SUSPEND the PC's stream, which the helper answered with another session change.
  */
-#include "SBCDecoder.h"
+#include "CodecDecoder.h"
 #include "OutputPolicy.h"
 #include "../shared/SpeakaShared.h"
 #import <stdio.h>
@@ -33,6 +33,7 @@
 
 /* v8.9 output selection; only the stream thread reads or writes these. */
 static int g_output_mode=OUTPUT_MODE_SPEAKER;
+static int g_aac_enabled=0;   /* SpeakaAAC: offer AAC-LC alongside SBC (experimental, SBC is the default) */
 static NSArray<NSDictionary *> *g_never_outputs;
 static int g_output_notify=-1;
 static void publish_status(NSString *state,NSString *reason,BOOL force);
@@ -51,6 +52,13 @@ static void hlog(FILE *stream,const char *fmt,...) {
     fprintf(stream,"%02d:%02d:%02d.%03ld ",tm.tm_hour,tm.tm_min,tm.tm_sec,(long)(ts.tv_nsec/1000000L));
     va_list ap;va_start(ap,fmt);vfprintf(stream,fmt,ap);va_end(ap);
     fflush(stream);
+}
+
+/* The codec layer logs through a plain (fmt, ...) sink; send it to stdout like every other helper line. */
+static void hlog_line(const char *fmt,...) {
+    char line[512];
+    va_list ap;va_start(ap,fmt);vsnprintf(line,sizeof line,fmt,ap);va_end(ap);
+    hlog(stdout,"%s",line);
 }
 /* v9.1: every activation and deactivation is logged with its time, so the helper log lines up with the phone's own
  * START/SUSPEND lines (V882_CONTROL ... by=phone) in the daemon log. */
@@ -156,6 +164,7 @@ static void load_output_settings(void) {
     (void)CFPreferencesAppSynchronize(domain);
     id mode=CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_OUTPUT_MODE),domain));
     g_output_mode=output_mode_from_string([mode isKindOfClass:[NSString class]]?[(NSString *)mode UTF8String]:NULL);
+    g_aac_enabled=CFPreferencesGetAppBooleanValue(CFSTR(SPEAKA_KEY_AAC),domain,NULL)?1:0;
     id never=CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_NEVER_OUTPUTS),domain));
     NSMutableArray<NSDictionary *> *list=[NSMutableArray array];
     if([never isKindOfClass:[NSArray class]])
@@ -517,8 +526,11 @@ static void stream(int fd) {
         g_output_notify=-1;
     if(g_output_notify>=0) {int primed=0;(void)notify_check(g_output_notify,&primed);} /* first check is always "changed" */
     publish_status(@"starting",@"",YES);
-    SBCDecoder decoder;sbc_decoder_reset(&decoder);
-    AudioPacket packet;int16_t pcm[SBC_DECODER_PCM_SAMPLES];
+    /* v9.3 experimental: the codec comes from the ring header, set by the tweak at CONFIGURE; SBC is the default
+     * and the fallback. The PCM scratch fits the larger of an SBC burst and an AAC-LC frame (1024 stereo). */
+    CodecDecoder decoder;codec_decoder_begin(&decoder,s,g_aac_enabled,hlog_line);
+    #define CODEC_PCM_SAMPLES (SBC_DECODER_PCM_SAMPLES>2048u?SBC_DECODER_PCM_SAMPLES:2048u)
+    AudioPacket packet;int16_t pcm[CODEC_PCM_SAMPLES];
     uint64_t generation=0,doorbell=UINT64_MAX;
     unsigned retry=0,diagnostic_ticks=0;BOOL interrupted=NO;
     hold_state_t hold={0};int last_deferral=-1;  /* v9.1 keep/rearm policy, OutputPolicy.h */
@@ -558,7 +570,7 @@ static void stream(int fd) {
             else if(o->queue && !hold.running) hold_started(&hold,now);
             if(__atomic_exchange_n(&media_reset,0,__ATOMIC_ACQUIRE)) {
                 hlog(stdout,"V91_MEDIA_SERVICES_RESET queue=%d session=%d\n",o->queue!=NULL,g_session_active);
-                stop_output(o,s,"media_services_reset",1);sbc_decoder_reset(&decoder);
+                stop_output(o,s,"media_services_reset",1);codec_decoder_reset(&decoder);
                 hold_released(&hold,now,HOLD_RELEASE_REQUESTED);retry=0;
             }
             int changed=__atomic_exchange_n(&interruption,0,__ATOMIC_ACQUIRE);
@@ -566,13 +578,13 @@ static void stream(int fd) {
                 interrupted=changed==1;
                 hlog(stdout,"V882_INTERRUPTION type=%s reason=%ld\n",interrupted?"began":"ended",
                      __atomic_load_n(&interruption_reason,__ATOMIC_RELAXED));fflush(stdout);
-                stop_output(o,s,interrupted?"interruption_began":"interruption_ended",1);sbc_decoder_reset(&decoder);
+                stop_output(o,s,interrupted?"interruption_began":"interruption_ended",1);codec_decoder_reset(&decoder);
                 hold_released(&hold,now,HOLD_RELEASE_REQUESTED);
             }
             int settings_changed=0;
             if(g_output_notify>=0 && notify_check(g_output_notify,&settings_changed)==NOTIFY_STATUS_OK && settings_changed) {
                 load_output_settings();g_last_refusal=-1;
-                stop_output(o,s,"output_settings_changed",1);sbc_decoder_reset(&decoder);
+                stop_output(o,s,"output_settings_changed",1);codec_decoder_reset(&decoder);
                 hold_released(&hold,now,HOLD_RELEASE_REQUESTED); /* a user action: no rearm wait */
                 retry=0;
                 if(interrupted) {hlog(stdout,"V894_INTERRUPTION_CLEARED by=settings\n");interrupted=NO;}
@@ -591,7 +603,7 @@ static void stream(int fd) {
                         if(g_output_mode==OUTPUT_MODE_SPEAKER && !reassert_speaker(o,o->rate,s)) {
                             hold_started(&hold,helper_ms());publish_status(@"playing",@"",YES);
                         } else {
-                            stop_output(o,s,"route_changed",1);sbc_decoder_reset(&decoder);retry=20;
+                            stop_output(o,s,"route_changed",1);codec_decoder_reset(&decoder);retry=20;
                             hold_released(&hold,helper_ms(),device?HOLD_RELEASE_REQUESTED:HOLD_RELEASE_AUTOMATIC);
                         }
                     } else publish_status(@"playing",@"",YES);
@@ -610,7 +622,7 @@ static void stream(int fd) {
                 /* v9.1: a running output is KEPT (OutputPolicy.h). Stopping it here re-routed iOS, which made bluetoothd
                  * START or SUSPEND the PC's stream, which changed the generation again: every 0.7 s at 23:33. */
                 if(hold_generation_changed(&hold)) keep_output(o,current);
-                sbc_decoder_reset(&decoder);generation=current;retry=0;
+                codec_decoder_reset(&decoder);generation=current;retry=0;
                 if(!(current&1u)) publish_status(@"idle",@"PC paused or stopped the stream",NO);
                 else if(o->queue) publish_status(@"playing",@"",NO);
             }
@@ -623,7 +635,7 @@ static void stream(int fd) {
             /* v9.1: the output is released only after HOLD_MS without media (v9.0: at once, on any change). */
             if(hold_expired(&hold,now)) {
                 hlog(stdout,"V91_HOLD_EXPIRED no_media_ms=%llu\n",(unsigned long long)(now-hold.media_ms));
-                stop_output(o,s,"media_idle",1);sbc_decoder_reset(&decoder);
+                stop_output(o,s,"media_idle",1);codec_decoder_reset(&decoder);
                 hold_released(&hold,now,HOLD_RELEASE_AUTOMATIC);
             }
             if(retry) retry--;
@@ -632,7 +644,7 @@ static void stream(int fd) {
                 for(unsigned i=0;i<AUDIO_RING_SLOTS && audio_ring_dequeue(s,&packet);i++) {
                     if(!(generation&1u) || packet.generation!=generation || interrupted) continue;
                     unsigned frames=0,samples=0,rate=0;
-                    int result=sbc_decoder_decode(&decoder,&packet,pcm,SBC_DECODER_PCM_SAMPLES,&frames,&samples,&rate);
+                    int result=codec_decoder_decode(&decoder,&packet,pcm,CODEC_PCM_SAMPLES,&frames,&samples,&rate);
                     audio_ring_event(s,1,(AudioRingEvent){RING_EVENT_DECODE,packet.length,frames,result});
                     if(result || !samples) continue;
                     uint32_t nonzero_before=level.nonzero;
@@ -684,7 +696,7 @@ static void stream(int fd) {
     [[NSNotificationCenter defaultCenter] removeObserver:observer];
     [[NSNotificationCenter defaultCenter] removeObserver:route_observer];
     [[NSNotificationCenter defaultCenter] removeObserver:reset_observer];
-    stop_output(o,s,"ipc_closed",1);pthread_mutex_destroy(&o->lock);free(o);
+    stop_output(o,s,"ipc_closed",1);codec_decoder_end(&decoder);pthread_mutex_destroy(&o->lock);free(o);
     publish_status(@"stopped",@"Bluetooth speaker session ended",YES);
     munmap(s,sizeof *s);close(file);
 }

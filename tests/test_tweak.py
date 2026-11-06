@@ -130,7 +130,7 @@ class CapabilityNames(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         dylib = Path(cls.tmp.name) / ('libdiag.dylib' if os.uname().sysname == 'Darwin' else 'libdiag.so')
         subprocess.run([shutil.which('clang') or shutil.which('cc'), '-std=c11', '-Wall', '-Wextra', '-Werror',
-                        '-shared', '-fPIC', '-I', str(ROOT), str(ROOT / 'tweak/SinkEndpoint.c'),
+                        '-shared', '-fPIC', '-I', str(ROOT), str(ROOT / 'tweak/SinkEndpoint.c'), str(ROOT / 'shared/AACConfig.c'),
                         '-o', str(dylib)], check=True)
         cls.lib = CDLL(str(dylib))
         cls.lib.avdtp_decode_caps.argtypes = [POINTER(c_ubyte), c_size_t, POINTER(Caps)]
@@ -187,7 +187,7 @@ class SinkCapabilityList(unittest.TestCase):
         cls.tmp=tempfile.TemporaryDirectory()
         lib=Path(cls.tmp.name)/'caps.so'
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-shared','-fPIC',
-                        '-o',str(lib),str(ROOT/'tweak/SinkEndpoint.c')],check=True)
+                        '-o',str(lib),str(ROOT/'tweak/SinkEndpoint.c'),str(ROOT/'shared/AACConfig.c')],check=True)
         cls.func=ctypes.CDLL(str(lib)).sink_prepare_caps
         cls.func.argtypes=[ctypes.POINTER(SinkCaps),ctypes.POINTER(ctypes.c_uint8),ctypes.POINTER(ctypes.c_uint8)]
         cls.func.restype=ctypes.c_int
@@ -240,7 +240,7 @@ class TableCapacity(unittest.TestCase):
         cls.t = tempfile.TemporaryDirectory()
         target = Path(cls.t.name)/'capacity.so'
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-shared','-fPIC',
-                        str(ROOT/'tweak/SinkEndpoint.c'),'-o',str(target)],check=True)
+                        str(ROOT/'tweak/SinkEndpoint.c'),str(ROOT/'shared/AACConfig.c'),'-o',str(target)],check=True)
         cls.analyze = ctypes.CDLL(str(target)).sink_analyze_table
         cls.analyze.argtypes = [ctypes.POINTER(ctypes.c_uint8),ctypes.c_size_t,ctypes.c_uint,ctypes.POINTER(CStats)]
         cls.analyze.restype=ctypes.c_int
@@ -305,7 +305,7 @@ class AllocatorGeometry(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory()
         lib = Path(cls.temp.name) / 'libv79.so'
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-shared', '-fPIC',
-                        str(ROOT / 'tweak/SinkEndpoint.c'), '-o', str(lib)], check=True)
+                        str(ROOT / 'tweak/SinkEndpoint.c'), str(ROOT / 'shared/AACConfig.c'), '-o', str(lib)], check=True)
         cls.func = ctypes.CDLL(str(lib)).sink_analyze_allocation
         cls.func.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8),
                              ctypes.c_uint, ctypes.POINTER(Geometry)]
@@ -420,7 +420,7 @@ class SevenSlots(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         lib = Path(cls.tmp.name)/'v81config.so'
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-shared','-fPIC',
-                        str(ROOT/'tweak/SinkEndpoint.c'),'-o',str(lib)],check=True)
+                        str(ROOT/'tweak/SinkEndpoint.c'),str(ROOT/'shared/AACConfig.c'),'-o',str(lib)],check=True)
         cls.fn = ctypes.CDLL(str(lib)).sink_prepare_config_shadow
         cls.fn.argtypes=[ctypes.POINTER(ctypes.c_uint8),ctypes.c_size_t,
                          ctypes.POINTER(ctypes.c_uint8),ctypes.c_int]
@@ -521,7 +521,7 @@ class SinkSDPRecord(unittest.TestCase):
         if not cc: self.skipTest('no native compiler')
         with tempfile.TemporaryDirectory() as td:
             so=pathlib.Path(td)/'sdp.so'
-            subprocess.run([cc,'-shared','-fPIC','-o',str(so),str(ROOT/'tweak/SinkEndpoint.c')],check=True,
+            subprocess.run([cc,'-shared','-fPIC','-o',str(so),str(ROOT/'tweak/SinkEndpoint.c'),str(ROOT/'shared/AACConfig.c')],check=True,
                             stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             lib=ctypes.CDLL(str(so));lib.SinkSDPDescriptor.restype=ctypes.POINTER(Descriptor)
             desc=lib.SinkSDPDescriptor().contents

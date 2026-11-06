@@ -41,6 +41,7 @@
 
 #include "tweak/BluetoothdBuild.h"
 #include "shared/SpeakaShared.h"
+#include "shared/AACConfig.h"
 #include <pthread.h>
 #include <ptrauth.h>
 
@@ -289,6 +290,9 @@ static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a
         __atomic_store_n(&g_sink_stream_handle,(unsigned)a2,__ATOMIC_RELEASE);
         memset(&g_stream_control,0,sizeof g_stream_control);
         g_stream_control.local_seid=7;g_stream_control.remote_seid=(unsigned)a4;
+        /* v9.3: tell the helper which codec this session uses. Only the SBC endpoint exists, so it is SBC;
+         * when an AAC endpoint is registered (the native blocker), its CONFIGURE would publish AAC here. */
+        AudioRelaySetCodec(A2DP_CODEC_SBC,NULL,0);
         pthread_mutex_unlock(&g_stream_control_lock);
         SpeakaLogNow("V88_CONFIG handle=%u local_seid=7 remote_seid=%u",(unsigned)a2,(unsigned)a4);
         /* v9.6: the PC's side of the speaker's stream, for the app's connection line (diag.v95.peer). */
