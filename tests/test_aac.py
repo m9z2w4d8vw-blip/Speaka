@@ -13,6 +13,8 @@ What is NOT tested here, because there is no Apple toolchain on the host and no 
 These are the AAC blockers; see docs/CHANGELOG.md. Every SBC test in test_audio.py still runs unchanged.
 """
 import ctypes
+import os
+import shutil
 import sys
 import pathlib
 import struct
@@ -181,6 +183,11 @@ class CodecDispatchFallback(unittest.TestCase):
     def setUpClass(cls):
         vendor = ROOT / "audiohelper/vendor_sbc"
         if not (vendor / "sbc.c").exists() or not (vendor / "bits.c").exists():
+            # Locally this is a legitimate skip (no fetch). In CI libsbc is always fetched first, so skipping there
+            # would hide a real link failure - fail loudly instead. (Phase 4: a test must not silently skip past a
+            # missing dependency that CI is supposed to provide.)
+            if os.environ.get("CI"):
+                raise AssertionError("vendored libsbc missing in CI; the fetch step must run before the tests")
             raise unittest.SkipTest("vendored libsbc not present; run tools/fetch_google_sbc.sh (CI does)")
         cls.have_audiotoolbox = sys.platform == "darwin"
 
@@ -358,6 +365,79 @@ class LATMDepacketizer(unittest.TestCase):
         ok = self.lib.latm_parse_audiomuxelement(buf, len(element), au, 16, ctypes.byref(fr))
         self.assertEqual(ok, 0)                                  # refuses rather than overflowing
 
+
+
+class OnDeviceHarnessBuilds(unittest.TestCase):
+    """The on-device AAC decode harness (tools/aac_decode_test) must stay buildable and correct. CI builds it against
+    the real iPhoneOS SDK, but that build is far from the test step, so a missing source, a changed decoder
+    signature, or a broken fixture would only surface late. This compiles the harness logic as C on the host against
+    a linkable fake AudioConverter that emits 1024 frames per access unit, runs it over the real fixture, and checks
+    the accounting. It exercises the real AACDecoder.c, LATM.c, AACConfig.c and the real fixture - only AudioToolbox
+    is faked, which the host cannot provide. A real-decoder run happens on the device (README.md)."""
+    def test_harness_compiles_and_accounts_correctly(self):
+        cc = shutil.which("cc")
+        self.assertIsNotNone(cc)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            # Regenerate the embedded fixture header from the shipped fixtures.
+            gen = subprocess.run([sys.executable, str(ROOT / "tools/aac_decode_test/make_fixture_header.py")],
+                                 capture_output=True, text=True)
+            self.assertEqual(gen.returncode, 0, gen.stderr)
+            self.assertTrue((ROOT / "tools/aac_decode_test/fixture_data.h").exists())
+
+            # A C-compilable copy of the harness: drop the two Objective-C constructs (Foundation import and
+            # @autoreleasepool), and make the relative includes absolute.
+            src = (ROOT / "tools/aac_decode_test/aac_decode_test.m").read_text()
+            src = src.replace("#import <Foundation/Foundation.h>", "")
+            src = src.replace("    @autoreleasepool {", "    {")
+            src = src.replace('#include "../../shared/AACConfig.h"', '#include "%s/shared/AACConfig.h"' % ROOT)
+            src = src.replace('#include "../../shared/AudioRing.h"', '#include "%s/shared/AudioRing.h"' % ROOT)
+            src = src.replace('#include "../../audiohelper/AACDecoder.h"', '#include "%s/audiohelper/AACDecoder.h"' % ROOT)
+            src = src.replace('#include "fixture_data.h"', '#include "%s/tools/aac_decode_test/fixture_data.h"' % ROOT)
+            (tmp / "harness.c").write_text(src)
+
+            # A linkable fake AudioConverter emitting a quiet non-silent ramp, 1024 frames per access unit.
+            (tmp / "AudioToolbox").mkdir()
+            (tmp / "AudioToolbox/AudioToolbox.h").write_text(
+                "#pragma once\n#include <stdint.h>\ntypedef int32_t OSStatus;enum{noErr=0};\n"
+                "typedef uint32_t UInt32;typedef double Float64;\n"
+                "typedef struct{Float64 mSampleRate;UInt32 mFormatID,mFormatFlags,mBytesPerPacket,mFramesPerPacket,"
+                "mBytesPerFrame,mChannelsPerFrame,mBitsPerChannel,mReserved;}AudioStreamBasicDescription;\n"
+                "typedef struct{UInt32 mNumberChannels,mDataByteSize;void*mData;}AudioBuffer;"
+                "typedef struct{UInt32 mNumberBuffers;AudioBuffer mBuffers[1];}AudioBufferList;\n"
+                "typedef struct{int64_t mStartOffset;UInt32 mVariableFramesInPacket,mDataByteSize;}AudioStreamPacketDescription;\n"
+                "typedef struct X*AudioConverterRef;enum{kAudioFormatLinearPCM=1,kAudioFormatMPEG4AAC=2};\n"
+                "enum{kAudioFormatFlagIsSignedInteger=4,kAudioFormatFlagIsPacked=8,kMPEG4Object_AAC_LC=2};\n"
+                "typedef OSStatus(*AudioConverterComplexInputDataProc)(AudioConverterRef,UInt32*,AudioBufferList*,AudioStreamPacketDescription**,void*);\n"
+                "OSStatus AudioConverterNew(const AudioStreamBasicDescription*,const AudioStreamBasicDescription*,AudioConverterRef*);\n"
+                "OSStatus AudioConverterDispose(AudioConverterRef);\n"
+                "OSStatus AudioConverterReset(AudioConverterRef);\n"
+                "OSStatus AudioConverterFillComplexBuffer(AudioConverterRef,AudioConverterComplexInputDataProc,void*,UInt32*,AudioBufferList*,AudioStreamPacketDescription*);\n")
+            (tmp / "fake_at.c").write_text(
+                '#include "AudioToolbox/AudioToolbox.h"\n'
+                "OSStatus AudioConverterNew(const AudioStreamBasicDescription*a,const AudioStreamBasicDescription*b,AudioConverterRef*c){(void)a;(void)b;*c=(AudioConverterRef)1;return 0;}\n"
+                "OSStatus AudioConverterDispose(AudioConverterRef c){(void)c;return 0;}\n"
+                "OSStatus AudioConverterReset(AudioConverterRef c){(void)c;return 0;}\n"
+                "OSStatus AudioConverterFillComplexBuffer(AudioConverterRef c,AudioConverterComplexInputDataProc p,void*x,UInt32*io,AudioBufferList*o,AudioStreamPacketDescription*d){"
+                "(void)c;(void)p;(void)x;(void)d;UInt32 n=*io;if(n>1024)n=1024;int16_t*b=o->mBuffers[0].mData;"
+                "for(UInt32 i=0;i<n*2;i++)b[i]=(int16_t)((i%256)*4);*io=n;o->mBuffers[0].mDataByteSize=n*4;return 0;}\n")
+
+            exe = tmp / "harness"
+            build = subprocess.run(
+                [cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I", str(tmp),
+                 str(tmp / "harness.c"), str(ROOT / "audiohelper/AACDecoder.c"),
+                 str(ROOT / "shared/LATM.c"), str(ROOT / "shared/AACConfig.c"), str(tmp / "fake_at.c"),
+                 "-lm", "-o", str(exe)], capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            run = subprocess.run([str(exe)], capture_output=True, text=True)
+            # pass==true only if the harness walked all 25 elements and accounted 25*1024 frames.
+            self.assertIn('"elements": 25', run.stdout)
+            self.assertIn('"decoded_ok": 25', run.stdout)
+            self.assertIn('"errors": 0', run.stdout)
+            self.assertIn('"pcm_frames": 25600', run.stdout)
+            self.assertIn('"decoded_rate": 48000', run.stdout)
+            self.assertIn('"pass": true', run.stdout)
+            self.assertEqual(run.returncode, 0, run.stdout)
 
 
 if __name__ == "__main__":

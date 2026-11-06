@@ -105,6 +105,22 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s tests -v
 
+      - name: Build the on-device AAC decode test (real iPhoneOS AudioToolbox)
+        run: |
+          set -euo pipefail
+          # Compiles Speaka's real AACDecoder.c / LATM.c / AACConfig.c against the actual iPhoneOS SDK and links the
+          # real AudioToolbox. This is the only build that exercises the AudioConverter path; it is signed and
+          # uploaded so it can be run on a device over SSH (tools/aac_decode_test/README.md).
+          make -C tools/aac_decode_test
+          file tools/aac_decode_test/aac_decode_test
+
+      - name: Upload the AAC decode test
+        uses: actions/upload-artifact@v4
+        with:
+          name: aac-decode-test
+          path: tools/aac_decode_test/aac_decode_test
+          if-no-files-found: error
+
       - name: Build and package
         run: make clean package FINALPACKAGE=1
 
