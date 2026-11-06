@@ -130,7 +130,7 @@ static inline const char *output_route_reason(int code)
  *   - A running output is KEPT through a stream gap: a SUSPEND, a close and reopen, a track change or a pause. Only
  *     stale PCM is dropped. The audio session therefore never changes because the stream did. The output is released
  *     only after HOLD_MS without media, which also covers Windows closing and reopening the stream after the
- *     phone suspends it (21:35 log in TESTING-v8.9.4: SUSPEND, CLOSE 3.7 s later, reopen 6.1 s later).
+ *     phone suspends it (the 21:35 log from v8.9.4's device test: SUSPEND, CLOSE 3.7 s later, reopen 6.1 s later).
  *   - After the helper lets go on its own (hold expired, route refused, start or enqueue error), it does not activate
  *     again for HOLD_REARM_MS, so it can never switch iOS's audio around faster than that, whatever the cause.
  *   - Starting from idle needs audible PCM. Exact digital silence (what the PC sends when the phone restarts a stream

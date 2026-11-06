@@ -281,7 +281,7 @@ class TableCapacity(unittest.TestCase):
         d=plistlib.loads((ROOT/'settings/Resources/Root.plist').read_bytes())
         self.assertNotIn('SpeakaV77SinkTrial',[x.get('key') for x in d['items']])
     def test_pinned_disassembly_layout(self):
-        docs=(ROOT/'docs/research/V78_AVDTP_CAPACITY_FINDINGS.md').read_text()
+        docs=(ROOT/'docs/BLUETOOTHD.md').read_text()
         for x in ['0xCEE14','0xCEE54','0xCEEE8','0x9768b0']:
             self.assertIn(x,docs)
 
@@ -367,7 +367,7 @@ class AllocatorGeometry(unittest.TestCase):
             self.assertIn(offset, source)
         self.assertIn('v8.8-continuous-sbc-ring', source)
     def test_documented_limitations(self):
-        docs=(ROOT/'docs/research/V79_AVDTP_ALLOCATION_FINDINGS.md').read_text()
+        docs=(ROOT/'docs/BLUETOOTHD.md').read_text()
         for needle in ['0xCE428', '0xCE4F4', '0x984a60', 'NOT', 'no allocation']:
             self.assertIn(needle,docs)
 
@@ -405,7 +405,7 @@ class ConfigGetter(unittest.TestCase):
         self.assertIn('snapshot_allocation();',SRC)
         self.assertIn('if (g_config_hook_enabled && g_config_index3_calls == 0u)',SRC)
     def test_docs_disclose_limitations(self):
-        d=(ROOT/'docs/history/TESTING-v8.0.md').read_text()
+        d=(ROOT/'docs/BLUETOOTHD.md').read_text()
         self.assertIn('No memory changes',d)
         self.assertIn('NO_INDEX3_CALL_OBSERVED',d)
         self.assertIn('Legacy Sink',d)
@@ -484,7 +484,7 @@ class SevenSlots(unittest.TestCase):
         self.assertIn('V81_LIVE RESULT',SRC)
         self.assertIn('g_config_shadow_returned',SRC)
     def test_documents_disclose_no_sink_and_rollback(self):
-        docs=(ROOT/'docs/history/TESTING-v8.1.md').read_text()
+        docs=(ROOT/'docs/BLUETOOTHD.md').read_text()
         for term in ('OFF','Legacy Sink','one-shot','v8.0','no Sink', 'slots=7'):
             self.assertIn(term,docs)
 

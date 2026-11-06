@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
+  <a href="#install"><b>Install</b></a> &nbsp;·&nbsp;
   <a href="#using-speaka"><b>Using Speaka</b></a> &nbsp;·&nbsp;
   <a href="#troubleshooting"><b>Troubleshooting</b></a> &nbsp;·&nbsp;
   <a href="#how-it-works"><b>How it works</b></a> &nbsp;·&nbsp;
@@ -39,15 +39,17 @@ changing songs; switching outputs during playback; and wired earbuds without rep
 > **exactly one** `bluetoothd` build, from iOS 17.0 (see [Requirements](#requirements)). On any other build it hooks
 > nothing, so you get no speaker rather than a broken Bluetooth.
 
-## Highlights
+## Install
 
-| | |
-| --- | --- |
-| 🔊 **One-tap Start and Stop** | One button in the Speaka app. It opens into a live log while Bluetooth restarts; your other devices reconnect on their own. |
-| 🎧 **Your choice of output** | iPhone speaker, wired or USB headphones, or any iOS output, switchable mid-song. |
-| 💻 **Live connection line** | The app shows when your PC is connected and where the audio is playing. |
-| 🛡️ **Safe by design** | Checks the exact Bluetooth build before hooking anything; every session ends at the next Bluetooth restart. |
-| 🩺 **Built-in diagnostics** | One tap exports everything needed to diagnose a problem. |
+1. Install **`Speaka.tipa`** from the [latest release](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest)
+   with TrollStore.
+2. Open Speaka and tap **Install Tweak**. It installs the tweak the app carries; nothing else to download.
+3. Tap **Start**, then connect from the PC and choose the iPhone as its output. On Windows, pair it under
+   *Bluetooth & devices* the first time.
+
+**Start** restarts Bluetooth, and your other devices reconnect on their own. The speaker lasts until Bluetooth next
+restarts (see [When to tap Start again](#when-to-tap-start-again)). To remove everything, hold **Uninstall** in the
+app for 4 seconds.
 
 ## Requirements
 
@@ -75,103 +77,32 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
 
 </details>
 
-## Quick start
-
-1. **Download** `Speaka.tipa` from the [**latest release**](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest).
-   It carries the tweak too. `SHA256SUMS` lets you verify it. After this first install, the app updates itself and the
-   tweak ([Updates](#updates)).
-2. **Install it.** Open `Speaka.tipa` with TrollStore. `Speaka.ipa` is the same file under another name.
-3. **Install the tweak.** Open Speaka and tap **Install Tweak**, above the big button. Bluetooth restarts, the iPhone
-   resprings, and Settings gains a **Speaka** page. (Or install the release's `Speaka_<version>_iphoneos-arm64.deb`
-   yourself, with Sileo or Zebra or `sudo dpkg -i`; with the tweak installed, the button doesn't show.)
-4. **Start.** Open Speaka and tap **Start**. Bluetooth restarts once more.
-5. **Connect.** On the PC, pair with the iPhone (Windows: Settings > Bluetooth & devices > Add device > Bluetooth) and
-   choose it as the sound output.
-
-> [!IMPORTANT]
-> Upgrading from a build older than v9.0? Its package had a different name, so remove it first. The steps are in
-> [TESTING-v9.0](docs/history/TESTING-v9.0.md).
-
-> [!NOTE]
-> The app needs TrollStore. Sideloading it with AltStore or Sideloadly installs it, but strips the permissions it needs
-> to reach the tweak and to install it. The app only controls the tweak, so the tweak is always required.
-
-<details>
-<summary><b>What the install script does, and how to uninstall</b></summary>
-
-<br>
-
-Installing registers the audio helper with launchd, creates `/tmp/FTABHarvest`, and restarts `bluetoothd` once, so the
-new build is the one running. Installing alone does not turn the speaker on; that's what **Start** is for.
-
-To remove Speaka, uninstall the package, which also unloads the helper. Then restart Bluetooth to unload the tweak:
-
-```sh
-sudo dpkg -r com.parv.speaka
-sudo killall -9 bluetoothd
-```
-
-</details>
-
 ## Using Speaka
 
 ### The app
 
-The app looks and moves like Caz, from Caz's own code: the same panels, type and animations, on Speaka's own
-background.
-
-- **One button** at the bottom reads **Start**, or **Stop** while the speaker is on. Tapping it opens it into a log,
-  as Caz's Clean button does, with a line for each step Bluetooth goes through: restarting, arming the speaker,
-  installing its hooks, registering Bluetooth's own endpoints, making room for the speaker, preparing the audio path,
-  adding the speaker and advertising it, then *Ready for your PC*. If a step fails, its line says so and the header
-  keeps the tweak's own reason. The log folds back 1.6 s after the last line, or 6 s after a failure, and the button
-  then reads the other word.
-- **The connection line** above the button says what's happening: *LAPTOP-XXXX · connected* as soon as the PC
-  sets up the stream and while it's paused, *LAPTOP-XXXX · iPhone speaker* while it plays, or *Connect from your PC*
-  while nothing is connected. The PC's name comes from the audio route, where iOS shows it as a Bluetooth audio
-  device, or from iOS's Bluetooth list; when neither has it, it says *Your PC*.
-- **The header** reads *by Parv*, or, when something needs your attention, says what in the warning colour: for
-  example that the volume is at zero, or that Bluetooth was turned off and on.
-- **Settings** has **Kill Bluetooth**: `killall -9 bluetoothd`, from the app. iOS starts Bluetooth again at once,
-  without the speaker, so use it when devices won't reconnect, then tap **Start**.
-- **Audio Output** opens a window with the three outputs; the current one has a checkmark. **Choose Output Device**
-  under them opens iOS's own picker.
-- **Uninstall** removes everything when held for 4 seconds; a tap alone does nothing. While you hold, a gray fill
-  sweeps across the row from left to right, and the part it has covered dims, so that part looks disabled; the row
-  still reads *Uninstall*, and if you let go early the edge runs back. At 4 seconds the whole row has the disabled
-  look and reads *Uninstalling...*, with no second prompt, and the
-  header doesn't warn that the tweak is missing: the tweak is removed with dpkg and Bluetooth restarts, Settings closes, Speaka's logs, settings and
-  downloads are deleted, and TrollStore removes the app. If the tweak can't be removed, nothing else is, and the header
-  says why.
-- **Credits** shows the app's and the tweak's versions and the license of the interface, which Caz and Speaka share.
-- **Update Available** appears above the button when a newer release is out; see [Updates](#updates).
-- **Settings** also has **Update notifications**: while Speaka is open, it checks for a new release every 2 minutes,
-  and it asks iOS to check in the background too. iOS decides when that happens, often much less often than every 2
-  minutes, and never once Speaka has been swiped away. Each release is announced once, when it carries `Speaka.tipa`.
-
-Since v9.7, Start, Stop and the audio output are only in the app; **Settings > Speaka** keeps the status, the debug
-log and the research switches. More detail is in [app/README.md](app/README.md).
+- **The big button** reads **Start**, or **Stop** while the speaker is on. Tapping it opens into a log with a line
+  for each step Bluetooth goes through, ending with *Ready for your PC*. If a step fails, its line says so and the
+  header keeps the tweak's own reason.
+- **The connection line** above it says what's happening: *LAPTOP-XXXX · connected* while the PC is connected or
+  paused, *LAPTOP-XXXX · iPhone speaker* while it plays, or *Connect from your PC*.
+- **The header** reads *by Parv*, or, when something needs you, says what in the warning colour: for example that the
+  volume is at zero, or that Bluetooth was turned off and on.
+- **Settings** has **Kill Bluetooth** (`killall -9 bluetoothd`, from the app: Bluetooth restarts at once, without the
+  speaker) and **Update notifications**.
+- **Audio Output** chooses where the sound plays; see [Where the audio plays](#where-the-audio-plays).
+- **Uninstall**, held for 4 seconds, removes the tweak, Speaka's logs, settings and downloads, and the app. A tap does
+  nothing; while you hold, a gray fill sweeps across the row, and letting go early cancels. If the tweak can't be
+  removed, nothing else is, and the header says why.
+- **Credits** shows the app's and the tweak's versions, and the license of the interface, which Speaka shares with Caz.
 
 ### Updates
 
-Since v9.5, `Speaka.tipa` carries the tweak's `.deb`, so one file installs both. While the tweak isn't installed,
-**Install Tweak** sits above the big button and installs the one the app carries, with nothing to download. Once the
-tweak is installed, of whatever version, the app works as before.
-
-Once per launch, the app asks GitHub for Speaka's releases. When one is newer than the installed app or tweak,
-**Update Available** slides up above the button, as in Caz. Tapping it opens the changelog (the commit messages of
-each release), and **Update** installs it:
-
-1. if the app is behind, it downloads only the new `.tipa`, into `/var/mobile/Library/Caches/Speaka` (or the tweak's
-   `/tmp/FTABHarvest` if that can't be written), and installs it with TrollStore, which closes Speaka;
-2. if the tweak is behind, it installs the tweak carried by the newest app (the new one, or this one if only the tweak
-   was behind) with dpkg, whose install script restarts Bluetooth, so a running speaker stops;
-3. if the tweak was updated, it resprings, so Settings and the app open in their new versions.
-
-With only the app behind, nothing resprings, and if TrollStore can't install it, TrollStore is asked to download it from
-the release instead. If the tweak doesn't install after a new app did, the app offers it again when it next opens.
-Installing needs the app's update helper, which runs as root through TrollStore, so update by hand if you sideloaded
-the app some other way.
+When a newer release is out, **Update Available** appears above the button. Tapping it shows the changelog, and
+**Update** installs it: TrollStore installs the new app, then dpkg installs the tweak the new app carries, which
+restarts Bluetooth, so a running speaker stops. With **Update notifications** on, the app checks every 2 minutes while
+it's open, and asks iOS to check in the background as well (iOS decides how often, and never once Speaka has been
+swiped away).
 
 ### When to tap Start again
 
@@ -194,47 +125,38 @@ The speaker lasts as long as that run of Bluetooth. Tap **Start** again after an
 | **Any device (follow iOS)** | Wherever iOS is playing | The mode for Bluetooth earbuds |
 
 > [!TIP]
-> For **Bluetooth earbuds**, choose *Any device* and pick the earbuds with **Choose Output Device** (the app) or
-> **Choose output device...** (Settings), or in Control Center. Your PC is itself a Bluetooth audio device to iOS, and
+> For **Bluetooth earbuds**, choose *Any device* and pick the earbuds with **Choose Output Device** in the app's
+> Audio Output, or in Control Center. Your PC is itself a Bluetooth audio device to iOS, and
 > since it connects last, iOS may send the sound back to it. If the connection line shows your PC, pick the earbuds
 > again.
 
-### The Settings page
+### Settings > Speaka
 
-| Section | Rows |
-| --- | --- |
-| Status | Loaded in daemon, Last event, Log channels |
-| Debug log | View debug log, Copy log to clipboard, Clear log |
-Start, Stop, the session and the audio output were here until v9.7; they're in the app now. The Experiments switches
-went in v9.8: **Start** sets the two it needs by itself.
+**Status** shows whether the tweak loaded into `bluetoothd`, its last event and where it logs. **Debug log** shows the
+full log, and copies it or saves it to iCloud Drive. Start, Stop and the audio output are in the app.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | What to do |
 | --- | --- | --- |
-| Start ends with *Still waiting* | Bluetooth still runs an older tweak build without the Start handler | Reinstall the package (its install script restarts Bluetooth), or run `sudo killall -9 bluetoothd`. Then Start again. |
-| *Off - Bluetooth was turned off and on; tap Start* | Toggling Bluetooth rebuilt Apple's endpoints without the speaker | Tap **Start**. |
-| The PC connects and drops at once, or finds no speaker | No speaker registered since the last Bluetooth restart | Tap **Start**, then reconnect from the PC. |
-| The PC plays, the iPhone is silent, and the connection line shows your PC | *Any device* is sending the sound back to the PC | Choose *iPhone speaker* or *Wired headphones*, or pick your earbuds with **Choose output device...**. |
-| Control Center keeps switching between *Headphones* and your PC, and nothing plays | Builds before v9.1 restarted their audio on every stream change, and each restart re-routed iOS ([TESTING-v9.1](docs/history/TESTING-v9.1.md)) | Update to v9.1. If it still happens, save the log right away. |
-| The app says the volume is at 0% | That output's volume is at zero | Raise the iPhone volume while audio plays. |
+| The PC connects and drops at once, or finds no speaker | No speaker since the last Bluetooth restart | Tap **Start**, then reconnect from the PC. |
+| *Bluetooth was turned off and on* | Toggling Bluetooth rebuilt Apple's endpoints without the speaker | Tap **Start**. |
+| Start ends with *Still waiting* | Bluetooth still runs a tweak without the Start handler | Tap **Install Tweak** or **Update**, or run `sudo killall -9 bluetoothd`. Then Start again. |
+| The PC plays, the iPhone is silent, and the connection line shows your PC | *Any device* is sending the sound back to the PC | Choose *iPhone speaker* or *Wired headphones*, or pick your earbuds with **Choose Output Device**. |
+| The app says the volume is at 0% | That output's volume is at zero | Raise the iPhone's volume while audio plays. |
 | Wired mode is silent and the connection line says it's waiting | Nothing is plugged in | Plug the headset in; playback starts by itself. |
-| The sound stopped after a call, Siri or another app | iOS interrupted playback | Pause and play on the PC, or change any audio setting. |
-| **Update Available** never appears | The app checks once per launch; offline, or GitHub's limit of 60 checks an hour was reached | Open the app again later. You can always install from the [latest release](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest) by hand. |
-| *Update failed* after *Installing the tweak* | dpkg reported an error, often because Sileo or Zebra was installing at the same time | Close the package manager and tap **Update** again. Nothing else changed. |
-| Bluetooth misbehaves in general | | Tap **Stop** in the app (its button reads Stop while the speaker is on), or **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`. To remove everything, hold **Uninstall** in the app for 4 seconds. |
+| The sound stopped after a call, Siri or another app | iOS interrupted playback | Pause and play on the PC. |
+| **Update Available** never appears | The app checks once per launch; offline, or GitHub's limit of 60 checks an hour was reached | Open the app again later, or install from the [latest release](https://github.com/m9z2w4d8vw-blip/Speaka/releases/latest). |
+| *Update failed* after *Installing the tweak* | dpkg reported an error, often because Sileo or Zebra was installing at the same time | Close the package manager and tap **Update** again. |
+| Bluetooth misbehaves in general | | Tap **Stop**, or **Settings > Kill Bluetooth** in the app. |
 
-When something goes wrong, open **View debug log** right away and use **Save Log to iCloud Drive**.
+When something goes wrong, open **Settings > Speaka > View debug log** right away and use **Save Log to iCloud Drive**.
 
-## Logs and diagnostics
+## Logs
 
-**View debug log** in Settings gathers everything in one place:
-
-- the tweak's status;
-- its log;
-- an **AUDIO HELPER** section with the output mode, the helper's last status (state, device, volume) and its own log.
-
-**Copy log to clipboard** and **Save Log to iCloud Drive** export the same text.
+**View debug log** in Settings > Speaka gathers the tweak's status, its log, and an **AUDIO HELPER** section with the
+output mode, the helper's last status and its own log. **Copy log to clipboard** and **Save Log to iCloud Drive**
+export the same text.
 
 <details>
 <summary><b>Log files, copying them to a PC, and the lines worth knowing</b></summary>
@@ -283,107 +205,21 @@ Offline helpers in `tools/`:
 
 ## How it works
 
-```mermaid
-flowchart LR
-    PC["PC<br/>Bluetooth audio source"] -->|"SBC audio over Bluetooth"| BT
-    subgraph phone["iPhone"]
-        BT["bluetoothd<br/>+ Speaka tweak"] -->|"shared memory"| HELPER["Audio helper<br/>decodes SBC"]
-        HELPER --> OUT["iPhone speaker<br/>wired earbuds<br/>any iOS output"]
-        UI["Speaka app<br/>or Settings"] -.->|"Start, Stop"| BT
-        UI -.->|"output mode"| HELPER
-    end
-```
+1. **Start:** the app writes a request to Bluetooth's preferences and posts a notification. The tweak, inside
+   `bluetoothd`, arms a one-shot session and restarts `bluetoothd`.
+2. **The check:** on relaunch the tweak confirms this is the one `bluetoothd` build it was written for (its UUID and
+   the first instructions at every hook address) and hooks nothing otherwise.
+3. **Becoming a speaker:** it gives the AVDTP endpoint table a seventh slot, registers an A2DP Sink (SEID 7) after
+   iOS's six Sources, and publishes the Audio Sink SDP record (`0x110B`) that tells the PC it's a speaker.
+4. **The audio:** hooks on AVDTP signalling follow the PC's stream, and the media hook copies its SBC packets into a
+   shared-memory ring in `/tmp/FTABHarvest`.
+5. **Playback:** the tweak connects to `127.0.0.1:37594`, so launchd starts the audio helper, which decodes the SBC
+   with Google's libsbc and plays it on the chosen output.
+6. **The rest:** the app polls the status for its screens, and its root helper installs updates and uninstalls through
+   TrollStore and dpkg.
 
-Inside the Bluetooth daemon, the tweak adds one Sink endpoint next to Apple's six Source endpoints and advertises the
-iPhone as an audio sink. The PC then sees a speaker. Incoming audio goes through shared memory to a separate helper
-process, which decodes it and plays it on the output you chose. Apple's own Bluetooth handling stays untouched.
-
-Starting the speaker works like this:
-
-```mermaid
-sequenceDiagram
-    actor You
-    participant App as Speaka app or Settings
-    participant BT as bluetoothd + tweak
-    participant PC
-    You->>App: Tap Start
-    App->>BT: Start request with a one-time code
-    BT->>BT: Arm the speaker and restart itself
-    BT-->>App: Armed, speaker registered
-    PC->>BT: Connect and choose the iPhone as output
-    BT-->>App: Receiving audio
-```
-
-<details>
-<summary><b>Technical details: hooks, design, the audio helper and the shared names</b></summary>
-
-<br>
-
-**Hooks.** `tweak/Hooks.xm` is loaded into `bluetoothd` (filter: `Speaka.plist`). Its five offset hooks come from
-`tweak/BluetoothdBuild.h`, and each target is verified before hooking. Two do the work; three are pass-through observers.
-
-| Function | Offset | Role |
-| --- | --- | --- |
-| `AVDTP_RegisterMultipoint` | `0x00cecf0` | Watches Apple's six Source registrations, then registers the Sink endpoint |
-| `SetConfigInd_handler` | `0x037ae68` | Learns the stream handle and endpoint IDs when the PC configures a stream |
-| `advertise_A2DP_source` | `0x044df14` | Observer |
-| `SetConfig_accept_SBC` | `0x03b03b4` | Observer (logs the accepted SBC configuration) |
-| `publish_audio_device` | `0x0376e4c` | Observer |
-
-**Design, step by step:**
-
-1. **A seventh endpoint slot (v8.1).** AVDTP is configured for six endpoints, all used by Apple's Sources. A one-shot
-   shadow of its configuration (getter index 3) makes room for a seventh.
-2. **The speaker endpoint (v8.2).** After the six Sources register, the tweak registers one Sink (TSEP 1, SEID 7, SBC)
-   and a local SDP Audio Sink record (UUID `0x110B`). A small state machine (`tweak/StreamControl.c`) tracks the stream.
-3. **Media (v8.8).** Apple's stream callback table has 27 pointer-authenticated entries. The tweak copies it and
-   replaces only slot `+0xb0`, a no-op stub at `+0x385dfc`. Each packet lands in a ring of 32 × 2048-byte slots in
-   locked shared memory, with no locks, allocation, logging or system calls on Bluetooth's receive thread.
-4. **A worker thread** connects to the helper, drains the log and event queues, and keeps the helper's health lease
-   every 20 ms.
-5. **The idle guard (v8.8.2).** iOS's idle check at `+0x376034` would suspend a stream that iOS itself isn't playing.
-   While the helper is healthy, the guard keeps the stream; otherwise Apple's decision stands.
-6. **Start and Stop (v8.9.2).** The app or Settings writes `{action, nonce, time}` and posts
-   `com.parv.speaka.v89.session`. The tweak validates it, sets the one-shot switches and restarts `bluetoothd` by
-   ending itself. It runs as `mobile`, so it can't use `launchctl kickstart`. launchd relaunches it, armed.
-7. **Bluetooth toggles (v8.9.2).** Turning Bluetooth off and on re-runs Apple's endpoint registration without the
-   Sink. The tweak notices, stops forwarding and reports it.
-
-**The audio helper.** `BTPSAudioHelper` (`audiohelper/`) runs outside `bluetoothd`. It's started by the launchd job
-`com.parv.speaka.audio` on `127.0.0.1:37594`, as user `mobile`, on the first stream. It decodes with Google libsbc and
-plays through AudioQueue. Nothing records, and no input is ever opened.
-
-| Mode | AVAudioSession setup |
-| --- | --- |
-| iPhone speaker | PlayAndRecord with DefaultToSpeaker, plus a speaker override |
-| Wired headphones or earbuds | PlayAndRecord with no Bluetooth option, so only wired or USB outputs qualify |
-| Any device | Playback, which follows iOS |
-
-The route policy is plain C in `OutputPolicy.h`, tested directly. The helper also does these things:
-
-- services its run loop, so route changes and interruptions arrive;
-- clears an interruption when a new stream starts;
-- reports its health every ~0.2 s;
-- publishes its status for the app and Settings;
-- keeps its output through stream changes, lets go only after 8 s without audio, and never re-activates its session
-  faster than every 3 s (v9.1, `audiohelper/OutputPolicy.h`).
-
-**Shared names.** Everything below lives in `shared/SpeakaShared.h`, so the tweak, the helper, Settings and the app always
-agree.
-
-| Name | Kind | Purpose |
-| --- | --- | --- |
-| `SpeakaStatus`, `SpeakaLog` | Preference | The tweak's status and log for Settings and the app |
-| `SpeakaV89SessionRequest` / `...SessionPending` | Preference | A Start/Stop request, carried across the restart |
-| `com.parv.speaka.v89.session` | Darwin notification | "A session request is waiting" |
-| `SpeakaV81SevenOnce`, `SpeakaV82DecisiveOnce` | Preference | The one-shot switches that Start sets and the next launch consumes |
-| `SpeakaV89OutputMode` | Preference | `speaker`, `headphones` (wired) or `any` |
-| `com.parv.speaka.v89.output` | Darwin notification | The output setting changed |
-| `SpeakaV89HelperStatus` | Preference | The helper's state, outputs and volume |
-| `127.0.0.1:37594` | TCP (launchd socket) | The daemon's connection to the helper |
-| `/tmp/FTABHarvest/` | Directory | The shared ring file and both logs |
-
-</details>
+Each session ends at the next Bluetooth restart, which always comes back as normal Bluetooth. How each offset was
+found is in [docs/BLUETOOTHD.md](docs/BLUETOOTHD.md).
 
 ## Repository layout
 
@@ -414,7 +250,7 @@ agree.
 ├── tests/                     one file per part: test_tweak, test_audio, test_start_stop, test_settings_page,
 │                              test_app, test_build (many compile the real C sources)
 ├── tools/                     offline scripts
-├── docs/                      release notes (history/), research findings (research/), images
+├── docs/                      CHANGELOG.md (every release), BLUETOOTHD.md (how each part of bluetoothd was found)
 └── .github/workflows/         CI: test, build, package, publish
 ```
 
@@ -424,7 +260,8 @@ so the copies can't drift apart. `tests/test_build.py` fails CI with an explanat
 - a file lands in the wrong folder;
 - a `(1)` duplicate appears;
 - a source in `tweak/` or `shared/` becomes unused;
-- a README link breaks.
+- `docs/CHANGELOG.md` has no entry for the version being built;
+- a README link or `#` anchor breaks.
 
 ## Building and testing
 
@@ -434,28 +271,15 @@ flowchart LR
     deb --> app["Build the app<br/>.tipa and .ipa,<br/>carrying the .deb"] -.->|"attached if it built"| rel
 ```
 
-Every push runs `.github/workflows/build.yml` on macOS with Xcode and Theos. The tweak job does four things:
-
-1. fetches the pinned libsbc;
-2. runs every test;
-3. builds and checks the `.deb`;
-4. uploads it as the `Speaka-deb` artifact, trying once more 30 s later if GitHub's artifact service times out.
-
-A second job, after the first, builds the app the way Caz is built, with XcodeGen and `xcodebuild`, puts the
-`Speaka-deb` artifact inside it as `Speaka.app/Speaka.deb`, checks it carries exactly that file, and uploads the
-`Speaka-app` artifact.
-
-Each push to `main` publishes a full release named after its version (`9.3.57`, tag `v9.3.57`) with the `.deb`,
-`Speaka.tipa`, `Speaka.ipa` and `SHA256SUMS`, marked latest. Its notes are the push's commit messages, which the app's
-changelog shows, and the old rolling **nightly** release is deleted. If the app fails to build, the release still goes
-out with the `.deb`, and the updater updates only the tweak. Publishing is tried up to three times, 30 s apart, and
-clears any draft a failed try left behind, since GitHub's release service sometimes fails partway. Versions are `control`'s `Version` plus the run number,
-for the `.deb` and the app alike (`tools/release_version.sh`), so every release is newer than the last. A tag you push,
-like `v9.4.0`, publishes as `9.4.0`; set `control`'s `Version` (and `MARKETING_VERSION` in `app/project.yml`) to `9.4`
-afterwards.
+Every push runs `.github/workflows/build.yml` on macOS with Xcode and Theos: it fetches the pinned libsbc, runs every
+test, builds and checks the `.deb`, then builds the app with the `.deb` inside it. Each push to `main` publishes a
+release named after its version (`control`'s `Version` plus the run number, so `9.8.74`) with the `.deb`,
+`Speaka.tipa`, `Speaka.ipa` and `SHA256SUMS`; its notes are the push's commit messages, which the app shows as the
+changelog. If the app fails to build, the release still goes out with the `.deb`. Uploads and publishing are retried,
+since GitHub's services sometimes fail partway.
 
 <details>
-<summary><b>Building locally, running the tests, and porting</b></summary>
+<summary><b>Building locally, the tests, the app, and porting</b></summary>
 
 <br>
 
@@ -466,7 +290,7 @@ You need macOS with Xcode and [Theos](https://theos.dev) for the tweak, and Xcod
 export THEOS=~/theos
 bash tools/fetch_google_sbc.sh       # Google libsbc at the pinned commit
 make clean package FINALPACKAGE=1    # packages/com.parv.speaka_*.deb (rootless, arm64 + arm64e)
-make -C app tipa                     # app/packages/Speaka.tipa and Speaka.ipa (XcodeGen + xcodebuild)
+DEB="$PWD/packages/com.parv.speaka_9.8_iphoneos-arm64.deb" make -C app tipa   # app/packages/Speaka.tipa and .ipa
 ```
 
 The build is rootless only. `BTPS_WITH_PREFS=0` skips the Settings bundle.
@@ -476,12 +300,21 @@ python3 -m unittest discover -s tests -v
 BTPS_SANITIZE=1 python3 -m unittest discover -s tests    # AddressSanitizer + UBSan where tests compile C
 ```
 
-The tests check the sources statically, or compile the real C files with the host compiler: the shared ring, the log
-summarizer, the route policy and the SBC decoders. The SDP record is checked against a Python model. The decoder and
-runtime tests need libsbc, so run `tools/fetch_google_sbc.sh` first; without it, `test_v88_runtime` fails by design.
+The tests check the sources, and compile the real C (the ring, stream control, the relay, the decoder, the output
+policy, the root helper) with the host compiler. There's no Apple compiler on a Linux host, so `tests/test_app.py`
+also checks the Swift: balanced code, every type and member used being defined, and every Objective-C method called by
+its pinned Swift name. The decoder test needs libsbc, so run `tools/fetch_google_sbc.sh` first; without it,
+`AudioRuntime` in `tests/test_audio.py` fails by design.
 
-**Porting** to another iOS build means re-deriving every offset and signature in `tweak/BluetoothdBuild.h` and `tweak/Hooks.xm`.
-`docs/research/` and [PROVENANCE-v8.2](docs/history/PROVENANCE-v8.2.md) record how each was found, and
+**The app** is built the way Caz is: XcodeGen generates the project from `app/project.yml`, `xcodebuild` compiles it,
+clang builds the root helper from `app/RootHelper/main.c`, and `app/scripts/package.sh` signs both with `ldid` and
+zips them. It reads the tweak's status from `com.apple.bluetooth`'s preferences, which takes the
+`platform-application` and `com.apple.private.security.no-sandbox` entitlements; `com.apple.private.persona-mgmt`
+lets it start the root helper, which installs updates (`install-update`), kills Bluetooth (`kill-bluetooth`) and
+uninstalls (`remove-tweak`, `uninstall-app`).
+
+**Porting** to another iOS build means finding every offset and signature in `tweak/BluetoothdBuild.h` and
+`tweak/Hooks.xm` again. [docs/BLUETOOTHD.md](docs/BLUETOOTHD.md) records how each was found, and
 `tools/inspect_bluetoothd.py` collects the evidence.
 
 </details>
@@ -493,14 +326,11 @@ runtime tests need libsbc, so run `tools/fetch_google_sbc.sh` first; without it,
 >
 > 1. **Stop** in the app.
 > 2. **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`.
-> 3. Uninstall the package.
+> 3. Hold **Uninstall** in the app for 4 seconds. Without the app: `sudo dpkg -r com.parv.speaka`, then
+>    `sudo killall -9 bluetoothd`.
 
-Three design choices limit what can go wrong:
-
-- The tweak refuses to hook a build it wasn't made for.
-- It leaves Apple's own signaling and Source endpoints alone.
-- Every speaker session is one-shot: the switches are consumed at launch, so the next Bluetooth restart always comes
-  back as normal Bluetooth.
+The tweak refuses to hook a build it wasn't made for, leaves Apple's own signalling and Source endpoints alone, and
+arms each speaker session only once, so the next Bluetooth restart always comes back as normal Bluetooth.
 
 ## Known limitations
 
@@ -514,66 +344,9 @@ Three design choices limit what can go wrong:
 - **iOS lists the PC as an output.** That comes from bluetoothd and is not fixed. If the phone suspends the stream
   as playback starts, the sound begins once Windows reopens the stream, about 6 s later.
 
-## Version history
+## Changelog
 
-Each version's notes explain what changed, why, and how it was tested on the device. There are no v8.4 or v8.5
-notes.
-
-<details>
-<summary><b>All versions, and the reverse-engineering notes</b></summary>
-
-<br>
-
-| Version | Milestone | Notes |
-| --- | --- | --- |
-| v5 | First on-device checklist for the hook build | [TESTING-v5](docs/history/TESTING-v5.md) |
-| v6 | Device testing procedure | [TESTING-v6](docs/history/TESTING-v6.md) |
-| v7 | Optional SDP registration observation | [TESTING-v7](docs/history/TESTING-v7.md) |
-| v7.1 | iCloud log export, SDP research, receive-side media foundation | [TESTING-v7.1](docs/history/TESTING-v7.1.md) |
-| v7.2 | Verified test sequence | [TESTING-v7.2](docs/history/TESTING-v7.2.md) |
-| v7.3 | Cross-process PCM playback in a separate helper | [TESTING-v7.3](docs/history/TESTING-v7.3.md) |
-| v7.4 | `bluetoothd` to an independent audio helper | [TESTING-v7.4](docs/history/TESTING-v7.4.md) |
-| v7.5 | Compressed RTP/SBC from `bluetoothd` to the helper | [TESTING-v7.5](docs/history/TESTING-v7.5.md) |
-| v7.6 | Decode captured SBC and play it from the helper | [TESTING-v7.6](docs/history/TESTING-v7.6.md) |
-| v7.6.1 | Helper playback diagnostics and limited gain | [TESTING-v7.6.1](docs/history/TESTING-v7.6.1.md) |
-| v7.7 | Two-phase Sink endpoint capacity trial | [TESTING-v7.7](docs/history/TESTING-v7.7.md) |
-| v7.8 | Read-only AVDTP capacity audit | [TESTING-v7.8](docs/history/TESTING-v7.8.md) |
-| v7.9 | Read-only allocation geometry audit | [TESTING-v7.9](docs/history/TESTING-v7.9.md) |
-| v8.0 | AVDTP configuration lookup timing probe | [TESTING-v8.0](docs/history/TESTING-v8.0.md) |
-| v8.1 | One-shot seven-slot AVDTP capacity | [TESTING-v8.1](docs/history/TESTING-v8.1.md) |
-| v8.2 | Live native Sink signaling: SEID 7 and SDP `0x110B` | [TESTING-v8.2](docs/history/TESTING-v8.2.md), [PROVENANCE-v8.2](docs/history/PROVENANCE-v8.2.md) |
-| v8.3 | Post-Source audio context | [TESTING-v8.3](docs/history/TESTING-v8.3.md) |
-| v8.6 | Receive-only media channel trial | [TESTING-v8.6](docs/history/TESTING-v8.6.md) |
-| v8.7 | Raw media-handler entry counter | [TESTING-v8.7](docs/history/TESTING-v8.7.md) |
-| v8.8 | **Continuous audio** through shared memory to the helper | [TESTING-v8.8](docs/history/TESTING-v8.8.md) |
-| v8.8.1 | Speaker route | [TESTING-v8.8.1](docs/history/TESTING-v8.8.1.md) |
-| v8.8.2 | Native idle-check guard | [TESTING-v8.8.2](docs/history/TESTING-v8.8.2.md) |
-| v8.9 | One-tap Start/Stop and audio output selection | [TESTING-v8.9](docs/history/TESTING-v8.9.md) |
-| v8.9.1 | Superseded by v8.9.2 (its restart approach was wrong) | [TESTING-v8.9.1](docs/history/TESTING-v8.9.1.md) |
-| v8.9.2 | Start reaches the tweak; Bluetooth toggles are detected | [TESTING-v8.9.2](docs/history/TESTING-v8.9.2.md) |
-| v8.9.3 | Logs that cover the whole session and show where the audio went | [TESTING-v8.9.3](docs/history/TESTING-v8.9.3.md) |
-| v8.9.4 | Wired earbuds without replugging; switching outputs without reconnecting | [TESTING-v8.9.4](docs/history/TESTING-v8.9.4.md) |
-| v9.0 | **Renamed to Speaka** throughout: package `com.parv.speaka` and new internal names | [TESTING-v9.0](docs/history/TESTING-v9.0.md) |
-| v9.1 | No more Headphones / PC flicker: the helper keeps its output through stream changes | [TESTING-v9.1](docs/history/TESTING-v9.1.md) |
-| v9.2 | The app takes Caz's look: one Start/Stop button that opens into a live log | [TESTING-v9.2](docs/history/TESTING-v9.2.md) |
-| v9.3 | Speaka's own background again; the app updates itself and the tweak; numbered releases | [TESTING-v9.3](docs/history/TESTING-v9.3.md) |
-| v9.4 | Updates that install; Start shows every step and which one failed | [TESTING-v9.4](docs/history/TESTING-v9.4.md) |
-| v9.5 | One `.tipa` installs the app and the tweak; Install Tweak; one-download updates | [TESTING-v9.5](docs/history/TESTING-v9.5.md) |
-| v9.6 | Settings with Kill Bluetooth; the PC's name from the audio route; still connected while paused | [TESTING-v9.6](docs/history/TESTING-v9.6.md) |
-| v9.7 | Update notifications; Kill Bluetooth is just a button; Settings > Speaka without what the app does | [TESTING-v9.7](docs/history/TESTING-v9.7.md) |
-| v9.8 | Caz's four-row menu; Uninstall, held for 4 seconds, removes the tweak, its leftovers and the app | [TESTING-v9.8](docs/history/TESTING-v9.8.md) |
-
-| Research note | Topic |
-| --- | --- |
-| [V5_STATIC_FINDINGS](docs/research/V5_STATIC_FINDINGS.md) | Static disassembly landmarks |
-| [V6_SDP_AND_MEDIA_PLAN](docs/research/V6_SDP_AND_MEDIA_PLAN.md) | Plan for Sink discovery and incoming audio |
-| [V7_SDP_REVERSE_ENGINEERING](docs/research/V7_SDP_REVERSE_ENGINEERING.md) | SDP record-add instrumentation |
-| [V7_1_MEDIA_PATH](docs/research/V7_1_MEDIA_PATH.md) | Receive side: RTP packets to stereo PCM |
-| [V78_AVDTP_CAPACITY_FINDINGS](docs/research/V78_AVDTP_CAPACITY_FINDINGS.md) | `AVDTP_RegisterMultipoint` and the origin of error `0x68` |
-| [V79_AVDTP_ALLOCATION_FINDINGS](docs/research/V79_AVDTP_ALLOCATION_FINDINGS.md) | Where the six-entry AVDTP table comes from |
-| [V83_BINARY_PROVENANCE](docs/research/V83_BINARY_PROVENANCE.md) | Audio-context expansion: binary provenance |
-
-</details>
+Every release, newest first, is in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Credits
 

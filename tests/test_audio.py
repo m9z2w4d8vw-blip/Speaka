@@ -815,7 +815,7 @@ int main(void) {
     for (long reason = 3; reason <= 8; reason++) assert(!hold_route_is_device_change(reason));
     for (long reason = -1; reason <= 9; reason++) assert(hold_route_reason_name(reason)[0]);
     for (int code = 0; code <= 4; code++) assert(hold_start_reason(code)[0]);
-    /* Windows reopened the stream 6.1 s after the phone suspended it (21:35 log, TESTING-v8.9.4). */
+    /* Windows reopened the stream 6.1 s after the phone suspended it (the 21:35 log from v8.9.4's device test). */
     assert(HOLD_MS >= 6100u && HOLD_REARM_MS >= 1000u);
     printf("v9.1 policy passed (%u rearmed starts in 60 s)\n", starts);
     return 0;
@@ -831,7 +831,7 @@ int main(void) {
             to the PC (START).
         Timing is from the 23:33 log: configuring and starting took ~450 ms (active after ~250 ms), stopping ~170 ms.
         Windows, once the phone suspends a stream it is still playing, closes it after 3.7 s and reopens it 2.3 s later
-        (TESTING-v8.9.4). Under both, the v9.0 rule loops and v9.1 settles: at once (H1) or after Windows reopens (H2).
+        (the v8.9.4 device test). Under both, the v9.0 rule loops and v9.1 settles: at once (H1) or after Windows reopens (H2).
         """
         out = self.compile_run(r'''
 #include <assert.h>
@@ -977,7 +977,7 @@ int main(void) {
         self.assertEqual(helper.count("ok=[session setActive:YES error:&error];if(ok) note_session(1,"), 3)
         self.assertIn("AVAudioSessionMediaServicesWereResetNotification", helper)
         self.assertIn("removeObserver:reset_observer]", helper)
-        self.assertTrue((ROOT / "docs/history/TESTING-v9.1.md").is_file())
+        self.assertIn("\n## v9.1\n", (ROOT / "docs/CHANGELOG.md").read_text())
 
     def test_control_log_names_the_initiator(self):
         tweak = read("tweak/Hooks.xm")

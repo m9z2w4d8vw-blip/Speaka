@@ -23,7 +23,7 @@
  * media type, a1 the endpoint type, a2 a pointer to numCaps 16-byte capability records, a3 numCaps, a4 the count,
  * and a5 points at a ONE-BYTE assigned SEID. Never reuse a Source's output pointer for the Sink, or read 8 bytes there.
  *
- * How each part was found and tested: docs/history/ and docs/research/.
+ * How each part was found: docs/BLUETOOTHD.md. What changed when: docs/CHANGELOG.md.
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach-o/dyld.h>
@@ -387,7 +387,7 @@ typedef uint64_t (*source_registration_fn_t)(uint64_t);
 static source_registration_fn_t g_source_reg_orig = NULL;
 static volatile unsigned g_source_reg_hook_ok = 0;
 static volatile unsigned g_audio_table_extended = 0;
-static void *g_leaked_original_table = NULL; /* intentionally retained; see TESTING-v8.3 */
+static void *g_leaked_original_table = NULL; /* intentionally retained; see docs/BLUETOOTHD.md, section 10 */
 
 
 /* Optional one-shot Sink SEP capacity experiment. Unlike v4, this does not

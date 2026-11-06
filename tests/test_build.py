@@ -106,24 +106,31 @@ class RepoLayout(unittest.TestCase):
             self.assertIsNone(re.search(r" \(\d+\)(\.|$)", path.name),
                               f"{path.relative_to(ROOT)} looks like a duplicate upload")
 
-    def test_release_notes_live_in_docs_history_and_are_indexed(self):
+    def test_one_changelog_and_one_research_document(self):
+        # Since v9.8 the release notes are one changelog and the research notes one document (the old ones are in
+        # git history). The changelog must have an entry for the version being built.
         stray = [path.relative_to(ROOT).as_posix() for path in repo_files()
-                 if re.match(r"(TESTING|PROVENANCE)-v.*\.md$", path.name) and path.parent != ROOT / "docs" / "history"]
-        self.assertEqual(stray, [], "release notes belong in docs/history/")
+                 if re.match(r"(TESTING|PROVENANCE)-v.*\.md$", path.name)]
+        self.assertEqual(stray, [], "release notes go in docs/CHANGELOG.md, research in docs/BLUETOOTHD.md")
+        self.assertFalse((ROOT / "docs/history").exists() or (ROOT / "docs/research").exists())
+        version = re.search(r"^Version:\s*(\d+\.\d+)", (ROOT / "control").read_text(), re.M).group(1)
+        self.assertIn(f"\n## v{version}\n", (ROOT / "docs/CHANGELOG.md").read_text())
         readme = (ROOT / "README.md").read_text()
-        for path in sorted((ROOT / "docs" / "history").glob("*.md")):
-            self.assertIn(f"docs/history/{path.name}", readme, f"README's version history does not link {path.name}")
-        for path in sorted((ROOT / "docs" / "research").glob("*.md")):
-            self.assertIn(f"docs/research/{path.name}", readme, f"README does not link {path.name}")
+        for doc in ("docs/CHANGELOG.md", "docs/BLUETOOTHD.md"):
+            self.assertIn(f"]({doc})", readme)
 
     def test_readme_links_resolve(self):
         readme = (ROOT / "README.md").read_text()
         targets = re.findall(r"\]\(([^)\s#]+)(?:#[^)]*)?\)", readme)
-        self.assertGreater(len(targets), 20)
         for target in targets:
             if re.match(r"[a-z]+:", target):
                 continue
             self.assertTrue((ROOT / target).exists(), f"README links to {target}, which does not exist")
+        # In-page links: GitHub's anchor for each heading (lower case, punctuation dropped, spaces to hyphens).
+        anchors = {re.sub(r"[^a-z0-9 _-]", "", h.lower()).replace(" ", "-")
+                   for h in re.findall(r"^#{1,4} (.+)$", readme, re.M)}
+        for anchor in re.findall(r'(?:\]\(|href=")#([^)"]+)', readme):
+            self.assertIn(anchor, anchors, f"README links to #{anchor}, which no heading has")
 
 
 # ---- fetching libsbc before the build ----
