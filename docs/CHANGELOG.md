@@ -77,6 +77,14 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **Health lease during the input gate (v9.8.90 regression, fixed):** gated on a starved input, the output renders
+  nothing but its queue still runs, so the helper reported "playing" with a frozen render count. The lease lapsed
+  1.5 s into every gated stretch (12:05:55.870 -> 12:05:57.443 `render_age_ms=1516`, again 12:07:07 -> 12:07:08), the
+  idle guard passed, and Apple's A2DP code suspended the stream ~10 s later - while packets were still arriving and
+  decoding. Holding now covers the gate as well as an interruption (OutputPolicy.h `health_holding`): the helper
+  reports decoded frames, so the lease lasts exactly as long as the stream is received and decoded, and still lapses
+  within the normal 1.5 s when input or decoding stops. The lease now treats a switch between the two counters as a
+  new baseline rather than progress, so alternating states can't fake health. `V882_HEALTH` logs `holding=`.
 - **Startup stutter, measured (v9.8.89 device test):** the first ~26 s after a Start arrive at 13-27 packets/s
   instead of 47, in order - contiguous RTP sequence numbers, timestamps +1024 each, forwarded == decoded - so nothing
   is lost at Speaka's interception point; the packets are delivered late. The window ends ~42.5 s after bluetoothd

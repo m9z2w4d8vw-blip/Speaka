@@ -348,6 +348,18 @@ static inline int input_rate_add(input_rate_t *r, unsigned frames, unsigned outp
     return 0;
 }
 
+/* ---- which counter keeps the stream's lease (v9.9.3) ----
+ * The idle guard keeps the PC's stream only while the helper's reported counter advances. Playing, that is the
+ * rendered-frame count. But when the output is held on purpose - paused by an interruption, or gated because the
+ * input can't sustain playback - nothing renders, so the helper reports "holding" with its decoded-frame count:
+ * the lease then lasts exactly as long as the stream is still being received and decoded. v9.8.90 covered only the
+ * pause; its input gate reported "playing" with a frozen render count, the lease lapsed 1.5 s into every gated
+ * stretch (12:05:57, 12:07:08), and Apple's A2DP code suspended the stream ~10 s later. */
+static inline int health_holding(int stream_active, int has_queue, int paused, int input_starved)
+{
+    return stream_active && has_queue && (paused || input_starved);
+}
+
 /* AVAudioSessionRouteChangeReason values (public, stable since iOS 6). A route change the helper did not cause and
  * that is a real device arrival or removal lets a waiting output start at once. */
 enum { OWN_ROUTE_NEW_DEVICE = 1, OWN_ROUTE_OLD_DEVICE_GONE = 2 };

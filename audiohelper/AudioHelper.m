@@ -563,10 +563,12 @@ static void keep_output(Output *o,uint64_t generation) {
          (unsigned)(generation&1u));
 }
 static void report_health(Output *o,AudioRing *s,uint64_t generation) {
-    /* v9.9.2: "holding" (2): paused by an interruption with the stream active and decoding. The counter is decode
-     * progress, so the idle guard keeps the stream exactly as long as the helper keeps consuming it. Without it, the
-     * lease lapsed 1.5 s into an interruption and Apple's A2DP code suspended the stream (v9.8.89, 11:05:39.816). */
-    if(o->paused && (generation&1u)) {
+    /* "holding" (2): the output is held on purpose - paused by an interruption (v9.9.2) or gated because the input
+     * can't sustain playback (v9.9.3) - while the stream is active. The counter is decode progress, so the idle guard
+     * keeps the stream exactly as long as the helper keeps receiving and decoding it, and no longer (OutputPolicy.h,
+     * health_holding). Gated, the queue still runs, so v9.8.90 reported "playing" with a frozen render count. */
+    if(health_holding((generation&1u)!=0,o->queue!=NULL,(int)o->paused,
+                      (int)__atomic_load_n(&o->input_starved,__ATOMIC_RELAXED))) {
         audio_ring_event(s,1,(AudioRingEvent){RING_EVENT_HEALTH,(uint32_t)generation,
             __atomic_load_n(&o->decoded_frames,__ATOMIC_RELAXED),2});
         return;

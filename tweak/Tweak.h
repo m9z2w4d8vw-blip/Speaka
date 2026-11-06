@@ -230,6 +230,7 @@ typedef struct {
     uint64_t media_ms, heartbeat_ms, render_ms;
     uint32_t render_counter;
     unsigned media_seen, heartbeat_seen, render_seen, playing;
+    unsigned holding, counter_seen;   /* v9.9.3: which counter the helper reports (decoded when holding) */
 } SinkHealth;
 
 static inline void sink_health_reset(SinkHealth *h,uint64_t generation,
@@ -242,12 +243,22 @@ static inline void sink_health_sample(SinkHealth *h,uint64_t media,
     if(media!=h->media_counter) {h->media_counter=media;h->media_ms=now;h->media_seen=1;}
     if(heartbeat!=h->heartbeat_counter) {h->heartbeat_counter=heartbeat;h->heartbeat_ms=now;h->heartbeat_seen=1;}
 }
+/* state: 0 not playing, 1 playing (counter: rendered frames), 2 holding (counter: decoded frames - the output is held
+ * on purpose while the stream is still received and decoded). v9.9.3: the two counters are different numbers, so a
+ * switch between them sets a new baseline instead of counting as progress - otherwise alternating states with both
+ * counters frozen would look like progress. The new counter must then advance like any other. */
 static inline void sink_health_render(SinkHealth *h,uint32_t generation,
-                                          uint32_t rendered,unsigned playing,uint64_t now) {
+                                          uint32_t counter,unsigned state,uint64_t now) {
     if(!(h->generation&1u) || (uint32_t)h->generation!=generation) return;
-    h->playing=playing;
-    if(playing && rendered!=h->render_counter) {h->render_ms=now;h->render_seen=1;}
-    h->render_counter=rendered;
+    unsigned holding=state==2u,playing=state!=0u;
+    if(h->counter_seen && holding!=h->holding) {
+        h->holding=holding;h->playing=playing;h->render_counter=counter;
+        if(!playing) h->render_seen=0;
+        return;
+    }
+    h->holding=holding;h->counter_seen=1;h->playing=playing;
+    if(playing && counter!=h->render_counter) {h->render_ms=now;h->render_seen=1;}
+    h->render_counter=counter;
     if(!playing) h->render_seen=0;
 }
 static inline int sink_health_ready(const SinkHealth *h,int connected,uint64_t now) {

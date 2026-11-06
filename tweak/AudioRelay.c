@@ -183,9 +183,9 @@ static void drain_logs(AudioRing *s,SinkHealth *health,uint64_t now) {
         if(!audio_ring_pop(&s->decode_log,s->decoded,sizeof s->decoded[0],
                         AUDIO_RING_EVENTS,&e,sizeof e)) break;
         if(e.kind==RING_EVENT_HEALTH) {
-            /* v9.9.2: 1 = playing (counter: rendered frames); 2 = holding through an interruption (counter: decoded
-             * frames). Both keep the lease while their counter advances: the helper is consuming the stream. */
-            sink_health_render(health,e.bytes,e.frames,e.result==1||e.result==2,now);
+            /* 1 = playing (counter: rendered frames); 2 = holding - paused by an interruption or gated on a starved
+             * input (counter: decoded frames). Both keep the lease while their own counter advances (Tweak.h). */
+            sink_health_render(health,e.bytes,e.frames,e.result==1?1u:e.result==2?2u:0u,now);
             g_relay_health_why=e.result<0?(unsigned)(-(int64_t)e.result):0u;
         }
         else if(e.kind==RING_EVENT_DECODE) {
@@ -274,8 +274,8 @@ static void *worker(void *arg) {
         if(ready!=last_ready) {
             /* v8.9.4 why= bits from the helper: 0x1 stream inactive, 0x2 no queue, 0x4 queue not running,
              * 0x8 stopping, 0x10 enqueue error, 0x20 route not acceptable for the selected mode. */
-            SpeakaLogNow("V882_HEALTH ready=%d generation=%llu connected=%d playing=%u media_age_ms=%lld heartbeat_age_ms=%lld render_age_ms=%lld why=0x%x",
-                ready,(unsigned long long)(generation>>1),fd>=0,health.playing,
+            SpeakaLogNow("V882_HEALTH ready=%d generation=%llu connected=%d playing=%u holding=%u media_age_ms=%lld heartbeat_age_ms=%lld render_age_ms=%lld why=0x%x",
+                ready,(unsigned long long)(generation>>1),fd>=0,health.playing,health.holding,
                 health.media_seen?(long long)(now-health.media_ms):-1ll,
                 health.heartbeat_seen?(long long)(now-health.heartbeat_ms):-1ll,
                 health.render_seen?(long long)(now-health.render_ms):-1ll,g_relay_health_why);

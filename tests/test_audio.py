@@ -127,35 +127,64 @@ class IdleGuard(unittest.TestCase):
             ran = subprocess.run([str(exe)], text=True, capture_output=True, timeout=10, env=env)
             self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
 
-    def test_holding_through_an_interruption_keeps_the_lease_while_decoding(self):
-        # v9.9.2: in v9.8.89 the lease needed rendered frames, so it lapsed 1.5 s into an interruption and Apple's A2DP
-        # code suspended the stream when the helper came back (11:05:39.816). A paused helper now reports "holding" with
-        # decode progress as its counter; the relay passes holding as playing, so the lease lasts exactly as long as the
-        # helper consumes the stream - and lapses as soon as it stops.
+    def test_holding_lease_follows_decode_progress_and_counter_switches(self):
+        # v9.9.3 (the v9.8.90 regression): gated on a starved input, the helper's output renders nothing, so the
+        # render-count lease lapsed 1.5 s in (12:05:57.443 render_age_ms=1516) and Apple suspended the stream. Holding
+        # now reports decoded frames. Real Tweak.h: the lease must follow whichever counter is reported, treat a switch
+        # between the two as a new baseline (not progress), and still lapse when reception or decoding stops.
         self.compile_run(r"""
 #include <assert.h>
 #include "tweak/Tweak.h"
-int main(void) {
-    SinkHealth h; sink_health_reset(&h,3,100,1000);
-    uint64_t media=100,beat=1000; uint32_t decoded=0;
-    for (uint64_t t=200; t<=20000; t+=200) {                 /* 20 s of interruption: decoding goes on */
-        media++; beat++; decoded+=1024;
-        sink_health_sample(&h,media,beat,t);
-        sink_health_render(&h,3,decoded,1,t);                 /* the relay passes holding (2) as playing */
-        assert(sink_health_ready(&h,1,t));
+static SinkHealth h; static uint64_t media, beat; static uint32_t rendered, decoded;
+static void start(uint64_t t) { sink_health_reset(&h,3,100,1000); media=100; beat=1000; rendered=5000; decoded=900000;
+                                (void)t; }
+static void tick(uint64_t t, int got_media, int alive) { if (got_media) media++; if (alive) beat++;
+                                                       sink_health_sample(&h,media,beat,t); }
+static uint64_t lapse_after(uint64_t from, uint64_t to, int got_media, int advance, unsigned state) {
+    for (uint64_t t = from; t <= to; t += 200) {
+        tick(t, got_media, 1);
+        if (advance) { if (state == 2) decoded += 1024; else rendered += 1024; }
+        sink_health_render(&h,3,state==2?decoded:rendered,state,t);
+        if (!sink_health_ready(&h,1,t)) return t;
     }
-    /* Decoding stops (the stream ended, or the helper stalled): the lease lapses within 1.5 s. */
-    for (uint64_t t=20200; t<=21500; t+=100) { beat++; sink_health_sample(&h,media,beat,t); sink_health_render(&h,3,decoded,1,t); }
-    assert(!sink_health_ready(&h,1,21701));
+    return 0;
+}
+int main(void) {
+    /* Playing normally. */
+    start(0);
+    assert(lapse_after(200,2000,1,1,1) == 0);
+    /* A: the gate engages - holding, decoded advancing, rendering frozen: healthy for as long as it lasts. */
+    assert(lapse_after(2200,20000,1,1,2) == 0);
+    /* C: input recovers - back to playing: no false timeout across the counter switch. */
+    assert(lapse_after(20200,24000,1,1,1) == 0);
+    /* B: holding again, then the input stops (no media, no decoding; the helper still answers): lapses in ~1.5 s. */
+    assert(lapse_after(24200,26000,1,1,2) == 0);
+    uint64_t gone = lapse_after(26200,30000,0,0,2);
+    assert(gone && gone - 26000 <= 1700);
+    /* B: media still arriving but decoding stalled (a stuck decoder): the holding counter is frozen, so it lapses too. */
+    start(0); assert(lapse_after(200,2000,1,1,2) == 0);
+    uint64_t stalled = lapse_after(2200,6000,1,0,2);
+    assert(stalled && stalled - 2000 <= 1700);
+    /* E: alternating states every report with BOTH counters frozen is not progress, even with media flowing. */
+    start(0); assert(lapse_after(200,2000,1,1,1) == 0);
+    uint64_t t, flipped = 0;
+    for (t = 2200; t <= 6000; t += 200) {
+        tick(t,1,1);
+        unsigned state = ((t / 200) % 2) ? 2u : 1u;
+        sink_health_render(&h,3,state==2?decoded:rendered,state,t);   /* different numbers, neither advancing */
+        if (!sink_health_ready(&h,1,t)) { flipped = t; break; }
+    }
+    assert(flipped && flipped - 2000 <= 1700);
+    /* E: a switch where both counters hold the same value is not a false timeout if the new counter advances. */
+    start(0); rendered = decoded = 7777;
+    assert(lapse_after(200,2000,1,1,1) == 0);
+    decoded = rendered;
+    assert(lapse_after(2200,8000,1,1,2) == 0);
+    /* Not playing (stream inactive / no queue) never keeps the lease. */
+    tick(8200,1,1); sink_health_render(&h,3,decoded+1024,0,8200); assert(!sink_health_ready(&h,1,8200));
     return 0;
 }
 """)
-        relay = read("tweak/AudioRelay.c")
-        self.assertIn("sink_health_render(health,e.bytes,e.frames,e.result==1||e.result==2,now);", relay)
-        helper = read("audiohelper/AudioHelper.m")
-        health = between(helper, "static void report_health(Output *o,AudioRing *s,uint64_t generation) {", "\n}\n")
-        self.assertIn("if(o->paused && (generation&1u)) {", health)
-        self.assertIn("__atomic_load_n(&o->decoded_frames,__ATOMIC_RELAXED),2});", health)
 
     def test_health_requires_current_media_heartbeat_and_rendering(self):
         self.compile_run(r'''
@@ -737,6 +766,102 @@ int main(void) {
             self.assertEqual(ran.returncode,0,ran.stdout+ran.stderr)
             print(ran.stdout,end="")
 
+    def test_gated_output_keeps_the_stream_lease_end_to_end(self):
+        """The v9.8.90 failure, end to end: START, then input at ~44% of real time (12:05:55: 21397/48000), then real
+        time, then the input stops. Through the real render callback, PCM writers and input monitor, the real
+        health_holding decision, and the real lease (tweak/Tweak.h), with the helper reporting every 200 ms as it does.
+        v9.8.90's report (holding only when paused) must reproduce the device: the lease lapses ~1.5 s after the gate
+        engages. v9.9.3 must keep it while packets are received and decoded, keep it through recovery, and still let it
+        lapse within the normal timeout once the input stops."""
+        source = SOURCE.read_text()
+        render = source.split("#define PCM_CAPACITY", 1)[1].split("static void stop_output", 1)[0]
+        writers = source.split("static void hold_pcm(", 1)[1].split("static void keep_output(", 1)[0]
+        harness = r"""
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+typedef int32_t OSStatus;
+typedef void *AudioQueueRef;
+typedef struct { void *mAudioData; uint32_t mAudioDataByteSize; } AudioQueueBuffer;
+typedef AudioQueueBuffer *AudioQueueBufferRef;
+static OSStatus AudioQueueEnqueueBuffer(AudioQueueRef q,AudioQueueBufferRef b,unsigned p,const void *d){(void)q;(void)b;(void)p;(void)d;return 0;}
+#define PCM_CAPACITY""" + render + "static void hold_pcm(" + writers + r"""
+#include "OutputPolicy.h"
+#include "tweak/Tweak.h"
+typedef struct { long gated_at, first_unready_while_receiving, unready_after_stop; unsigned unready_reports_recovery;
+                 uint64_t silence_gated; } R;
+/* Phases: 0-12 s starved at 44% of real time, 12-22 s real time, 22-25 s nothing arrives (stream still active). */
+static double rate_at(double s) { return s < 12.0 ? 0.44 * 46.875 : s < 22.0 ? 46.875 : 0.0; }
+static R run(int fixed) {
+    static Output o; memset(&o,0,sizeof o); pthread_mutex_init(&o.lock,NULL); o.priming=1;
+    int16_t pcm[2048]; for (int i=0;i<2048;i++) pcm[i]=1000;
+    int16_t data[AUDIO_FRAMES*2]; AudioQueueBuffer buf={data,0};
+    input_rate_t in; input_rate_reset(&in,0,1);
+    SinkHealth h; sink_health_reset(&h,3,0,0);
+    uint64_t media=0, beat=0; double sched=0; uint64_t next_pkt=0, next_render=0;
+    R r={-1,-1,-1,0,0};
+    for (uint64_t t=0; t<25000000; t+=1000) {
+        double sec=t/1e6, rate=rate_at(sec);
+        if (rate>0 && t>=next_pkt) {                       /* a packet: the tweak counts media, the helper decodes it */
+            media++;
+            o.decoded_frames+=1024;
+            int c=input_rate_add(&in,1024,48000,t/1000);
+            if (c) { if (c<0) o.priming=o.count<PCM_PRIME; o.input_starved=c>0; if (c>0 && r.gated_at<0) r.gated_at=(long)(t/1000); }
+            if (o.input_starved) hold_pcm(&o,pcm,1024); else write_pcm(&o,pcm,1024);
+            sched+=1e6/rate; next_pkt=(uint64_t)sched;
+        }
+        if (rate==0) next_pkt=t+1000, sched=(double)t;
+        if (t%5000==0) {                                   /* the helper's loop: heartbeat, window close */
+            beat++;
+            int c=input_rate_add(&in,0,48000,t/1000);
+            if (c) { if (c<0) o.priming=o.count<PCM_PRIME; o.input_starved=c>0; if (c>0 && r.gated_at<0) r.gated_at=(long)(t/1000); }
+        }
+        if (t>=next_render) { render(&o,&o,&buf); next_render+=10667; }
+        if (t%200000==0 && t>0) {                          /* report_health every 200 ms -> the relay's lease */
+            int holding = fixed ? health_holding(1,1,(int)o.paused,(int)o.input_starved) : (int)o.paused;
+            uint32_t counter = holding ? o.decoded_frames : (uint32_t)o.render_tick;
+            sink_health_sample(&h,media,beat,t/1000);
+            sink_health_render(&h,3,counter,holding?2u:1u,t/1000);
+            int ready=sink_health_ready(&h,1,t/1000);
+            if (!ready && sec>1.0 && sec<12.0 && r.first_unready_while_receiving<0) r.first_unready_while_receiving=(long)(t/1000);
+            if (!ready && sec>=12.5 && sec<22.0) r.unready_reports_recovery++;
+            if (!ready && sec>=22.0 && r.unready_after_stop<0) r.unready_after_stop=(long)(t/1000)-22000;
+        }
+    }
+    r.silence_gated=o.silence_gated;
+    pthread_mutex_destroy(&o.lock);
+    return r;
+}
+int main(void) {
+    R old=run(0), now=run(1);
+    printf("v9.8.90: gate at %ld ms, lease lapsed at %ld ms (%ld ms after the gate)\n", old.gated_at,
+           old.first_unready_while_receiving, old.first_unready_while_receiving-old.gated_at);
+    printf("v9.9.3:  gate at %ld ms, lapsed while receiving: %s, unready reports during recovery: %u,"
+           " lapsed %ld ms after the input stopped, gated silence %llu frames\n", now.gated_at,
+           now.first_unready_while_receiving<0?"never":"YES", now.unready_reports_recovery, now.unready_after_stop,
+           (unsigned long long)now.silence_gated);
+    assert(old.gated_at>0 && now.gated_at>0);                          /* the monitor sees ~44% as starved */
+    long lag = old.first_unready_while_receiving - old.gated_at;
+    assert(old.first_unready_while_receiving>0 && lag>=1000 && lag<=2200);   /* reproduces 12:05:55.870 -> 57.443 */
+    assert(now.first_unready_while_receiving<0);                       /* A: healthy while receiving and decoding */
+    assert(now.silence_gated>48000u*5u);                               /* ... with the output genuinely held */
+    assert(now.unready_reports_recovery==0);                           /* C: no false timeout through recovery */
+    assert(now.unready_after_stop>=0 && now.unready_after_stop<=1900); /* B: the input stopping still lapses it */
+    return 0;
+}
+"""
+        cc = shutil.which("cc"); self.assertIsNotNone(cc)
+        flags = ["-std=gnu11","-O2","-Wall","-Wextra","-Werror","-pthread","-I"+str(ROOT/"audiohelper"),"-I"+str(ROOT)]
+        with tempfile.TemporaryDirectory() as td:
+            c = pathlib.Path(td)/"lease.c"; exe = pathlib.Path(td)/"lease"; c.write_text(harness)
+            built = subprocess.run([cc,*flags,str(c),"-o",str(exe)],capture_output=True,text=True,timeout=60)
+            self.assertEqual(built.returncode,0,built.stdout+built.stderr)
+            ran = subprocess.run([str(exe)],capture_output=True,text=True,timeout=60)
+            self.assertEqual(ran.returncode,0,ran.stdout+ran.stderr)
+            print(ran.stdout,end="")
+
     def test_speaker_route_and_teardown_guards(self):
         source = SOURCE.read_text()
         # The speaker path is unchanged since v8.8.1. v8.9.4 adds the only other PlayAndRecord configuration, wired
@@ -1183,6 +1308,40 @@ int main(void) {
         hooks = read("tweak/Hooks.xm")
         config = between(hooks, "static uint64_t hook_setconfigind(", "\n}\n")
         self.assertIn("AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);", config)
+
+    def test_health_states_for_pause_interruption_gate_and_shutdown(self):
+        # v9.9.3, test D: each lifecycle state keeps its own health behaviour. Holding needs an active stream and a
+        # queue; a Windows pause (stream inactive) is never holding and resets the input monitor, so a pause is not
+        # starvation; an interruption still pauses in place; shutdown still releases the session.
+        self.compile_run(r"""
+#include <assert.h>
+#include "OutputPolicy.h"
+int main(void) {
+    assert(health_holding(1,1,0,1) == 1);     /* gated on a starved input, stream active: holding */
+    assert(health_holding(1,1,1,0) == 1);     /* paused by an interruption, stream active: holding */
+    assert(health_holding(1,1,0,0) == 0);     /* playing normally: the render-based report applies */
+    assert(health_holding(0,1,1,1) == 0);     /* Windows paused the stream: never holding, whatever the flags */
+    assert(health_holding(1,0,0,1) == 0);     /* no queue: nothing is held */
+    return 0;
+}
+""")
+        helper = read("audiohelper/AudioHelper.m")
+        health = between(helper, "static void report_health(Output *o,AudioRing *s,uint64_t generation) {", "\n}\n")
+        self.assertIn("if(health_holding((generation&1u)!=0,o->queue!=NULL,(int)o->paused,", health)
+        self.assertIn("(int)__atomic_load_n(&o->input_starved,__ATOMIC_RELAXED))) {", health)
+        self.assertIn("__atomic_load_n(&o->decoded_frames,__ATOMIC_RELAXED),2});", health)
+        self.assertIn("(uint32_t)__atomic_load_n(&o->render_tick,__ATOMIC_RELAXED),why?-(int32_t)why:1});", health)
+        relay = read("tweak/AudioRelay.c")
+        self.assertIn("sink_health_render(health,e.bytes,e.frames,e.result==1?1u:e.result==2?2u:0u,now);", relay)
+        self.assertIn("playing=%u holding=%u media_age_ms=", relay)                # the next device log says which
+        loop = between(helper, "for(;;) {", "[[NSNotificationCenter defaultCenter] removeObserver:observer];")
+        generation = between(loop, "if(current!=generation) {", "\n            }\n")
+        # A pause (or any new stream) restarts the measurement and lifts the gate: a pause is not starvation.
+        self.assertIn("input_rate_reset(&input,now,(int)(current&1u));__atomic_store_n(&o->input_starved,0,__ATOMIC_RELAXED);",
+                      generation)
+        began = loop.split("if(changed==1) {", 1)[1].split("} else {", 1)[0]
+        self.assertIn('pause_output(o,s,"interruption_began");', began)          # interruptions: unchanged
+        self.assertIn('stop_output(o,s,"ipc_closed",1);', helper)                 # shutdown: releases the session
 
     def test_control_log_names_the_initiator(self):
         tweak = read("tweak/Hooks.xm")
