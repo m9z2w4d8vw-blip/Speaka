@@ -243,15 +243,119 @@ class CodecDispatchFallback(unittest.TestCase):
             begin = ctypes.CDLL(self._build(tmp, shim=shim)).begin_codec
             begin.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
             begin.restype = ctypes.c_int
-            SBC, AAC = 0x00, 0x02
+            SBC, AAC, DISABLED = 0x00, 0x02, 0xffffffff
             lc_48_stereo = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x84, 0x80, 0, 0, 0, 0)
             unsupported = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x14, 0x80, 0, 0, 0, 0)   # 96 kHz
-            self.assertEqual(begin(SBC, lc_48_stereo, 1), SBC)      # SBC session regardless of the switch
-            self.assertEqual(begin(AAC, lc_48_stereo, 0), SBC)      # AAC negotiated, switch off: SBC
-            self.assertEqual(begin(AAC, unsupported, 1), SBC)       # AAC on, unsupported rate: SBC
+            self.assertEqual(begin(SBC, lc_48_stereo, 1), SBC)      # SBC session: SBC
+            # AAC negotiated but undecodable must NOT fall back to SBC (it would decode AAC as noise): stay DISABLED.
+            self.assertEqual(begin(AAC, lc_48_stereo, 0), DISABLED)  # switch off
+            self.assertEqual(begin(AAC, unsupported, 1), DISABLED)   # unsupported rate
             if self.have_audiotoolbox:
                 # Only where a real AudioConverter exists can AAC setup actually succeed.
                 self.assertEqual(begin(AAC, lc_48_stereo, 1), AAC)
+            else:
+                # Without a real converter here, even a good config can't build a decoder: still DISABLED, never SBC.
+                self.assertEqual(begin(AAC, lc_48_stereo, 1), DISABLED)
+
+
+
+class LATMDepacketizer(unittest.TestCase):
+    """The LATM AudioMuxElement parser, checked against real ffmpeg output (not our own encoder).
+
+    Fixtures (generated once with ffmpeg, shipped so CI needs no ffmpeg):
+      aac_latm_48k_stereo.loas - ffmpeg `-f latm` output: LOAS-framed AudioMuxElements;
+      aac_latm_48k_stereo.aus  - ffmpeg `-f adts` output of the same audio, as raw AAC access units.
+    The test strips LOAS framing, runs each AudioMuxElement through latm_parse_audiomuxelement, and asserts the
+    extracted access units are byte-identical to the ADTS ones. That is an end-to-end check that depacketization
+    yields valid AAC access units, which the earlier ADTS-wrapping-the-raw-payload code did not.
+    """
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        lib = pathlib.Path(cls.tmp.name) / "latm.so"
+        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC", "-I", str(ROOT),
+                        "-o", str(lib), str(ROOT / "shared/LATM.c")], check=True)
+        cls.lib = ctypes.CDLL(str(lib))
+        cls.lib.latm_parse_audiomuxelement.argtypes = [
+            ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t, ctypes.c_void_p]
+        cls.lib.latm_parse_audiomuxelement.restype = ctypes.c_int
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    # LATMFrame: asc[8], asc_len, au_len (size_t), used_same_mux.
+    class LATMFrame(ctypes.Structure):
+        _fields_ = [("asc", ctypes.c_uint8 * 8), ("asc_len", ctypes.c_uint),
+                    ("au_len", ctypes.c_size_t), ("used_same_mux", ctypes.c_uint)]
+
+    def parse(self, element):
+        au = (ctypes.c_uint8 * 8192)()
+        fr = self.LATMFrame()
+        buf = (ctypes.c_uint8 * len(element)).from_buffer_copy(element)
+        ok = self.lib.latm_parse_audiomuxelement(buf, len(element), au, 8192, ctypes.byref(fr))
+        return ok, bytes(au[:fr.au_len]), fr
+
+    @staticmethod
+    def strip_loas(stream):
+        """ffmpeg LOAS: 0x2B7 (11-bit sync) + 13-bit length + AudioMuxElement."""
+        out, i = [], 0
+        while i + 3 <= len(stream):
+            word = (stream[i] << 8) | stream[i + 1]
+            if (word >> 5) != 0x2B7:
+                break
+            length = ((word & 0x1f) << 8) | stream[i + 2]
+            out.append(stream[i + 3:i + 3 + length])
+            i += 3 + length
+        return out
+
+    @staticmethod
+    def adts_aus(path):
+        import struct
+        data = path.read_bytes()
+        n = struct.unpack_from("<I", data, 0)[0]
+        aus, off = [], 4
+        for _ in range(n):
+            length = struct.unpack_from("<I", data, off)[0]; off += 4
+            aus.append(data[off:off + length]); off += length
+        return aus
+
+    def test_extracts_access_units_matching_ffmpeg_adts(self):
+        loas = (ROOT / "tests/fixtures/aac_latm_48k_stereo.loas").read_bytes()
+        elements = self.strip_loas(loas)
+        self.assertGreater(len(elements), 10)
+        expected = self.adts_aus(ROOT / "tests/fixtures/aac_latm_48k_stereo.aus")
+        self.assertEqual(len(elements), len(expected))
+        asc_frames = 0
+        for i, (element, want) in enumerate(zip(elements, expected)):
+            ok, au, fr = self.parse(element)
+            self.assertEqual(ok, 1, f"element {i} failed to parse")
+            self.assertEqual(au, want, f"access unit {i} does not match ffmpeg's ADTS AU")
+            if fr.asc_len:
+                asc_frames += 1
+                self.assertEqual(bytes(fr.asc[:fr.asc_len]), bytes([0x11, 0x90]))  # 48 kHz stereo AAC-LC
+        self.assertGreaterEqual(asc_frames, 1)   # at least the first element carries StreamMuxConfig
+
+    def test_rejects_malformed_and_out_of_scope(self):
+        # Empty, and a single byte that claims useSameStreamMux=1 then truncates before PayloadLengthInfo.
+        self.assertEqual(self.parse(b"")[0], 0)
+        self.assertEqual(self.parse(b"\x80")[0], 0)              # useSameStreamMux=1, no length info
+        # useSameStreamMux=0 then an audioMuxVersion=1 (unsupported): first two bits 0 1...
+        self.assertEqual(self.parse(bytes([0x40, 0x00, 0x00]))[0], 0)
+        # A valid element truncated mid-AU: take a real one and cut its last byte.
+        loas = (ROOT / "tests/fixtures/aac_latm_48k_stereo.loas").read_bytes()
+        element = self.strip_loas(loas)[1]                       # a useSameStreamMux=1 frame
+        self.assertEqual(self.parse(element[:-1])[0], 0)         # claimed AU length now overruns
+
+    def test_au_capacity_is_respected(self):
+        loas = (ROOT / "tests/fixtures/aac_latm_48k_stereo.loas").read_bytes()
+        element = self.strip_loas(loas)[0]
+        au = (ctypes.c_uint8 * 16)()                             # far too small for a 288-byte AU
+        fr = self.LATMFrame()
+        buf = (ctypes.c_uint8 * len(element)).from_buffer_copy(element)
+        ok = self.lib.latm_parse_audiomuxelement(buf, len(element), au, 16, ctypes.byref(fr))
+        self.assertEqual(ok, 0)                                  # refuses rather than overflowing
 
 
 

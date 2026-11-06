@@ -29,9 +29,10 @@ Meaning:
 - `V93_CODEC sbc` - the session is SBC. This is the current expected result, because no AAC endpoint is advertised.
 - `V93_CODEC aac rate=48000 channels=2` - the session negotiated AAC-LC and the AAC decoder was built. Only possible
   once an AAC endpoint is registered.
-- `V93_CODEC aac negotiated but SpeakaAAC off; using sbc` - AAC was negotiated but the switch is off.
-- `V93_CODEC aac config invalid/unsupported; using sbc` or `... aac decoder setup failed; using sbc` - AAC was
-  negotiated but the helper fell back to SBC (unsupported rate, or AudioConverter error). Playback continues on SBC.
+- `V93_CODEC aac negotiated but SpeakaAAC off; no audio (not decoding AAC as SBC)` - AAC negotiated, switch off.
+- `V93_CODEC aac config invalid/unsupported; no audio` or `... aac decoder setup failed; no audio` - AAC negotiated
+  but undecodable. The helper stays silent rather than misreading AAC as SBC; fix the config or the decoder. (This
+  only arises once an AAC endpoint exists; with none, sessions are SBC and play normally.)
 
 Read it live:
 

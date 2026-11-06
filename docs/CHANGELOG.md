@@ -14,16 +14,24 @@ falls back to SBC if AAC setup fails.
 **What is implemented and tested (pure protocol and decoding, from the public A2DP AAC and MPEG-4 specs):**
 - `shared/AACConfig.c/.h`: the AAC Codec Specific Information - building Speaka's Sink capability (AAC-LC, 44.1/48
   kHz, mono/stereo), parsing a negotiated configuration, the MPEG-4 AudioSpecificConfig and sampling-frequency index.
-- `audiohelper/AACDecoder.c/.h`: an AAC-LC decoder over AudioToolbox's public `AudioConverter` API, reframing each
-  A2DP media payload to ADTS, mirroring the SBC decoder's interface.
-- `audiohelper/CodecDecoder.c/.h`: one handle over the SBC and AAC decoders; reads the codec from the ring header and
-  falls back to SBC when AAC is off, mis-configured, or the converter fails.
+- `shared/LATM.c/.h`: the A2DP AAC payload is an MPEG-4 LATM AudioMuxElement, not a bare access unit. This parses
+  the AudioMuxElement (StreamMuxConfig with an inline AAC-LC AudioSpecificConfig, PayloadLengthInfo, PayloadMux) and
+  extracts the AAC access unit. Validated against ffmpeg: 25/25 access units from an ffmpeg LATM stream come out
+  byte-identical to ffmpeg's own ADTS encode of the same audio.
+- `audiohelper/AACDecoder.c/.h`: an AAC-LC decoder over AudioToolbox's public `AudioConverter` API. It depacketizes
+  the LATM element to the access unit, ADTS-wraps THAT, and decodes. (The first version wrongly ADTS-wrapped the raw
+  LATM payload, which would decode to noise; corrected after review.)
+- `audiohelper/CodecDecoder.c/.h`: one handle over the SBC and AAC decoders; reads the codec from the ring header.
+  It falls back to SBC only for a session the SRC negotiated as SBC. If AAC is negotiated but cannot be decoded
+  (AAC off, bad config, converter failure), it goes to a silent DISABLED state rather than feeding AAC/LATM to the
+  SBC decoder (which would produce noise). A mid-stream AAC decode failure drops the frame; it is never SBC-misread.
 - The shared ring gained a `codec` field and `codec_config` in its **header** (not the packet), so the packet ABI is
   unchanged and an older helper still reads a session as SBC. `AudioRelaySetCodec` publishes it; the CONFIGURE hook
   calls it (with SBC today).
 - `sink_build_aac_codec_record` builds the AVDTP media-codec capability record for AAC-LC.
-- `tests/test_aac.py`: 8 tests for the config parsing, the capability record, the ASC, the ADTS framing and the
-  SBC fallback. All of `test_audio.py`'s SBC tests still pass unchanged.
+- `tests/test_aac.py`: tests for the config parsing, the capability record, the ASC, the ADTS framing, the LATM
+  depacketizer (cross-checked against ffmpeg fixtures), and the DISABLED fallback. All of `test_audio.py`'s SBC
+  tests still pass unchanged.
 
 **Blockers - what AAC still needs, and why it is not done here:**
 - *Registering a second (AAC) endpoint in `bluetoothd`.* The SBC Sink is registered by writing recovered native
@@ -31,9 +39,10 @@ falls back to SBC if AAC setup fails.
   layout for AAC, which would require disassembling Apple's signed binaries to recover. That reverse engineering is
   out of scope, so no AAC SEP is registered and Windows will keep negotiating SBC. This is isolated behind
   `sink_build_aac_codec_record` (the record is built; nothing advertises it).
-- *Confirming the decode on a device.* There is no Apple toolchain on the build host, so `AACDecoder.c` is compiled
-  by CI but never run by the tests; `AudioConverter` decoding AAC to PCM is unverified until a device test. A packet
-  capture can confirm which codec was negotiated, but not the native endpoint layout.
+- *Confirming the decode on a device.* The LATM depacketizer is verified on the host against ffmpeg, but
+  `AACDecoder.c`'s AudioConverter stage is compiled by CI and never run (no Apple toolchain on the host), so AAC ->
+  PCM is unproven until a device test. A packet capture can confirm which codec was negotiated, but not the native
+  endpoint layout.
 
 On-device steps and how to read the codec line: [AAC-TESTING.md](AAC-TESTING.md).
 

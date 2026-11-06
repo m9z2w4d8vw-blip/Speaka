@@ -7,6 +7,7 @@
  * stays behind the SpeakaAAC experiment switch and SBC remains the default. */
 #include "AACDecoder.h"
 #include <AudioToolbox/AudioToolbox.h>
+#include "../shared/LATM.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,6 +27,7 @@ struct AACDecoder {
     size_t in_size;
     AudioStreamPacketDescription in_packet_desc;
     int in_consumed;
+    uint8_t framed[ADTS_HEADER_BYTES + AUDIO_RING_PAYLOAD];   /* one ADTS-wrapped access unit */
 };
 
 static void build_adts(const AACDecoder *d, uint8_t header[ADTS_HEADER_BYTES], size_t frame_len) {
@@ -116,13 +118,18 @@ int aac_decoder_decode(AACDecoder *d, const AudioPacket *p, int16_t *pcm,
     d->seen = 1;
     d->next_sequence = (uint16_t)(p->sequence + 1);
 
-    /* Reframe the A2DP media payload to one ADTS frame for AudioConverter. */
-    static uint8_t framed[ADTS_HEADER_BYTES + AUDIO_RING_PAYLOAD];
-    size_t frame_len = p->length;
-    build_adts(d, framed, frame_len);
-    memcpy(framed + ADTS_HEADER_BYTES, p->data, frame_len);
-    d->in_data = framed;
-    d->in_size = ADTS_HEADER_BYTES + frame_len;
+    /* A2DP AAC payload is an MPEG-4 LATM AudioMuxElement, not a bare access unit. Depacketize it to the AAC access
+     * unit (PayloadMux), then ADTS-wrap THAT for AudioConverter. Wrapping the raw payload (the earlier bug) fed LATM
+     * bytes to the decoder as if they were an access unit and produced garbage. A malformed element is a decode
+     * error (negative return), which the caller treats as a failed AAC frame, never as SBC. */
+    LATMFrame frame;
+    /* Depacketize straight into the ADTS payload area, leaving room for the 7-byte header in front. */
+    size_t au_cap = sizeof d->framed - ADTS_HEADER_BYTES;
+    if (!latm_parse_audiomuxelement(p->data, p->length, d->framed + ADTS_HEADER_BYTES, au_cap, &frame))
+        return -11;   /* not a valid AudioMuxElement */
+    build_adts(d, d->framed, frame.au_len);
+    d->in_data = d->framed;
+    d->in_size = ADTS_HEADER_BYTES + frame.au_len;
     d->in_consumed = 0;
 
     /* AAC-LC yields 1024 frames per packet. Decode into a stereo-or-mono scratch, then widen mono to stereo. */
