@@ -212,6 +212,7 @@ class CodecDispatchFallback(unittest.TestCase):
             includes = ["-I" + str(t)] + includes
         sources = [str(ROOT / "audiohelper/CodecDecoder.c"), str(ROOT / "audiohelper/AACDecoder.c"),
                    str(ROOT / "audiohelper/SBCDecoder.c"), str(ROOT / "shared/AACConfig.c"),
+                   str(ROOT / "shared/LATM.c"),
                    str(ROOT / "audiohelper/vendor_sbc/sbc.c"), str(ROOT / "audiohelper/vendor_sbc/bits.c")]
         if shim:
             (t / "shim.c").write_text(shim)
@@ -233,29 +234,29 @@ class CodecDispatchFallback(unittest.TestCase):
     def test_defaults_to_sbc_without_aac(self):
         shim = r'''
         #include "CodecDecoder.h"
-        int begin_codec(unsigned codec, const unsigned char *csi, int aac_enabled) {
+        unsigned begin_codec(unsigned codec, const unsigned char *csi, int aac_enabled) {
             AudioRing h; h.codec = codec;
             for (int i=0;i<8;i++) h.codec_config[i]=csi[i];
             CodecDecoder d; unsigned used = codec_decoder_begin(&d, &h, aac_enabled, 0);
-            codec_decoder_end(&d); return (int)used;
+            codec_decoder_end(&d); return used;
         }'''
         with tempfile.TemporaryDirectory() as tmp:
             begin = ctypes.CDLL(self._build(tmp, shim=shim)).begin_codec
             begin.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
-            begin.restype = ctypes.c_int
+            begin.restype = ctypes.c_uint
             SBC, AAC, DISABLED = 0x00, 0x02, 0xffffffff
             lc_48_stereo = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x84, 0x80, 0, 0, 0, 0)
             unsupported = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x14, 0x80, 0, 0, 0, 0)   # 96 kHz
             self.assertEqual(begin(SBC, lc_48_stereo, 1), SBC)      # SBC session: SBC
-            # AAC negotiated but undecodable must NOT fall back to SBC (it would decode AAC as noise): stay DISABLED.
+            # The key guarantee: AAC negotiated but undecodable must NOT fall back to SBC (that would decode AAC as
+            # noise). These two paths reject before the converter is ever built, so they are DISABLED on every
+            # platform, real AudioToolbox or the test's success-stub alike.
             self.assertEqual(begin(AAC, lc_48_stereo, 0), DISABLED)  # switch off
-            self.assertEqual(begin(AAC, unsupported, 1), DISABLED)   # unsupported rate
-            if self.have_audiotoolbox:
-                # Only where a real AudioConverter exists can AAC setup actually succeed.
-                self.assertEqual(begin(AAC, lc_48_stereo, 1), AAC)
-            else:
-                # Without a real converter here, even a good config can't build a decoder: still DISABLED, never SBC.
-                self.assertEqual(begin(AAC, lc_48_stereo, 1), DISABLED)
+            self.assertEqual(begin(AAC, unsupported, 1), DISABLED)   # unsupported rate (rejected before converter)
+            # A good config builds a decoder and selects AAC. On macOS that is the real AudioConverter; on the host
+            # the test links a stub AudioConverterNew that succeeds, so the result is AAC either way. The contract
+            # that matters for safety is the two DISABLED cases above: AAC is never silently treated as SBC.
+            self.assertEqual(begin(AAC, lc_48_stereo, 1), AAC)
 
 
 
