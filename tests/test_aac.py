@@ -13,6 +13,7 @@ What is NOT tested here, because there is no Apple toolchain on the host and no 
 These are the AAC blockers; see docs/CHANGELOG.md. Every SBC test in test_audio.py still runs unchanged.
 """
 import ctypes
+import sys
 import pathlib
 import struct
 import subprocess
@@ -167,55 +168,69 @@ class ADTSFraming(unittest.TestCase):
 
 
 class CodecDispatchFallback(unittest.TestCase):
-    """codec_decoder_begin falls back to SBC when AAC is off, mis-configured, or decoder setup fails. Compiled with
-    a stub AudioConverter (never called on the SBC path) and stub libsbc, so it runs on the host."""
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        t = pathlib.Path(self.tmp.name)
-        # Stub libsbc and AudioToolbox headers.
-        (t / "vendor_sbc").mkdir()
-        # A stub libsbc: the full struct the real SBCDecoder.c reads, with inline no-op definitions so the SBC path
-        # links. The SBC path is never decoded here (the fallback only needs to be reachable), but it must build.
-        (t / "vendor_sbc/sbc.h").write_text(
-            "#pragma once\n#include <stdint.h>\n#include <stdbool.h>\n#define SBC_HEADER_SIZE 4\n"
-            "#define SBC_MAX_SAMPLES 128\n"
-            "enum sbc_freq{SBC_FREQ_16K,SBC_FREQ_32K,SBC_FREQ_44K1,SBC_FREQ_48K,SBC_NUM_FREQ};\n"
-            "enum sbc_mode{SBC_MODE_MONO,SBC_MODE_DUAL_CHANNEL,SBC_MODE_STEREO,SBC_MODE_JOINT_STEREO,SBC_NUM_MODE};\n"
-            "enum sbc_bam{SBC_BAM_LOUDNESS,SBC_BAM_SNR,SBC_NUM_BAM};\n"
-            "struct sbc_frame{bool msbc;enum sbc_freq freq;enum sbc_mode mode;enum sbc_bam bam;int nblocks,nsubbands,bitpool;};\n"
-            "typedef struct{int nchannels,nblocks,nsubbands;char dstate[1024];}sbc_t;\n"
-            "static inline void sbc_reset(sbc_t*x){(void)x;}\n"
-            "static inline int sbc_probe(const void*d,struct sbc_frame*f){(void)d;(void)f;return -1;}\n"
-            "static inline unsigned sbc_get_frame_size(const struct sbc_frame*f){(void)f;return 0;}\n"
-            "static inline int sbc_get_freq_hz(enum sbc_freq q){(void)q;return 48000;}\n"
-            "static inline int sbc_decode(sbc_t*s,const void*d,unsigned n,struct sbc_frame*f,int16_t*l,int pl,int16_t*r,int pr){(void)s;(void)d;(void)n;(void)f;(void)l;(void)pl;(void)r;(void)pr;return -1;}\n")
-        (t / "AudioToolbox").mkdir()
-        (t / "AudioToolbox/AudioToolbox.h").write_text(
-            "#pragma once\n#include <stdint.h>\n#include <stddef.h>\ntypedef int32_t OSStatus;enum{noErr=0};\n"
-            "typedef uint32_t UInt32;typedef double Float64;\n"
-            "typedef struct{Float64 mSampleRate;UInt32 mFormatID,mFormatFlags,mBytesPerPacket,mFramesPerPacket,mBytesPerFrame,mChannelsPerFrame,mBitsPerChannel,mReserved;}AudioStreamBasicDescription;\n"
-            "typedef struct{UInt32 mNumberChannels,mDataByteSize;void*mData;}AudioBuffer;typedef struct{UInt32 mNumberBuffers;AudioBuffer mBuffers[1];}AudioBufferList;\n"
-            "typedef struct{int64_t mStartOffset;UInt32 mVariableFramesInPacket,mDataByteSize;}AudioStreamPacketDescription;\n"
-            "typedef struct X*AudioConverterRef;enum{kAudioFormatLinearPCM=1,kAudioFormatMPEG4AAC=2};\n"
-            "enum{kAudioFormatFlagIsSignedInteger=4,kAudioFormatFlagIsPacked=8,kMPEG4Object_AAC_LC=2};\n"
-            "typedef OSStatus(*AudioConverterComplexInputDataProc)(AudioConverterRef,UInt32*,AudioBufferList*,AudioStreamPacketDescription**,void*);\n"
-            "static inline OSStatus AudioConverterNew(const AudioStreamBasicDescription*a,const AudioStreamBasicDescription*b,AudioConverterRef*c){(void)a;(void)b;*c=(AudioConverterRef)1;return 0;}\n"
-            "static inline OSStatus AudioConverterDispose(AudioConverterRef c){(void)c;return 0;}\n"
-            "static inline OSStatus AudioConverterReset(AudioConverterRef c){(void)c;return 0;}\n"
-            "static inline OSStatus AudioConverterFillComplexBuffer(AudioConverterRef c,AudioConverterComplexInputDataProc p,void*x,UInt32*n,AudioBufferList*b,AudioStreamPacketDescription*d){(void)c;(void)p;(void)x;(void)b;(void)d;*n=0;return 0;}\n")
-        lib = t / "dispatch.so"
-        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC",
-                        "-I" + str(t), "-I" + str(ROOT / "audiohelper"),
-                        "-o", str(lib), str(ROOT / "audiohelper/CodecDecoder.c"),
-                        str(ROOT / "audiohelper/AACDecoder.c"), str(ROOT / "audiohelper/SBCDecoder.c"),
-                        str(ROOT / "shared/AACConfig.c")], check=True)
-        self.lib = ctypes.CDLL(str(lib))
+    """codec_decoder_begin falls back to SBC when AAC is off, mis-configured, or decoder setup fails.
 
-    def tearDown(self):
-        self.tmp.cleanup()
+    This compiles the real helper sources, so it is honest about linkage the way CI is:
+      - the real vendored libsbc (audiohelper/vendor_sbc), skipped if it has not been fetched (local runs without
+        tools/fetch_google_sbc.sh); CI fetches it before this step, so CI always runs this test;
+      - AudioToolbox: on a platform that has the real framework (macOS), link it and use its header; elsewhere a
+        small stub header with inline definitions, so there is nothing unresolved to link. The AAC decoder's
+        AudioConverter calls are never reached on the SBC-fallback assertions, but the library must link cleanly.
+    """
+    @classmethod
+    def setUpClass(cls):
+        vendor = ROOT / "audiohelper/vendor_sbc"
+        if not (vendor / "sbc.c").exists() or not (vendor / "bits.c").exists():
+            raise unittest.SkipTest("vendored libsbc not present; run tools/fetch_google_sbc.sh (CI does)")
+        cls.have_audiotoolbox = sys.platform == "darwin"
+
+    def _build(self, tmp, *extra_sources, shim=None):
+        """Build a .so from the real helper sources plus libsbc, with AudioToolbox real-or-stubbed. Returns its path."""
+        t = pathlib.Path(tmp)
+        includes = ["-I" + str(ROOT), "-I" + str(ROOT / "audiohelper"),
+                    "-I" + str(ROOT / "audiohelper/vendor_sbc")]
+        link = []
+        if self.have_audiotoolbox:
+            link = ["-framework", "AudioToolbox"]
+        else:
+            (t / "AudioToolbox").mkdir(exist_ok=True)
+            (t / "AudioToolbox/AudioToolbox.h").write_text(
+                "#pragma once\n#include <stdint.h>\n#include <stddef.h>\ntypedef int32_t OSStatus;enum{noErr=0};\n"
+                "typedef uint32_t UInt32;typedef double Float64;\n"
+                "typedef struct{Float64 mSampleRate;UInt32 mFormatID,mFormatFlags,mBytesPerPacket,mFramesPerPacket,"
+                "mBytesPerFrame,mChannelsPerFrame,mBitsPerChannel,mReserved;}AudioStreamBasicDescription;\n"
+                "typedef struct{UInt32 mNumberChannels,mDataByteSize;void*mData;}AudioBuffer;"
+                "typedef struct{UInt32 mNumberBuffers;AudioBuffer mBuffers[1];}AudioBufferList;\n"
+                "typedef struct{int64_t mStartOffset;UInt32 mVariableFramesInPacket,mDataByteSize;}AudioStreamPacketDescription;\n"
+                "typedef struct X*AudioConverterRef;enum{kAudioFormatLinearPCM=1,kAudioFormatMPEG4AAC=2};\n"
+                "enum{kAudioFormatFlagIsSignedInteger=4,kAudioFormatFlagIsPacked=8,kMPEG4Object_AAC_LC=2};\n"
+                "typedef OSStatus(*AudioConverterComplexInputDataProc)(AudioConverterRef,UInt32*,AudioBufferList*,AudioStreamPacketDescription**,void*);\n"
+                "static inline OSStatus AudioConverterNew(const AudioStreamBasicDescription*a,const AudioStreamBasicDescription*b,AudioConverterRef*c){(void)a;(void)b;*c=(AudioConverterRef)1;return 0;}\n"
+                "static inline OSStatus AudioConverterDispose(AudioConverterRef c){(void)c;return 0;}\n"
+                "static inline OSStatus AudioConverterReset(AudioConverterRef c){(void)c;return 0;}\n"
+                "static inline OSStatus AudioConverterFillComplexBuffer(AudioConverterRef c,AudioConverterComplexInputDataProc p,void*x,UInt32*n,AudioBufferList*b,AudioStreamPacketDescription*d){(void)c;(void)p;(void)x;(void)b;(void)d;*n=0;return 0;}\n")
+            includes = ["-I" + str(t)] + includes
+        sources = [str(ROOT / "audiohelper/CodecDecoder.c"), str(ROOT / "audiohelper/AACDecoder.c"),
+                   str(ROOT / "audiohelper/SBCDecoder.c"), str(ROOT / "shared/AACConfig.c"),
+                   str(ROOT / "audiohelper/vendor_sbc/sbc.c"), str(ROOT / "audiohelper/vendor_sbc/bits.c")]
+        if shim:
+            (t / "shim.c").write_text(shim)
+            sources.append(str(t / "shim.c"))
+        lib = t / "dispatch.so"
+        # libsbc is upstream fixed-point C; build it without -Werror, our code with it.
+        objs = []
+        for i, src in enumerate(sources):
+            obj = str(t / ("%d.o" % i))
+            strict = [] if "/vendor_sbc/" in src else ["-Werror"]
+            r = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", *strict, "-fPIC", *includes, "-c", src, "-o", obj],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            objs.append(obj)
+        r = subprocess.run(["cc", "-shared", "-fPIC", *objs, *link, "-o", str(lib)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return str(lib)
 
     def test_defaults_to_sbc_without_aac(self):
-        # We call begin() with a real AudioRing-shaped buffer via a tiny C shim rather than guessing field offsets.
         shim = r'''
         #include "CodecDecoder.h"
         int begin_codec(unsigned codec, const unsigned char *csi, int aac_enabled) {
@@ -224,28 +239,20 @@ class CodecDispatchFallback(unittest.TestCase):
             CodecDecoder d; unsigned used = codec_decoder_begin(&d, &h, aac_enabled, 0);
             codec_decoder_end(&d); return (int)used;
         }'''
-        t = pathlib.Path(self.tmp.name)
-        (t / "shim.c").write_text(shim)
-        lib = t / "shim.so"
-        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC",
-                        "-I" + str(t), "-I" + str(ROOT / "audiohelper"), "-o", str(lib),
-                        str(t / "shim.c"), str(ROOT / "audiohelper/CodecDecoder.c"),
-                        str(ROOT / "audiohelper/AACDecoder.c"), str(ROOT / "audiohelper/SBCDecoder.c"),
-                        str(ROOT / "shared/AACConfig.c")], check=True)
-        begin = ctypes.CDLL(str(lib)).begin_codec
-        begin.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
-        begin.restype = ctypes.c_int
-        SBC, AAC = 0x00, 0x02
-        lc_48_stereo = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x84, 0x80, 0, 0, 0, 0)
-        unsupported = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x14, 0x80, 0, 0, 0, 0)   # 96 kHz
-        # SBC session: SBC regardless of the switch.
-        self.assertEqual(begin(SBC, lc_48_stereo, 1), SBC)
-        # AAC negotiated but the switch is off: fall back to SBC.
-        self.assertEqual(begin(AAC, lc_48_stereo, 0), SBC)
-        # AAC negotiated, switch on, supported config: AAC (the stub converter succeeds).
-        self.assertEqual(begin(AAC, lc_48_stereo, 1), AAC)
-        # AAC negotiated, switch on, unsupported rate: fall back to SBC.
-        self.assertEqual(begin(AAC, unsupported, 1), SBC)
+        with tempfile.TemporaryDirectory() as tmp:
+            begin = ctypes.CDLL(self._build(tmp, shim=shim)).begin_codec
+            begin.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
+            begin.restype = ctypes.c_int
+            SBC, AAC = 0x00, 0x02
+            lc_48_stereo = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x84, 0x80, 0, 0, 0, 0)
+            unsupported = (ctypes.c_uint8 * 8)(0x40, 0x00, 0x14, 0x80, 0, 0, 0, 0)   # 96 kHz
+            self.assertEqual(begin(SBC, lc_48_stereo, 1), SBC)      # SBC session regardless of the switch
+            self.assertEqual(begin(AAC, lc_48_stereo, 0), SBC)      # AAC negotiated, switch off: SBC
+            self.assertEqual(begin(AAC, unsupported, 1), SBC)       # AAC on, unsupported rate: SBC
+            if self.have_audiotoolbox:
+                # Only where a real AudioConverter exists can AAC setup actually succeed.
+                self.assertEqual(begin(AAC, lc_48_stereo, 1), AAC)
+
 
 
 if __name__ == "__main__":
