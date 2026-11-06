@@ -10,6 +10,7 @@
 #pragma once
 #include "../shared/AudioRing.h"
 #include "../shared/AACConfig.h"
+#include "../shared/AACPacket.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -46,12 +47,14 @@ void aac_decoder_destroy(AACDecoder *);
 /* Reset at a stream boundary (new generation, or a sequence gap), like sbc_decoder_reset. Drops partial fragments. */
 void aac_decoder_reset(AACDecoder *);
 
-/* Decode one packet. Returns 0 with *samples stereo frames in pcm and *rate set; 1 if nothing came out yet (decoder
- * priming, or a fragment waiting for the rest of its AudioMuxElement); or a negative error:
+/* Decode one packet: every access unit in it (a source may pack several frames into one packet), appended to pcm.
+ * Returns 0 with *samples stereo frames in pcm, *frames access units decoded and *rate set; 1 if nothing came out
+ * yet (decoder priming, or a fragment waiting for the rest); or a negative error:
  *   -1  bad arguments or packet        -6  AudioConverter error (aac_decoder_last_status has the OSStatus)
- *   -11 not a valid AudioMuxElement    -14 in-band configuration changed to one this decoder doesn't support
+ *   -11 no AAC transport accounts for the packet (aac_decoder_last_packet says what LATM found)
+ *   -14 in-band configuration changed to one this decoder doesn't support
  *   -15 rebuilding the converter for an in-band configuration change failed
- * Writes at most `capacity` int16 samples (a stereo frame counts as 2). */
+ * Writes at most `capacity` int16 samples (a stereo frame counts as 2); AAC-LC needs 2048 per access unit. */
 int aac_decoder_decode(AACDecoder *, const AudioPacket *packet, int16_t *pcm,
                        size_t capacity, unsigned *frames, unsigned *samples, unsigned *rate);
 
@@ -60,3 +63,5 @@ int32_t aac_decoder_last_status(const AACDecoder *);     /* OSStatus of the last
 unsigned aac_decoder_config_changes(const AACDecoder *); /* in-band configuration changes followed */
 unsigned aac_decoder_fragments_joined(const AACDecoder *);  /* AudioMuxElements reassembled from fragments */
 unsigned aac_decoder_fragments_dropped(const AACDecoder *); /* partial elements abandoned (a fragment was lost) */
+/* How the last packet was framed: transport, access units, and why LATM refused it if nothing accounted for it. */
+void aac_decoder_last_packet(const AACDecoder *, AACPacketResult *);

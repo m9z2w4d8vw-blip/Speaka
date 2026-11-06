@@ -530,7 +530,8 @@ static void stream(int fd) {
     /* v9.3 experimental: the codec comes from the ring header, set by the tweak at CONFIGURE; SBC is the default
      * and the fallback. The PCM scratch fits the larger of an SBC burst and an AAC-LC frame (1024 stereo). */
     CodecDecoder decoder;codec_decoder_begin(&decoder,s,g_aac_enabled,hlog_line);
-    #define CODEC_PCM_SAMPLES (SBC_DECODER_PCM_SAMPLES>2048u?SBC_DECODER_PCM_SAMPLES:2048u)
+    /* Room for the larger of an SBC burst and a packet of several AAC frames (CodecDecoder.h). */
+    #define CODEC_PCM_SAMPLES (SBC_DECODER_PCM_SAMPLES>CODEC_DECODER_PCM_SAMPLES?SBC_DECODER_PCM_SAMPLES:CODEC_DECODER_PCM_SAMPLES)
     AudioPacket packet;int16_t pcm[CODEC_PCM_SAMPLES];
     uint64_t generation=0,doorbell=UINT64_MAX;
     unsigned retry=0,diagnostic_ticks=0;BOOL interrupted=NO;

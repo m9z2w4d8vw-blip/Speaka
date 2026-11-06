@@ -10,10 +10,19 @@
 #include "SBCDecoder.h"
 #include "AACDecoder.h"
 
+/* PCM the caller must make room for per packet: a source may pack several AAC frames (1024 stereo frames each) into
+ * one packet. Eight frames, 32 KB of int16. */
+#define CODEC_DECODER_PCM_SAMPLES (8u * 1024u * 2u)
+/* AAC packets described in the helper log (V94_AAC_PKT): the first ones after each (re)start, then failures only. */
+#define CODEC_AAC_LOG_FIRST 8u
+#define CODEC_AAC_LOG_TOTAL 64u
+
 typedef struct {
     uint32_t codec;            /* A2DP_CODEC_SBC or A2DP_CODEC_AAC, after any fallback */
     SBCDecoder sbc;            /* always present; the fallback and the default */
     AACDecoder *aac;           /* non-NULL only when codec==AAC and setup succeeded */
+    void (*log)(const char *fmt, ...);
+    unsigned aac_since_reset, aac_logged;
 } CodecDecoder;
 
 /* Set up for a session from the ring header. Reads header->codec and header->codec_config. On AAC, builds the AAC

@@ -1,6 +1,5 @@
-/* LATM.c - see LATM.h. A bit-reader over the AudioMuxElement, following ISO/IEC 14496-3 Table 1.28 (AudioMuxElement),
- * 1.21 (StreamMuxConfig), 1.23 (PayloadLengthInfo). Clean-room from the spec; BlueZ (a2dp_aac) and FFmpeg's LATM
- * code do the same traversal. No OS calls, no Apple internals. */
+/* LATM.c - see LATM.h. Follows the syntax tables of ISO/IEC 14496-3 1.7.3: AudioMuxElement, StreamMuxConfig,
+ * LatmGetValue, PayloadLengthInfo, PayloadMux, and the AAC-LC AudioSpecificConfig / GASpecificConfig. */
 #include "LATM.h"
 #include <string.h>
 
@@ -8,88 +7,151 @@ typedef struct { const uint8_t *data; size_t len; size_t bit; int eof; } BitRead
 
 static int br_read(BitReader *b, unsigned bits, uint32_t *out) {
     uint32_t v = 0;
-    if (bits > 32) return 0;
+    if (bits > 32u) return 0;
     for (unsigned i = 0; i < bits; ++i) {
         size_t byte = b->bit >> 3;
-        if (byte >= b->len) { b->eof = 1; return 0; } /* never read past the buffer; remember it ran out */
-        unsigned shift = 7u - (b->bit & 7u);
-        v = (v << 1) | ((b->data[byte] >> shift) & 1u);
+        if (byte >= b->len) { b->eof = 1; return 0; }
+        v = (v << 1) | ((b->data[byte] >> (7u - (b->bit & 7u))) & 1u);
         b->bit++;
     }
     *out = v;
     return 1;
 }
 
-/* Collect `bits` into asc[] at bit offset *asc_bits (MSB first), growing the byte length. Keeps the AudioSpecificConfig
- * we parse inline, so the decoder gets the exact ASC the stream carried. */
-static int asc_put(uint8_t *asc, unsigned cap_bytes, unsigned *asc_bits, uint32_t value, unsigned bits) {
-    for (unsigned i = 0; i < bits; ++i) {
-        unsigned bit = (value >> (bits - 1u - i)) & 1u;
-        unsigned pos = *asc_bits;
-        if ((pos >> 3) >= cap_bytes) return 0;
-        if (bit) asc[pos >> 3] |= (uint8_t)(1u << (7u - (pos & 7u)));
-        (*asc_bits)++;
+/* LatmGetValue(): bytesForValue (2 bits), then that many plus one bytes, big-endian. */
+static int latm_get_value(BitReader *b, uint32_t *out) {
+    uint32_t n, value = 0, tmp;
+    if (!br_read(b, 2, &n)) return 0;
+    for (uint32_t i = 0; i <= n; ++i) {
+        if (!br_read(b, 8, &tmp)) return 0;
+        value = (value << 8) | tmp;
     }
+    *out = value;
     return 1;
 }
 
-/* StreamMuxConfig (Table 1.21), the A2DP / AAC-LC subset: audioMuxVersion=0, single program, single layer. The
- * AudioSpecificConfig is parsed INLINE (not length-prefixed) per ISO/IEC 14496-3: for AAC-LC that is
- * audioObjectType(5) + samplingFrequencyIndex(4) + channelConfiguration(4) + GASpecificConfig(3) = 16 bits, which
- * is exactly the 2-byte ASC the A2DP capability also carries. We reconstruct those 2 bytes for the decoder. */
-static int parse_stream_mux_config(BitReader *b, uint8_t *asc, unsigned *asc_len) {
-    uint32_t audio_mux_version, all_same, num_sub, num_prog, num_layer;
-    if (!br_read(b, 1, &audio_mux_version)) return 0;
-    if (audio_mux_version != 0) return 0;             /* version A (1) is out of scope and A2DP does not use it */
-    if (!br_read(b, 1, &all_same)) return 0;          /* allStreamsSameTimeFraming */
-    if (!br_read(b, 6, &num_sub)) return 0;           /* numSubFrames: 0 => one sub-frame */
-    if (num_sub != 0) return 0;
-    if (!br_read(b, 4, &num_prog)) return 0;          /* numProgram: 0 => one program */
-    if (num_prog != 0) return 0;
-    if (!br_read(b, 3, &num_layer)) return 0;         /* numLayer: 0 => one layer */
-    if (num_layer != 0) return 0;
-
-    /* AudioSpecificConfig, inline. We support AAC-LC (audioObjectType 2) only. */
-    unsigned asc_bits = 0;
-    uint8_t asc_buf[8] = {0};
-    uint32_t object_type, freq_index, channels;
-    if (!br_read(b, 5, &object_type)) return 0;
-    if (object_type != 2u) return 0;                  /* AAC-LC only; other object types are out of scope */
-    if (!br_read(b, 4, &freq_index)) return 0;
-    if (freq_index == 0xfu) return 0;                 /* explicit frequency (24 bits) is out of scope */
-    if (!br_read(b, 4, &channels)) return 0;
-    if (channels != 1u && channels != 2u) return 0;
-    /* GASpecificConfig for AAC-LC: frameLengthFlag(1), dependsOnCoreCoder(1), extensionFlag(1). */
-    uint32_t frame_length_flag, depends_core, extension_flag;
-    if (!br_read(b, 1, &frame_length_flag)) return 0;
-    if (!br_read(b, 1, &depends_core)) return 0;
-    if (depends_core) { uint32_t core_delay; if (!br_read(b, 14, &core_delay)) return 0; }
-    if (!br_read(b, 1, &extension_flag)) return 0;
-    if (extension_flag) return 0;                     /* AAC-LC has none; reject rather than guess */
-    /* Rebuild the 2-byte ASC from the fields (frameLengthFlag etc. are the GAS 3 bits). */
-    if (!asc_put(asc_buf, sizeof asc_buf, &asc_bits, object_type, 5) ||
-        !asc_put(asc_buf, sizeof asc_buf, &asc_bits, freq_index, 4) ||
-        !asc_put(asc_buf, sizeof asc_buf, &asc_bits, channels, 4) ||
-        !asc_put(asc_buf, sizeof asc_buf, &asc_bits, frame_length_flag, 1) ||
-        !asc_put(asc_buf, sizeof asc_buf, &asc_bits, depends_core, 1) ||
-        !asc_put(asc_buf, sizeof asc_buf, &asc_bits, extension_flag, 1)) return 0;
-    unsigned bytes = (asc_bits + 7u) / 8u;
-    for (unsigned i = 0; i < bytes; ++i) asc[i] = asc_buf[i];
-    *asc_len = bytes;
-
-    /* frameLengthType must be 0 for AAC-LC (variable length, signalled in PayloadLengthInfo). */
-    uint32_t frame_len_type;
-    if (!br_read(b, 3, &frame_len_type)) return 0;
-    if (frame_len_type != 0) return 0;
-    uint32_t latm_buffer_fullness;
-    if (!br_read(b, 8, &latm_buffer_fullness)) return 0;
-    /* otherDataPresent / crcCheckPresent: read and require absent, matching the A2DP byte-aligned subset. */
-    uint32_t other_data, crc_present;
-    if (!br_read(b, 1, &other_data)) return 0;
-    if (other_data) return 0;
-    if (!br_read(b, 1, &crc_present)) return 0;
-    if (crc_present) { uint32_t crc; if (!br_read(b, 8, &crc)) return 0; }
+/* AudioSpecificConfig, AAC-LC only: audioObjectType 2, a table sampling index, channelConfiguration 1 or 2, and
+ * GASpecificConfig (frameLengthFlag 0, dependsOnCoreCoder, extensionFlag). Returns 1, or 0 with *why. */
+static int parse_asc(BitReader *b, LATMConfig *cfg, int *why) {
+    uint32_t aot, sfi, ch, flf, core, ext;
+    if (!br_read(b, 5, &aot) || !br_read(b, 4, &sfi)) { *why = LATM_E_TRUNCATED; return 0; }
+    if (aot != 2u || sfi == 0xfu) { *why = LATM_E_ASC; return 0; }
+    if (!br_read(b, 4, &ch) || !br_read(b, 1, &flf) || !br_read(b, 1, &core)) { *why = LATM_E_TRUNCATED; return 0; }
+    if ((ch != 1u && ch != 2u) || flf) { *why = LATM_E_ASC; return 0; }
+    if (core) { uint32_t delay; if (!br_read(b, 14, &delay)) { *why = LATM_E_TRUNCATED; return 0; } }
+    if (!br_read(b, 1, &ext)) { *why = LATM_E_TRUNCATED; return 0; }
+    if (ext) { *why = LATM_E_ASC; return 0; }          /* AAC-LC carries no extension */
+    unsigned v = (aot << 11) | (sfi << 7) | (ch << 3) | (flf << 2) | (core << 1) | ext;
+    cfg->asc[0] = (uint8_t)(v >> 8);
+    cfg->asc[1] = (uint8_t)(v & 0xffu);
+    cfg->asc_len = 2;
     return 1;
+}
+
+/* StreamMuxConfig() for one program and one layer. Fills a fresh configuration; returns 0 on success or LATM_E_*. */
+static int parse_stream_mux_config(BitReader *b, LATMConfig *out) {
+    LATMConfig c;
+    memset(&c, 0, sizeof c);
+    uint32_t v, version_a = 0;
+    if (!br_read(b, 1, &c.audio_mux_version)) return LATM_E_TRUNCATED;
+    if (c.audio_mux_version == 1u && !br_read(b, 1, &version_a)) return LATM_E_TRUNCATED;
+    if (version_a) return LATM_E_VERSION_A;
+    if (c.audio_mux_version == 1u && !latm_get_value(b, &v)) return LATM_E_TRUNCATED;   /* taraBufferFullness */
+    uint32_t same_framing, subframes, programs, layers;
+    if (!br_read(b, 1, &same_framing) || !br_read(b, 6, &subframes) || !br_read(b, 4, &programs) ||
+        !br_read(b, 3, &layers)) return LATM_E_TRUNCATED;
+    if (!same_framing || programs || layers) return LATM_E_LAYOUT;
+    c.num_sub_frames = subframes;
+    /* Program 0 layer 0 always carries its own config (useSameConfig is implicit 0). */
+    if (c.audio_mux_version == 0u) {
+        int why = 0;
+        if (!parse_asc(b, &c, &why)) return why;
+    } else {
+        uint32_t asc_bits;
+        if (!latm_get_value(b, &asc_bits)) return LATM_E_TRUNCATED;
+        size_t start = b->bit;
+        int why = 0;
+        if (!parse_asc(b, &c, &why)) return why;
+        size_t used = b->bit - start;
+        if (used > asc_bits) return LATM_E_ASC;
+        for (size_t i = used; i < asc_bits; ++i) if (!br_read(b, 1, &v)) return LATM_E_TRUNCATED;   /* fillBits */
+    }
+    uint32_t frame_length_type;
+    if (!br_read(b, 3, &frame_length_type)) return LATM_E_TRUNCATED;
+    if (frame_length_type != 0u) return LATM_E_FRAME_LENGTH;
+    if (!br_read(b, 8, &v)) return LATM_E_TRUNCATED;                                 /* latmBufferFullness */
+    if (!br_read(b, 1, &c.other_data_present)) return LATM_E_TRUNCATED;
+    if (c.other_data_present) {
+        if (c.audio_mux_version == 1u) {
+            if (!latm_get_value(b, &c.other_data_bits)) return LATM_E_TRUNCATED;
+        } else {
+            uint32_t esc, tmp;
+            c.other_data_bits = 0;
+            do {
+                if (!br_read(b, 1, &esc) || !br_read(b, 8, &tmp)) return LATM_E_TRUNCATED;
+                if (c.other_data_bits > (UINT32_MAX >> 8)) return LATM_E_LAYOUT;
+                c.other_data_bits = (c.other_data_bits << 8) + tmp;
+            } while (esc);
+        }
+    }
+    if (!br_read(b, 1, &c.crc_present)) return LATM_E_TRUNCATED;
+    if (c.crc_present && !br_read(b, 8, &v)) return LATM_E_TRUNCATED;                 /* crcCheckSum */
+    c.valid = 1;
+    *out = c;
+    return 0;
+}
+
+int latm_parse_element(const uint8_t *in, size_t len, size_t *bitpos, int mux_config_present, LATMConfig *cfg,
+                       uint8_t *out, size_t out_cap, size_t *out_used, size_t *au_len, unsigned max_aus,
+                       unsigned *n_aus, unsigned *carried_config) {
+    if (carried_config) *carried_config = 0;
+    if (!in || !bitpos || !cfg || !out || !out_used || !au_len || !n_aus) return LATM_E_ARGS;
+    BitReader b = { in, len, *bitpos, 0 };
+    if (mux_config_present) {
+        uint32_t use_same;
+        if (!br_read(&b, 1, &use_same)) { *bitpos = b.bit; return LATM_E_TRUNCATED; }
+        if (!use_same) {
+            LATMConfig fresh;
+            int rc = parse_stream_mux_config(&b, &fresh);
+            if (rc) { *bitpos = b.bit; return rc; }
+            *cfg = fresh;
+            if (carried_config) *carried_config = 1;
+        }
+    }
+    if (!cfg->valid) { *bitpos = b.bit; return LATM_E_NO_CONFIG; }
+    unsigned found = 0;
+    for (unsigned sub = 0; sub <= cfg->num_sub_frames; ++sub) {
+        /* PayloadLengthInfo, frameLengthType 0: MuxSlotLengthBytes as 255-continued bytes. */
+        size_t slot = 0;
+        uint32_t tmp;
+        do {
+            if (!br_read(&b, 8, &tmp)) { *bitpos = b.bit; return LATM_E_TRUNCATED; }
+            slot += tmp;
+        } while (tmp == 255u);
+        if (!slot) { *bitpos = b.bit; return LATM_E_AU_LENGTH; }
+        if (b.bit + slot * 8u > len * 8u) { *bitpos = b.bit; return LATM_E_TRUNCATED; }
+        if (*n_aus >= max_aus || *out_used + slot > out_cap) { *bitpos = b.bit; return LATM_E_CAPACITY; }
+        /* PayloadMux: slot bytes, copied out (generally not byte-aligned here). */
+        uint8_t *dst = out + *out_used;
+        if ((b.bit & 7u) == 0u) {
+            memcpy(dst, in + (b.bit >> 3), slot);
+            b.bit += slot * 8u;
+        } else {
+            for (size_t i = 0; i < slot; ++i) { br_read(&b, 8, &tmp); dst[i] = (uint8_t)tmp; }
+        }
+        au_len[*n_aus] = slot;
+        (*n_aus)++;
+        *out_used += slot;
+        found++;
+    }
+    if (cfg->other_data_present) {
+        if (b.bit + cfg->other_data_bits > len * 8u) { *bitpos = b.bit; return LATM_E_TRUNCATED; }
+        b.bit += cfg->other_data_bits;
+    }
+    b.bit = (b.bit + 7u) & ~(size_t)7u;                                               /* byte_alignment() */
+    if (b.bit > len * 8u) { *bitpos = b.bit; return LATM_E_TRUNCATED; }
+    *bitpos = b.bit;
+    return (int)found;
 }
 
 int latm_parse_audiomuxelement(const uint8_t *in, size_t len, uint8_t *au_out, size_t au_cap, LATMFrame *out) {
@@ -97,39 +159,19 @@ int latm_parse_audiomuxelement(const uint8_t *in, size_t len, uint8_t *au_out, s
     memset(&z, 0, sizeof z);
     if (out) *out = z;
     if (!in || !out || !au_out || len == 0) return 0;
-
-    BitReader b = { in, len, 0, 0 };
-    uint32_t use_same;
-    if (!br_read(&b, 1, &use_same)) goto fail;        /* AudioMuxElement(muxConfigPresent=1): useSameStreamMux */
-    out->used_same_mux = use_same ? 1u : 0u;
-    if (!use_same) {
-        if (!parse_stream_mux_config(&b, out->asc, &out->asc_len)) goto fail;
+    /* Without a configuration, a useSameStreamMux=1 element is read with the defaults: one access unit, no other data. */
+    LATMConfig cfg;
+    memset(&cfg, 0, sizeof cfg);
+    cfg.valid = 1;
+    size_t bit = 0, used = 0, lens[64];
+    unsigned n = 0;
+    int rc = latm_parse_element(in, len, &bit, 1, &cfg, au_out, au_cap, &used, lens, 64, &n, NULL);
+    if (rc < 1) {
+        out->truncated = rc == LATM_E_TRUNCATED ? 1u : 0u;
+        return 0;
     }
-
-    /* PayloadLengthInfo (Table 1.23) for frameLengthType==0: MuxSlotLengthBytes as a run of 0xFF chunks + remainder. */
-    size_t au_len = 0;
-    for (;;) {
-        uint32_t chunk;
-        if (!br_read(&b, 8, &chunk)) goto fail;
-        au_len += chunk;
-        if (chunk != 255u) break;
-        if (au_len > 65536u) goto fail;                /* far beyond any AAC frame: malformed, not a fragment */
-    }
-
-    /* PayloadMux is au_len bytes, read through the bit reader because it is generally NOT byte-aligned within the
-     * element (StreamMuxConfig and PayloadLengthInfo are bit fields). Copy the shifted bytes out. */
-    if (au_len == 0 || au_len > au_cap) goto fail;
-    if (b.bit + au_len * 8u > len * 8u) { b.eof = 1; goto fail; }  /* declared AU runs past the input: a fragment */
-    for (size_t i = 0; i < au_len; ++i) {
-        uint32_t byte;
-        if (!br_read(&b, 8, &byte)) goto fail;
-        au_out[i] = (uint8_t)byte;
-    }
-    out->au_len = au_len;
+    out->used_same_mux = (in[0] >> 7) & 1u;
+    if (!out->used_same_mux) { out->asc[0] = cfg.asc[0]; out->asc[1] = cfg.asc[1]; out->asc_len = 2; }
+    out->au_len = lens[0];
     return 1;
-
-fail:
-    *out = z;
-    out->truncated = b.eof ? 1u : 0u;
-    return 0;
 }

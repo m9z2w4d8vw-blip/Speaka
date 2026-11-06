@@ -59,6 +59,14 @@ Later in this cycle:
   AAC test. Off by default; turning it off and tapping Start restores SBC. Fixed before anyone enabled it:
   v9.8.84 changed only the audio-table entry (the PC would still have been offered SBC) and wrote AAC's 6 codec bytes
   into a 4-byte tail. Both tables now agree, and compile-time checks size both buffers for either codec.
+- **Live AAC from Windows (v9.8.85 device test):** Windows negotiated AAC (MPEG-2 AAC-LC, 48 kHz stereo, VBR 256 kbps)
+  and streamed it, but every packet failed with -11: the parser accepted only one access unit per packet and only
+  the simplest LATM, while Windows packs as many frames as fit (about 3 per packet at low VBR rates, 1 near 256 kbps).
+  LATM is now parsed per ISO/IEC 14496-3 (persistent StreamMuxConfig, several frames per element, audioMuxVersion 1,
+  otherData), and LOAS, ADTS, RFC 3640, out-of-band LATM and bare access units are accepted too - each only when its
+  own length fields account for the whole packet. Every access unit in a packet is decoded. The phone's SUSPENDs
+  were the idle guard correctly handing a stream with no PCM back to Apple, and stop once PCM flows. The helper logs
+  each stream's first packets (V94_AAC_PKT: transport, frames, first 64 bytes).
 - **App build:** v9.8.84's app failed to build (an undeclared name in SPTweakClient.m), so that release has only the
   tweak; a new test checks every SP-prefixed name in the app's Objective-C is declared.
 

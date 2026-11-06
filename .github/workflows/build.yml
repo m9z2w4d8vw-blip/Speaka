@@ -368,7 +368,7 @@ jobs:
         env:
           CI: 'true'
           SPEAKA_REAL_AAC: '1'
-        run: python3 -m unittest -v tests.test_aac.RealAudioToolbox tests.test_aac.SelfTestRuns tests.test_aac.DecoderContract tests.test_aac.LATMDepacketizer
+        run: python3 -m unittest -v tests.test_aac.RealAudioToolbox tests.test_aac.SelfTestRuns tests.test_aac.DecoderContract tests.test_aac.LATMDepacketizer tests.test_aac.WindowsPacketization tests.test_aac.WindowsPacketsDecode
 
       - name: Build the iOS launch-test binaries
         run: |

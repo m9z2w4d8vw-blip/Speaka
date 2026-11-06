@@ -1,6 +1,7 @@
 /* Test driver for AACDecoder: builds AudioPackets in C, so the Python tests pass only plain numbers and bytes and
  * never mirror the packet layout. Linked either with tests/fakes/fake_audiotoolbox.c or with the real AudioToolbox. */
 #include "AACDecoder.h"
+#include <stdlib.h>
 #include <string.h>
 
 /* Exported for ctypes. */
@@ -40,3 +41,29 @@ int drv_decode(AACDecoder *d, unsigned generation, unsigned sequence, unsigned t
 }
 
 unsigned drv_create_status_size(void) { return (unsigned)sizeof(AACDecoderCreateStatus); }
+
+/* The transport depacketizer on its own (shared/AACPacket.c), with plain-number results for ctypes:
+ * info = [transport, header, aus, latm_error, latm_error_bit, incomplete, asc_seen]. */
+AACPacketState *drv_packet_new(unsigned channels);
+void drv_packet_free(AACPacketState *st);
+int drv_packet_split(AACPacketState *st, const uint8_t *in, unsigned len, uint8_t *out, unsigned cap,
+                     unsigned *au_len, unsigned max_aus, int *info);
+
+AACPacketState *drv_packet_new(unsigned channels) {
+    AACPacketState *st = (AACPacketState *)calloc(1, sizeof *st);
+    static const uint8_t asc[2] = {0x11, 0x90};            /* AAC-LC 48 kHz stereo, as negotiated */
+    if (st) aac_packet_init(st, asc, channels);
+    return st;
+}
+void drv_packet_free(AACPacketState *st) { free(st); }
+int drv_packet_split(AACPacketState *st, const uint8_t *in, unsigned len, uint8_t *out, unsigned cap,
+                     unsigned *au_len, unsigned max_aus, int *info) {
+    size_t lens[AAC_PACKET_MAX_AUS];
+    AACPacketResult r;
+    if (max_aus > AAC_PACKET_MAX_AUS) max_aus = AAC_PACKET_MAX_AUS;
+    int n = aac_packet_split(st, in, len, out, cap, lens, max_aus, &r);
+    for (int i = 0; i < n; ++i) au_len[i] = (unsigned)lens[i];
+    info[0] = (int)r.transport; info[1] = (int)r.header; info[2] = (int)r.aus; info[3] = r.latm_error;
+    info[4] = (int)r.latm_error_bit; info[5] = (int)r.incomplete; info[6] = (int)r.asc_seen;
+    return n;
+}

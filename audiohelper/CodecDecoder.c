@@ -14,6 +14,9 @@ uint32_t codec_decoder_begin(CodecDecoder *d, const AudioRing *header, int aac_e
                              void (*log)(const char *fmt, ...)) {
     sbc_decoder_reset(&d->sbc);
     d->aac = NULL;
+    d->log = log;
+    d->aac_since_reset = 0;
+    d->aac_logged = 0;
     if (header->codec == A2DP_CODEC_SBC) {
         d->codec = A2DP_CODEC_SBC;
         if (log) log("V93_CODEC sbc\n");
@@ -47,6 +50,7 @@ uint32_t codec_decoder_begin(CodecDecoder *d, const AudioRing *header, int aac_e
 }
 
 void codec_decoder_reset(CodecDecoder *d) {
+    d->aac_since_reset = 0;                 /* describe the first packets of the next stream too */
     if (d->codec == A2DP_CODEC_AAC && d->aac) aac_decoder_reset(d->aac);
     else if (d->codec == A2DP_CODEC_SBC) sbc_decoder_reset(&d->sbc);
     /* CODEC_DISABLED: nothing to reset. */
@@ -55,8 +59,32 @@ void codec_decoder_reset(CodecDecoder *d) {
 int codec_decoder_decode(CodecDecoder *d, const AudioPacket *p, int16_t *pcm,
                          size_t capacity, unsigned *frames, unsigned *samples, unsigned *rate) {
     (void)p;
-    if (d->codec == A2DP_CODEC_AAC && d->aac)
-        return aac_decoder_decode(d->aac, p, pcm, capacity, frames, samples, rate);
+    if (d->codec == A2DP_CODEC_AAC && d->aac) {
+        int r = aac_decoder_decode(d->aac, p, pcm, capacity, frames, samples, rate);
+        d->aac_since_reset++;
+        /* Evidence for the log, from the helper's own thread (never bluetoothd's): how the packet was framed, what
+         * came out, and its first 64 bytes. The first packets of each stream, then failures, within a total cap. */
+        if (d->log && d->aac_logged < CODEC_AAC_LOG_TOTAL && (d->aac_since_reset <= CODEC_AAC_LOG_FIRST || r < 0)) {
+            AACPacketResult res;
+            aac_decoder_last_packet(d->aac, &res);
+            char head[64 * 3 + 1];
+            size_t shown = p->length < 64u ? p->length : 64u, at = 0;
+            static const char hex[] = "0123456789abcdef";
+            for (size_t i = 0; i < shown; ++i) {
+                head[at++] = hex[p->data[i] >> 4];
+                head[at++] = hex[p->data[i] & 15u];
+                if (i + 1 < shown) head[at++] = ' ';
+            }
+            head[at] = 0;
+            d->aac_logged++;
+            d->log("V94_AAC_PKT n=%u len=%u seq=%u ts=%u result=%d frames=%u aus=%u transport=%s hdr=%u cfg=%u "
+                   "latm_err=%d@%u status=%d head=%s\n", d->aac_since_reset, (unsigned)p->length,
+                   (unsigned)p->sequence, (unsigned)p->timestamp, r, *samples, res.aus, aac_transport_name(res.transport),
+                   res.header, res.asc_seen, res.latm_error, (unsigned)res.latm_error_bit,
+                   (int)aac_decoder_last_status(d->aac), head);
+        }
+        return r;
+    }
     if (d->codec == A2DP_CODEC_SBC)
         return sbc_decoder_decode(&d->sbc, p, pcm, capacity, frames, samples, rate);
     /* DISABLED: consume the packet, emit nothing. -13 distinguishes it in the decode log. */

@@ -41,6 +41,10 @@ struct AACDecoder {
     int reasm_active;
     uint8_t framed[ADTS_HEADER_BYTES + AAC_MAX_ELEMENT_BYTES];  /* [ADTS header][access unit] */
     int16_t scratch[1024 * 2];
+    AACPacketState packets;         /* the source's transport and LATM configuration, across packets */
+    AACPacketResult last_packet;
+    uint8_t aus[AAC_MAX_ELEMENT_BYTES];   /* the access units of one packet, back to back */
+    size_t au_len[AAC_PACKET_MAX_AUS];
 };
 
 void aac_decoder_default_options(AACDecoderOptions *o) {
@@ -153,6 +157,7 @@ AACDecoder *aac_decoder_create_ex(const AACConfig *cfg, const AACDecoderOptions 
     if (!d) return NULL;
     if (opt) d->options = *opt; else aac_decoder_default_options(&d->options);
     if (!adopt_config(d, cfg) || build_converter(d, st) != noErr) { free(d); return NULL; }
+    aac_packet_init(&d->packets, d->asc, d->config.channels);
     return d;
 }
 
@@ -177,6 +182,10 @@ int32_t aac_decoder_last_status(const AACDecoder *d) { return d ? (int32_t)d->la
 unsigned aac_decoder_config_changes(const AACDecoder *d) { return d ? d->config_changes : 0; }
 unsigned aac_decoder_fragments_joined(const AACDecoder *d) { return d ? d->fragments_joined : 0; }
 unsigned aac_decoder_fragments_dropped(const AACDecoder *d) { return d ? d->fragments_dropped : 0; }
+void aac_decoder_last_packet(const AACDecoder *d, AACPacketResult *out) {
+    if (!out) return;
+    if (d) *out = d->last_packet; else memset(out, 0, sizeof *out);
+}
 
 int aac_decoder_decode(AACDecoder *d, const AudioPacket *p, int16_t *pcm,
                        size_t capacity, unsigned *frames, unsigned *samples, unsigned *rate) {
@@ -208,32 +217,30 @@ int aac_decoder_decode(AACDecoder *d, const AudioPacket *p, int16_t *pcm,
         }
     }
 
-    LATMFrame frame;
-    uint8_t *au = d->framed + ADTS_HEADER_BYTES;
-    size_t au_cap = sizeof d->framed - ADTS_HEADER_BYTES;
-    if (!latm_parse_audiomuxelement(element, element_len, au, au_cap, &frame)) {
-        if (frame.truncated && element_len < sizeof d->reasm) {
-            if (!d->reasm_active) {                    /* the first fragment: keep it and wait for the rest */
-                memcpy(d->reasm, p->data, p->length);
-                d->reasm_len = p->length;
-                d->reasm_timestamp = p->timestamp;
-                d->reasm_active = 1;
-            }
-            return 1;
+    AACPacketResult res;
+    int n = aac_packet_split(&d->packets, element, element_len, d->aus, sizeof d->aus, d->au_len,
+                             AAC_PACKET_MAX_AUS, &res);
+    d->last_packet = res;
+    if (n == 0) {
+        if (element_len < sizeof d->reasm && !d->reasm_active) {   /* the first fragment: keep it, wait for the rest */
+            memcpy(d->reasm, p->data, p->length);
+            d->reasm_len = p->length;
+            d->reasm_timestamp = p->timestamp;
+            d->reasm_active = 1;
         }
-        d->reasm_active = 0;
-        d->reasm_len = 0;
-        return -11;
+        return 1;
     }
     if (element == d->reasm) d->fragments_joined++;
     d->reasm_active = 0;
     d->reasm_len = 0;
+    if (n < 0) return -11;
 
     /* The in-band configuration is the stream's own: if it differs from what the converter was built for, follow it.
      * A rate change reaches the helper through *rate, which already restarts its output on a new rate. */
-    if (frame.asc_len >= 2u && (frame.asc[0] != d->asc[0] || frame.asc[1] != d->asc[1])) {
+    const LATMConfig *inband = &d->packets.latm;
+    if (res.asc_seen && inband->asc_len == 2u && (inband->asc[0] != d->asc[0] || inband->asc[1] != d->asc[1])) {
         AACConfig next;
-        if (!aac_config_from_asc(frame.asc, frame.asc_len, &next)) return -14;
+        if (!aac_config_from_asc(inband->asc, 2, &next)) return -14;
         next.vbr = d->config.vbr;
         next.bitrate = d->config.bitrate;
         if (d->converter) { AudioConverterDispose(d->converter); d->converter = NULL; }
@@ -241,37 +248,53 @@ int aac_decoder_decode(AACDecoder *d, const AudioPacket *p, int16_t *pcm,
         d->config_changes++;
     }
 
-    if (d->options.framing == AAC_FRAMING_ADTS) {
-        build_adts(d, d->framed, frame.au_len);
-        d->in_data = d->framed;
-        d->in_size = ADTS_HEADER_BYTES + frame.au_len;
-    } else {
-        d->in_data = au;                               /* the bare access unit */
-        d->in_size = frame.au_len;
+    /* Decode every access unit, appending its PCM. */
+    size_t offset = 0, written = 0;
+    unsigned decoded = 0, failed = 0;
+    for (int i = 0; i < n; ++i) {
+        const uint8_t *unit = d->aus + offset;
+        size_t unit_len = d->au_len[i];
+        offset += unit_len;
+        if (unit_len + ADTS_HEADER_BYTES > sizeof d->framed) { failed++; continue; }
+        if (d->options.framing == AAC_FRAMING_ADTS) {
+            build_adts(d, d->framed, unit_len);
+            memcpy(d->framed + ADTS_HEADER_BYTES, unit, unit_len);
+            d->in_data = d->framed;
+            d->in_size = ADTS_HEADER_BYTES + unit_len;
+        } else {
+            d->in_data = unit;                             /* the bare access unit */
+            d->in_size = unit_len;
+        }
+        d->in_consumed = 0;
+        size_t room = (capacity / 2u) - written;           /* stereo frames left in pcm */
+        if (room == 0) break;
+        UInt32 out_frames = room < 1024u ? (UInt32)room : 1024u;
+        AudioBufferList out_list;
+        out_list.mNumberBuffers = 1;
+        out_list.mBuffers[0].mNumberChannels = d->config.channels;
+        out_list.mBuffers[0].mDataByteSize = out_frames * d->out_format.mBytesPerFrame;
+        out_list.mBuffers[0].mData = d->scratch;
+        OSStatus status = AudioConverterFillComplexBuffer(d->converter, pull_input, d, &out_frames, &out_list, NULL);
+        d->last_status = status == SPK_NO_MORE_INPUT ? noErr : status;   /* our own end-of-input marker is success */
+        d->in_data = NULL;
+        if (status != noErr && status != SPK_NO_MORE_INPUT) { failed++; continue; }
+        if (out_frames == 0) continue;                     /* priming */
+        int16_t *dst = pcm + written * 2u;
+        if (d->config.channels == 2) {
+            memcpy(dst, d->scratch, (size_t)out_frames * 2u * sizeof(int16_t));
+        } else {
+            for (UInt32 k = 0; k < out_frames; ++k) { dst[k * 2] = d->scratch[k]; dst[k * 2 + 1] = d->scratch[k]; }
+        }
+        written += out_frames;
+        decoded++;
     }
-    d->in_consumed = 0;
-
-    UInt32 out_frames = 1024;
-    if ((size_t)out_frames * 2u > capacity) out_frames = (UInt32)(capacity / 2u);
-    AudioBufferList out_list;
-    out_list.mNumberBuffers = 1;
-    out_list.mBuffers[0].mNumberChannels = d->config.channels;
-    out_list.mBuffers[0].mDataByteSize = out_frames * d->out_format.mBytesPerFrame;
-    out_list.mBuffers[0].mData = d->scratch;
-
-    OSStatus status = AudioConverterFillComplexBuffer(d->converter, pull_input, d, &out_frames, &out_list, NULL);
-    d->last_status = status;
-    d->in_data = NULL;
-    if (status != noErr && status != SPK_NO_MORE_INPUT) return -6;
-    if (out_frames == 0) return 1;                     /* priming: nothing emitted yet */
-
-    if (d->config.channels == 2) {
-        memcpy(pcm, d->scratch, (size_t)out_frames * 2u * sizeof(int16_t));
-    } else {
-        for (UInt32 i = 0; i < out_frames; ++i) { pcm[i * 2] = d->scratch[i]; pcm[i * 2 + 1] = d->scratch[i]; }
+    if (!written) {
+        /* Everything the transport produced was rejected by the decoder: detect the transport afresh next time. */
+        if (failed) { aac_packet_unlock(&d->packets); return -6; }
+        return 1;                                          /* priming */
     }
-    *samples = out_frames;
-    *frames = 1;
+    *samples = (unsigned)written;
+    *frames = decoded;
     *rate = d->config.sample_rate;
     return 0;
 }

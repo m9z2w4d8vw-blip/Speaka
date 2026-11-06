@@ -14,6 +14,7 @@ Run only where the real AudioToolbox exists, in CI's device-test job (SPEAKA_REA
 The phone runs the same decoder through the self-test (tools/device_test).
 """
 import ctypes
+import random
 import re
 import importlib.util
 import json
@@ -28,6 +29,8 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests"))
+import aac_packets  # noqa: E402  (bit-exact packet writers, validated against ffmpeg)
 
 
 def build_lib(tmp, *sources, extra=()):
@@ -137,7 +140,7 @@ class AACCapabilityRecord(unittest.TestCase):
 
 
 FAKES = ROOT / "tests/fakes"
-DECODER_SOURCES = ["audiohelper/AACDecoder.c", "shared/LATM.c", "shared/AACConfig.c"]
+DECODER_SOURCES = ["audiohelper/AACDecoder.c", "shared/AACPacket.c", "shared/LATM.c", "shared/AACConfig.c"]
 IS_MAC = sys.platform == "darwin"
 
 
@@ -226,9 +229,9 @@ class Decoder:
         return self.handle
 
     def decode(self, data, sequence, timestamp, generation=1):
-        pcm = (ctypes.c_int16 * 2048)()
+        pcm = (ctypes.c_int16 * (16 * 2048))()             # several AAC frames per packet
         samples, rate = ctypes.c_uint(), ctypes.c_uint()
-        r = self.lib.drv_decode(self.handle, generation, sequence, timestamp, bytes(data), len(data), pcm, 2048,
+        r = self.lib.drv_decode(self.handle, generation, sequence, timestamp, bytes(data), len(data), pcm, 16 * 2048,
                                 ctypes.byref(samples), ctypes.byref(rate))
         return r, samples.value, rate.value, pcm
 
@@ -324,6 +327,33 @@ class CodecDispatchFallback(unittest.TestCase):
                 for (int i = 0; i < 8; i++) h.codec_config[i] = csi[i];
                 CodecDecoder d; unsigned used = codec_decoder_begin(&d, &h, aac_enabled, 0);
                 codec_decoder_end(&d); return used;
+            }
+            #include <stdarg.h>
+            #include <stdio.h>
+            #include <string.h>
+            static char *g_out; static unsigned g_cap, g_used; static int g_lines;
+            static void capture(const char *fmt, ...) {
+                va_list ap; va_start(ap, fmt);
+                int n = vsnprintf(g_out + g_used, g_cap - g_used, fmt, ap);
+                va_end(ap);
+                if (n > 0 && g_used + (unsigned)n < g_cap) { g_used += (unsigned)n; g_lines++; }
+            }
+            int log_packets(const unsigned char *flat, unsigned count, char *out, unsigned cap) {
+                static AudioRing h; static AudioPacket p; static int16_t pcm[16 * 2048];
+                const unsigned char aac[8] = {0x40, 0x00, 0x84, 0x80, 0, 0, 0, 0};   /* LC 48 kHz stereo */
+                g_out = out; g_cap = cap; g_used = 0; g_lines = 0; out[0] = 0;
+                memset(&h, 0, sizeof h); h.codec = 2; memcpy(h.codec_config, aac, 8);
+                CodecDecoder d; codec_decoder_begin(&d, &h, 1, capture);
+                unsigned off = 0, ts = 0;
+                for (unsigned i = 0; i < count; i++) {
+                    unsigned len; memcpy(&len, flat + off, 4); off += 4;
+                    memset(&p, 0, sizeof p); p.generation = 1; p.sequence = (uint16_t)i; p.timestamp = ts;
+                    p.length = len; memcpy(p.data, flat + off, len); off += len; ts += 1024;
+                    unsigned frames = 0, samples = 0, rate = 0;
+                    codec_decoder_decode(&d, &p, pcm, sizeof pcm / sizeof pcm[0], &frames, &samples, &rate);
+                }
+                codec_decoder_end(&d);
+                return g_lines;
             }""")
         lib = compile_c(cls.tmp.name, "dispatch.so",
                         ["audiohelper/CodecDecoder.c", "audiohelper/SBCDecoder.c", *DECODER_SOURCES, str(shim)],
@@ -332,10 +362,45 @@ class CodecDispatchFallback(unittest.TestCase):
         cls.begin = ctypes.CDLL(str(lib)).begin_codec
         cls.begin.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
         cls.begin.restype = ctypes.c_uint
+        cls.log_packets = ctypes.CDLL(str(lib)).log_packets
+        cls.log_packets.argtypes = [ctypes.c_char_p, ctypes.c_uint, ctypes.c_char_p, ctypes.c_uint]
+        cls.log_packets.restype = ctypes.c_int
 
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
+
+    def test_aac_packets_are_described_in_the_log(self):
+        # The evidence the next device test depends on: V94_AAC_PKT with the transport, the frames found and the
+        # packet's first 64 bytes, for the first packets of a stream and then failures, within a cap.
+        elements, aus = fixture_elements()
+        packets = [aac_packets.element(g, config={"subframes": len(g) - 1}) for g in windows_packing(aus)]
+        # One packet nothing accounts for: a version-1 StreamMuxConfig with two programs (LATM_E_LAYOUT), whose first
+        # byte is no audio element either.
+        w = aac_packets.W()
+        w.put(0, 1); w.put(1, 1); w.put(0, 1); aac_packets.latm_get_value(w, 0xff); w.put(1, 1); w.put(0, 6); w.put(1, 4)
+        bad = (w.data() + bytes(range(64)))[:40]
+        packets.insert(3, bad)
+        flat = b"".join(struct.pack("<I", len(x)) + x for x in packets)
+        lines = (ctypes.c_char * 65536)()
+        n = self.log_packets(flat, len(packets), lines, 65536)
+        text = lines.value.decode()
+        logged = [l for l in text.splitlines() if l.startswith("V94_AAC_PKT")]
+        self.assertGreater(n, 0)
+        self.assertIn("V93_CODEC aac rate=48000 channels=2", text)
+        self.assertEqual(len(logged), 8 + 0)                        # the first 8 packets (the bad one is among them)
+        first = logged[0]
+        self.assertIn("n=1 len=%d " % len(packets[0]), first)
+        self.assertIn("result=0 ", first)
+        self.assertIn("transport=latm hdr=0 cfg=1", first)
+        self.assertIn("aus=%d " % len(windows_packing(aus)[0]), first)
+        self.assertIn("head=" + " ".join("%02x" % b for b in packets[0][:64]), first)
+        line = logged[3]
+        self.assertIn("result=-11 ", line)
+        self.assertIn("transport=none", line)
+        self.assertIn("latm_err=-3@", line)                         # LATM_E_LAYOUT, and where
+        self.assertIn("head=" + " ".join("%02x" % b for b in bad), line)
+        self.assertIn("status=0 ", first)                           # the decoder's own end-of-input marker reads as 0
 
     def test_never_decodes_aac_as_sbc(self):
         SBC, AAC, DISABLED = 0x00, 0x02, 0xffffffff
@@ -395,8 +460,10 @@ class LATMDepacketizer(unittest.TestCase):
 
     def test_rejects_malformed_and_out_of_scope(self):
         self.assertEqual(self.parse(b"")[0], 0)
-        ok, _, fr = self.parse(bytes([0x40, 0x00, 0x00]))      # audioMuxVersion 1: out of scope, not a fragment
+        ok, _, fr = self.parse(bytes([0x60, 0x00, 0x00]))      # audioMuxVersionA 1: reserved, not a fragment
         self.assertEqual((ok, fr.truncated), (0, 0))
+        ok, _, fr = self.parse(bytes([0x40, 0x00, 0x00]))      # audioMuxVersion 1 is supported: this is just cut short
+        self.assertEqual((ok, fr.truncated), (0, 1))
 
     def test_au_capacity_is_respected(self):
         ok, _, fr = self.parse(self.elements[0], cap=16)       # far too small for a 288-byte access unit
@@ -627,6 +694,21 @@ class RealAudioToolbox(unittest.TestCase):
         report = json.loads(r.stdout)
         self.assertTrue(report["pass"], "production strategy failed; working: %s" % report["working_strategies"])
 
+    def test_windows_packed_packets_decode_with_apples_decoder(self):
+        # Several frames per packet, the configuration in every packet: what v9.8.85 rejected with -11 on the phone.
+        dec = Decoder(self.lib)
+        self.assertTrue(dec.create())
+        _, aus = fixture_elements()
+        total, timestamp = 0, 0
+        for i, g in enumerate(windows_packing(aus)):
+            r, samples, rate, _ = dec.decode(aac_packets.element(g, config={"subframes": len(g) - 1}), i, timestamp)
+            self.assertIn(r, (0, 1), f"packet {i}: status {dec.stat('last_status')}")
+            total += samples
+            timestamp += 1024 * len(g)
+        dec.destroy()
+        self.assertGreaterEqual(total, 23 * 1024)
+        print("apple decoder, Windows-packed packets: %d PCM frames from %d access units" % (total, len(aus)))
+
     def test_pcm_matches_ffmpegs_decode(self):
         dec = Decoder(self.lib)
         self.assertTrue(dec.create())
@@ -856,6 +938,240 @@ class AACsinkMode(unittest.TestCase):
         config_hook_body = hooks.split("static void install_config_hook(", 1)[1].split("\n}\n\n", 1)[0]
         self.assertIn("g_aac_sink_mode", config_hook_body,
                       "g_aac_sink_mode must be set inside install_config_hook (re-read on every BT restart)")
+
+
+def read_aus(name):
+    data = (ROOT / "tests/fixtures" / name).read_bytes()
+    count, off, aus = struct.unpack_from("<I", data, 0)[0], 4, []
+    for _ in range(count):
+        n = struct.unpack_from("<I", data, off)[0]
+        aus.append(data[off + 4:off + 4 + n])
+        off += 4 + n
+    return aus
+
+
+def windows_packing(aus, mtu=720):
+    """Group access units the way the v9.8.85 device log shows Windows packing them: as many complete frames as fit
+    in one packet (about 3 per packet at low VBR rates, 1 per packet near 256 kbps)."""
+    groups, current = [], []
+    for au in aus:
+        if current and sum(len(a) + 2 for a in current) + len(au) + 2 > mtu:
+            groups.append(current)
+            current = []
+        current.append(au)
+    if current:
+        groups.append(current)
+    return groups
+
+
+class WindowsPacketization(unittest.TestCase):
+    """The live failure: every packet from Windows was rejected with -11. The old parser accepted only one access unit
+    per packet and rejected several frames per element, LOAS framing, audioMuxVersion 1, otherData and the other
+    standard framings. Each shape here is built from ffmpeg's real access units with a writer ffmpeg's own LATM
+    decoder accepts (tests/aac_packets.py); the depacketizer must return exactly ffmpeg's access units, in order."""
+    TRANSPORT = {1: "latm", 2: "loas", 3: "adts", 4: "rfc3640", 5: "latm-oob", 6: "raw"}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.lib = ctypes.CDLL(str(compile_c(cls.tmp.name, "packets.so", [*DECODER_SOURCES, "tests/aac_decoder_driver.c"],
+                                            shared=True)))
+        cls.lib.drv_packet_new.restype = ctypes.c_void_p
+        cls.lib.drv_packet_new.argtypes = [ctypes.c_uint]
+        cls.lib.drv_packet_free.argtypes = [ctypes.c_void_p]
+        cls.lib.drv_packet_split.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint,
+                                             ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint,
+                                             ctypes.POINTER(ctypes.c_uint), ctypes.c_uint, ctypes.POINTER(ctypes.c_int)]
+        cls.lib.drv_packet_split.restype = ctypes.c_int
+        cls.elements, cls.aus = fixture_elements()
+        cls.silence = read_aus("aac_silence_48k_stereo.aus")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        self.state = self.lib.drv_packet_new(2)
+
+    def tearDown(self):
+        self.lib.drv_packet_free(self.state)
+
+    def split(self, packet):
+        out = (ctypes.c_uint8 * 16384)()
+        lens = (ctypes.c_uint * 16)()
+        info = (ctypes.c_int * 7)()
+        n = self.lib.drv_packet_split(self.state, bytes(packet), len(packet), out, 16384, lens, 16, info)
+        aus, off = [], 0
+        for i in range(max(n, 0)):
+            aus.append(bytes(out[off:off + lens[i]]))
+            off += lens[i]
+        return n, aus, self.TRANSPORT.get(info[0], "none"), list(info)
+
+    def expect(self, packets, want_aus, transport):
+        got = []
+        for i, packet in enumerate(packets):
+            n, aus, t, info = self.split(packet)
+            self.assertGreater(n, 0, f"packet {i} ({len(packet)} bytes) rejected: info={info}")
+            self.assertEqual(t, transport, f"packet {i}")
+            got += aus
+        self.assertEqual(got, want_aus)
+
+    def test_several_frames_per_packet_with_the_config_in_every_packet(self):
+        groups = windows_packing(self.aus)
+        self.assertTrue(any(len(g) > 1 for g in groups))
+        packets = [aac_packets.element(g, config={"subframes": len(g) - 1}) for g in groups]
+        self.expect(packets, self.aus, "latm")
+
+    def test_config_once_then_reused_across_multi_frame_packets(self):
+        pairs = [self.aus[i:i + 2] for i in range(0, 24, 2)]
+        packets = [aac_packets.element(pairs[0], config={"subframes": 1})]
+        packets += [aac_packets.element(g) for g in pairs[1:]]           # useSameStreamMux=1: needs the cached config
+        self.expect(packets, [a for g in pairs for a in g], "latm")
+
+    def test_audio_mux_version_1_and_other_data(self):
+        packets = [aac_packets.element([a], config={"version": 1, "asc_fill": 5}) for a in self.aus[:5]]
+        packets += [aac_packets.element([a], config={"other_bits": 300, "crc": 0x5a}, other_bits=300) for a in self.aus[5:10]]
+        packets += [aac_packets.element([a], config={"version": 1, "other_bits": 24}, other_bits=24) for a in self.aus[10:15]]
+        self.expect(packets, self.aus[:15], "latm")
+
+    def test_loas_frames_from_ffmpeg_one_and_two_per_packet(self):
+        loas = (ROOT / "tests/fixtures/aac_latm_48k_stereo.loas").read_bytes()
+        frames, i = [], 0
+        while i < len(loas):
+            n = ((loas[i + 1] & 0x1f) << 8) | loas[i + 2]
+            frames.append(loas[i:i + 3 + n])
+            i += 3 + n
+        self.expect(frames, self.aus, "loas")                             # ffmpeg's real LOAS bytes, one per packet
+        self.lib.drv_packet_free(self.state)
+        self.state = self.lib.drv_packet_new(2)
+        self.expect([frames[i] + frames[i + 1] for i in range(0, 24, 2)], self.aus[:24], "loas")
+
+    def test_adts_frames_from_ffmpeg(self):
+        adts = (ROOT / "tests/fixtures/aac_adts_48k_stereo.aac").read_bytes()
+        frames, i = [], 0
+        while i + 7 <= len(adts):
+            n = ((adts[i + 3] & 3) << 11) | (adts[i + 4] << 3) | (adts[i + 5] >> 5)
+            frames.append(adts[i:i + n])
+            i += n
+        self.expect(frames, self.aus, "adts")
+        self.lib.drv_packet_free(self.state)
+        self.state = self.lib.drv_packet_new(2)
+        self.expect([b"".join(frames[i:i + 3]) for i in range(0, 24, 3)], self.aus[:24], "adts")
+
+    def test_rfc3640_out_of_band_latm_and_bare_access_units(self):
+        self.expect([aac_packets.rfc3640(g) for g in windows_packing(self.aus)], self.aus, "rfc3640")
+        for transport, packets in (("latm-oob", [aac_packets.element([a], mux_config_present=False) for a in self.aus]),
+                                   ("raw", list(self.aus))):
+            self.lib.drv_packet_free(self.state)
+            self.state = self.lib.drv_packet_new(2)
+            self.expect(packets, self.aus, transport)
+
+    def test_one_byte_media_payload_header_must_match_its_frame_count(self):
+        groups = windows_packing(self.aus)
+        packets = [bytes([len(g)]) + aac_packets.element(g, config={"subframes": len(g) - 1}) for g in groups]
+        self.expect(packets, self.aus, "latm")
+        n, aus, t, info = self.split(packets[0])
+        self.assertEqual(info[1], 1)                                      # the header was recognised
+        wrong = bytes([5]) + aac_packets.element(self.aus[:2], config={"subframes": 1})
+        n, aus, t, info = self.split(wrong)
+        self.assertFalse(n > 0 and info[1] == 1, "a header that miscounts must not be accepted as a header")
+
+    def test_the_16_byte_silent_packets(self):
+        # ffmpeg's silent stereo frames are 6 bytes; a LOAS frame carrying one, with its StreamMuxConfig, is exactly
+        # the 16 bytes seen in the device log. The other framings of the same frame must decode too.
+        quiet = [a for a in self.silence if len(a) == 6][:6]
+        loas = [aac_packets.loas(aac_packets.element([a], config={})) for a in quiet]
+        self.assertEqual({len(p) for p in loas}, {16})
+        self.expect(loas, quiet, "loas")
+        for transport, packets in (("latm", [aac_packets.element([a], config={}) for a in quiet]),
+                                   ("latm", [aac_packets.element(quiet[i:i + 2], config={"subframes": 1})
+                                             for i in range(0, 6, 2)])):
+            self.lib.drv_packet_free(self.state)
+            self.state = self.lib.drv_packet_new(2)
+            self.expect(packets, quiet, transport)
+
+    def test_malformed_input_is_refused_with_a_reason(self):
+        # Random bytes: a strong framing (a sync word, or length fields that must add up exactly) never accepts them.
+        rng = random.Random(7)
+        for i in range(300):
+            self.lib.drv_packet_free(self.state)
+            self.state = self.lib.drv_packet_new(2)
+            junk = bytes(rng.randrange(256) for _ in range(rng.choice((2, 5, 16, 64, 300, 700))))
+            n, aus, t, info = self.split(junk)
+            self.assertNotIn(t, ("latm", "loas", "adts", "rfc3640"), f"junk #{i} ({len(junk)} bytes) accepted as {t}")
+        # An element followed by stray bytes does not account for the packet: not LATM.
+        self.lib.drv_packet_free(self.state)
+        self.state = self.lib.drv_packet_new(2)
+        n, aus, t, info = self.split(aac_packets.element([self.aus[0]], config={}) + b"\x00\x01\x02")
+        self.assertNotEqual(t, "latm")
+        # Two programs, a layout A2DP never uses: LATM refuses it and says why (LATM_E_LAYOUT).
+        self.lib.drv_packet_free(self.state)
+        self.state = self.lib.drv_packet_new(2)
+        w = aac_packets.W()
+        w.put(0, 1); w.put(0, 1); w.put(1, 1); w.put(0, 6); w.put(1, 4); w.put(0, 3)
+        w.put(0x1190, 16); w.put(0, 32)
+        n, aus, t, info = self.split(w.data())
+        self.assertNotEqual(t, "latm")
+        self.assertEqual(info[3], -3)
+
+    def test_fragments_wait_for_the_rest(self):
+        first = aac_packets.element([self.aus[0]], config={})
+        self.assertGreater(self.split(first)[0], 0)                       # locks LATM
+        element = aac_packets.element([self.aus[1]])
+        n, aus, t, info = self.split(element[:200])
+        self.assertEqual((n, info[5]), (0, 1))                            # a fragment of the locked transport
+        loas = aac_packets.loas(aac_packets.element([self.aus[2]], config={}))
+        self.lib.drv_packet_free(self.state)
+        self.state = self.lib.drv_packet_new(2)
+        self.assertEqual(self.split(loas[:100])[0], 0)                    # a LOAS sync word, cut short
+
+
+class WindowsPacketsDecode(unittest.TestCase):
+    """End to end through AACDecoder with tests/fakes: packets packed the way Windows packs them decode to 1024 PCM
+    frames per access unit, and the converter receives exactly ffmpeg's access units. v9.8.85 returned -11 for all."""
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.lib = ctypes.CDLL(str(compile_c(cls.tmp.name, "decoder.so", [*DECODER_SOURCES, "tests/aac_decoder_driver.c"],
+                                            shared=True)))
+        cls.elements, cls.aus = fixture_elements()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        for name in ("fake_at_packets", "fake_at_packet_log_len"):
+            ctypes.c_uint.in_dll(self.lib, name).value = 0
+        self.dec = Decoder(self.lib)
+        self.assertTrue(self.dec.create())
+
+    def tearDown(self):
+        self.dec.destroy()
+
+    def received(self):
+        lens = (ctypes.c_uint * 256).in_dll(self.lib, "fake_at_packet_lens")
+        log = (ctypes.c_uint8 * 65536).in_dll(self.lib, "fake_at_packet_log")
+        out, off = [], 0
+        for i in range(ctypes.c_uint.in_dll(self.lib, "fake_at_packets").value):
+            out.append(bytes(log[off:off + lens[i]]))
+            off += lens[i]
+        return out
+
+    def run_packets(self, groups, build):
+        timestamp = 0
+        for i, g in enumerate(groups):
+            r, samples, rate, _ = self.dec.decode(build(g), i, timestamp)
+            self.assertEqual((r, samples, rate), (0, 1024 * len(g), 48000), f"packet {i} of {len(g)} frames")
+            timestamp += 1024 * len(g)
+        self.assertEqual(self.received(), [a for g in groups for a in g])
+
+    def test_multi_frame_latm_packets(self):
+        self.run_packets(windows_packing(self.aus), lambda g: aac_packets.element(g, config={"subframes": len(g) - 1}))
+
+    def test_loas_packets(self):
+        self.run_packets([[a] for a in self.aus], lambda g: aac_packets.loas(aac_packets.element(g, config={})))
+
 
 if __name__ == "__main__":
     unittest.main()
