@@ -17,6 +17,7 @@ uint32_t codec_decoder_begin(CodecDecoder *d, const AudioRing *header, int aac_e
     d->log = log;
     d->aac_since_reset = 0;
     d->aac_logged = 0;
+    d->rate_hint = 48000u;
     if (header->codec == A2DP_CODEC_SBC) {
         d->codec = A2DP_CODEC_SBC;
         if (log) log("V93_CODEC sbc\n");
@@ -35,6 +36,7 @@ uint32_t codec_decoder_begin(CodecDecoder *d, const AudioRing *header, int aac_e
                              cs.specific_status, cs.new_status);
             } else {
                 d->codec = A2DP_CODEC_AAC;
+            d->rate_hint = cfg.sample_rate;
                 if (log) log("V93_CODEC aac rate=%u channels=%u software=%d cookie_status=%d\n", cfg.sample_rate,
                              cfg.channels, cs.used_software, cs.cookie_status);
                 return d->codec;
@@ -97,3 +99,5 @@ void codec_decoder_end(CodecDecoder *d) {
     if (d->aac) { aac_decoder_destroy(d->aac); d->aac = NULL; }
     d->codec = A2DP_CODEC_SBC;
 }
+
+unsigned codec_decoder_rate_hint(const CodecDecoder *d) { return d && d->rate_hint ? d->rate_hint : 48000u; }

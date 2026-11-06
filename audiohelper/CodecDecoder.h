@@ -23,6 +23,7 @@ typedef struct {
     AACDecoder *aac;           /* non-NULL only when codec==AAC and setup succeeded */
     void (*log)(const char *fmt, ...);
     unsigned aac_since_reset, aac_logged;
+    unsigned rate_hint;        /* the negotiated sample rate, for an output started before the first packet */
 } CodecDecoder;
 
 /* Set up for a session from the ring header. Reads header->codec and header->codec_config. On AAC, builds the AAC
@@ -40,3 +41,7 @@ int codec_decoder_decode(CodecDecoder *, const AudioPacket *, int16_t *pcm,
                          size_t capacity, unsigned *frames, unsigned *samples, unsigned *rate);
 
 void codec_decoder_end(CodecDecoder *);
+
+/* The rate to open the output at before any packet has decoded: AAC's negotiated rate, else 48 kHz (what the PCs
+ * here use for SBC). A different real rate only rebuilds the queue; the session stays active. */
+unsigned codec_decoder_rate_hint(const CodecDecoder *);

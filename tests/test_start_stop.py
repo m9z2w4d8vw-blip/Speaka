@@ -185,6 +185,8 @@ static StreamControl g_stream_control;
 static pthread_mutex_t g_stream_control_lock=PTHREAD_MUTEX_INITIALIZER;
 static int last_active=-9,changes=0;
 void AudioRelaySetActive(int active) {last_active=active;changes++;}
+static unsigned last_state=0;
+void AudioRelaySetStreamState(uint32_t state) {last_state=state;}   /* v9.9: what the helper is told */
 void SpeakaLogNow(const char *,...) {}
 static void note_signal(''' + note + r'''
 int main() {
@@ -195,9 +197,11 @@ int main() {
     note_signal(0,0x108,start_pc,3);assert(changes==0);
     note_signal(1,0x108,accept_start_pc,2);assert(changes==1 && last_active==1);
     assert(!strcmp(peer,"streaming"));
+    assert(last_state==AUDIO_STREAM_STREAMING);
     /* Channel not yet known (old behaviour): an earbud SUSPEND with a colliding SEID would stop forwarding. */
     const uint8_t suspend_buds[3]={0x50,0x09,0xd0};
     note_signal(1,0x140,suspend_buds,3);assert(changes==2 && last_active==0);
+    assert(last_state==AUDIO_STREAM_PAUSED);     /* v9.9: a SUSPEND is a pause: the stream stays open */
     /* Channel known: earbud traffic is ignored; the PC still starts and stops the stream. */
     g_pc_signal_cid=0x108;changes=0;last_active=-9;strcpy(peer,"streaming");
     note_signal(1,0x140,suspend_buds,3);assert(changes==0);
@@ -369,6 +373,7 @@ int main(void) {
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "shared/AudioRing.h"
 typedef uint64_t (*source_registration_fn_t)(uint64_t);
 static source_registration_fn_t g_source_reg_orig;
 static int g_sink_armed = 1;
@@ -382,6 +387,8 @@ static void SpeakaSetStatus(const char *key, const char *fmt, ...) {
     if (!strcmp(key, "diag.v82.sep")) snprintf(last_sep, sizeof last_sep, "%s", fmt);
 }
 static void AudioRelaySetActive(int active) { set_active_calls++; last_active = active; }
+static unsigned last_stream_state = 0;
+static void AudioRelaySetStreamState(uint32_t state) { last_stream_state = state; }
 static void register_sink_after_sources(uint64_t) {   /* first power-up installs the Sink, later ones cannot */
     post_source_calls++;
     if (post_source_calls == 1) { g_audio_table_extended = 1; g_sink_accepted = 1; }
@@ -395,6 +402,7 @@ int main() {
     hook_native_registration(0x2000);                 /* Bluetooth off/on inside the same process */
     assert(g_sink_accepted == 0 && set_active_calls == 1 && last_active == 0);
     assert(strncmp(last_sep, "LOST", 4) == 0 && strstr(last_sep, "tap Start"));
+    assert(last_stream_state == AUDIO_STREAM_CLOSED);  /* v9.9: the speaker's stream is gone; the helper may let go */
     /* Not armed: nothing is reported or changed. */
     g_sink_armed = 0; last_sep[0] = 0; set_active_calls = 0;
     hook_native_registration(0x3000);

@@ -67,6 +67,16 @@ Later in this cycle:
   own length fields account for the whole packet. Every access unit in a packet is decoded. The phone's SUSPENDs
   were the idle guard correctly handing a stream with no PCM back to Apple, and stop once PCM flows. The helper logs
   each stream's first packets (V94_AAC_PKT: transport, frames, first 64 bytes).
+- **Owning the output (v9.8.86 device test):** AAC played, but every Windows pause turned into a loop. iOS treats the
+  PC as a Bluetooth output, so Apple's A2DP code suspends the stream when the helper activates its session and starts
+  it when the helper lets go; the helper let go after 8 s without media, waited 3 s, activated again - 13 phone STARTs
+  and 13 phone SUSPENDs in two minutes, with resuming landing in the middle. The helper now owns the output for the
+  whole session: the tweak connects it as soon as the PC configures the speaker, it activates before the stream
+  starts, keeps its session and queue through pauses and track changes (playing silence), and never lets go for lack
+  of media - only at Stop, or 30 s after the PC closes its stream without reopening. Its session is exclusive
+  (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
+  it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
+  is re-initialized.
 - **App build:** v9.8.84's app failed to build (an undeclared name in SPTweakClient.m), so that release has only the
   tweak; a new test checks every SP-prefixed name in the app's Objective-C is declared.
 

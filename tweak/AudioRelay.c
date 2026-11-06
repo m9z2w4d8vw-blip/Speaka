@@ -66,6 +66,8 @@ static int connect_loopback(uint16_t port)
 /* Only this worker performs IPC/logging. Never called from the media thread. */
 
 static AudioRing *g_shared;
+/* v9.9: set once the PC has configured the speaker: the worker connects the helper without waiting for START. */
+static volatile unsigned g_relay_warm;
 static AudioRingHello g_hello;
 
 /* v8.9.3: one V88_FORWARD and one V88_DECODE line per packet filled 94% of the log, so a Settings export showed only
@@ -130,6 +132,12 @@ void AudioRelaySetCodec(uint32_t codec,const uint8_t *codec_config,size_t len) {
     memset(s->codec_config,0,sizeof s->codec_config);
     if(codec_config && len && len<=sizeof s->codec_config) memcpy(s->codec_config,codec_config,len);
     __atomic_store_n(&s->codec,codec,__ATOMIC_RELEASE);
+}
+void AudioRelaySetStreamState(uint32_t state) {
+    AudioRing *s=__atomic_load_n(&g_shared,__ATOMIC_ACQUIRE);
+    if(!s) return;
+    __atomic_store_n(&s->stream_state,state,__ATOMIC_RELEASE);
+    if(state!=AUDIO_STREAM_NONE && state!=AUDIO_STREAM_CLOSED) __atomic_store_n(&g_relay_warm,1u,__ATOMIC_RELEASE);
 }
 void AudioRelaySetActive(int active) {
     AudioRing *s=__atomic_load_n(&g_shared,__ATOMIC_ACQUIRE);
@@ -248,7 +256,8 @@ static void *worker(void *arg) {
             }
         }
         if(retry) retry--;
-        if(fd<0 && (generation&1u) && !retry) {
+        /* v9.9: also once the PC has configured the speaker (warm), so the helper owns the output before START. */
+        if(fd<0 && ((generation&1u) || __atomic_load_n(&g_relay_warm,__ATOMIC_ACQUIRE)) && !retry) {
             fd=attach_helper();retry=100;
             SpeakaLogNow("V88_HELPER %s port=%u",fd>=0?"mapped shared ring":"activation failed",AUDIO_HELPER_PORT);
         }

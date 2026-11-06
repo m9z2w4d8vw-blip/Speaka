@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "../shared/AudioRing.h"
 
 /* ---- the log ring and formatting helpers (Log.c) ---- */
 /* tweak/Tweak.h - pure C helpers for the debug log (no Apple APIs, so they can be unit-tested anywhere). */
@@ -284,6 +285,10 @@ extern "C" {
 #endif
 int AudioRelayPrepare(void);
 void AudioRelaySetActive(int active);
+/* v9.9: the PC's stream state (AUDIO_STREAM_*, AudioRing.h), so the helper can tell a pause (keep the output) from a
+ * close. Any open state also connects the helper at once, before the stream starts, so it owns the output before
+ * the PC's START instead of activating mid-stream (which made Apple's A2DP code suspend the stream). */
+void AudioRelaySetStreamState(uint32_t state);
 /* v9.3 experimental, AAC: publish the negotiated codec (A2DP_CODEC_SBC / A2DP_CODEC_AAC, AACConfig.h) and, for AAC,
  * its 6-byte Codec Specific Information into the ring header, so the helper builds the right decoder. Call before
  * AudioRelaySetActive(1). codec_config may be NULL for SBC. Today the tweak only ever negotiates SBC (a second,

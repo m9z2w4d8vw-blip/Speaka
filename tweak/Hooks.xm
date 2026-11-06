@@ -312,6 +312,8 @@ static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a
         else
             AudioRelaySetCodec(A2DP_CODEC_SBC,NULL,0);
         unsigned seen=g_pc_config.valid;
+        /* v9.9: the stream is configured: the helper is connected now and owns the output before the PC's START. */
+        AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);
         pthread_mutex_unlock(&g_stream_control_lock);
         SpeakaLogNow("V88_CONFIG handle=%u local_seid=7 remote_seid=%u codec=%s%s",(unsigned)a2,(unsigned)a4,
                      avdtp_codec_name((uint8_t)codec),seen?"":" (assumed: SET_CONFIGURATION not seen)");
@@ -329,6 +331,8 @@ static void note_signal(unsigned direction,uint64_t cid,const uint8_t *p,size_t 
     int change=stream_control_signal(&g_stream_control,direction,cid,p,size);
     if(change>=0) {
         AudioRelaySetActive(change);
+        /* v9.9: a SUSPEND is a pause, and the stream stays open; only CLOSE or ABORT ends it. */
+        AudioRelaySetStreamState(change==1?AUDIO_STREAM_STREAMING:(p[1]&63u)==9u?AUDIO_STREAM_PAUSED:AUDIO_STREAM_CLOSED);
         /* v9.1: by= names who sent the command this line belongs to. A command (msg=0) is its sender's; a response
          * answers the other side's command. In the 23:33 loop every START and SUSPEND was by=phone: Apple's own A2DP
          * code driving the PC's stream as if the iPhone were the source. Logging only; nothing is blocked. */
@@ -1278,6 +1282,7 @@ static uint64_t hook_native_registration(uint64_t audio_context)
             pthread_mutex_lock(&g_stream_control_lock);   /* same lock SetConfigInd and signaling use */
             g_sink_accepted = 0u;
             AudioRelaySetActive(0);
+            AudioRelaySetStreamState(AUDIO_STREAM_CLOSED);
             pthread_mutex_unlock(&g_stream_control_lock);
             SpeakaSetStatus("diag.v82.sep", "LOST: Bluetooth was turned off and on; speaker endpoint gone until bluetoothd restarts (tap Start)");
             SpeakaLogNow("V892 SINK_LOST native Source loop ran again (#%u): Bluetooth re-initialized inside this bluetoothd; "

@@ -663,15 +663,19 @@ int main(void) {
         self.assertEqual(registration.count("queue:nil"), 3)
         self.assertNotIn("dispatch_get_main_queue", helper)   # nothing else is waiting to run on the main thread
 
-    def test_an_interruption_cannot_mute_the_helper_for_good(self):
+    def test_an_interruption_is_taken_back(self):
+        # v9.9: another app's session interrupting the helper used to stop its output and drop every packet until the
+        # PC sent a new START. Now the dead queue is dropped without deactivating (which would tell the other app to
+        # carry on), the session is marked inactive so the retake activates afresh, and the output is taken back.
         helper = read("audiohelper/AudioHelper.m")
         loop = helper.split("for(;;) {", 1)[1].split("[[NSNotificationCenter defaultCenter] removeObserver:observer];", 1)[0]
-        generation = loop.split("if(current!=generation) {", 1)[1].split("\n            }\n", 1)[0]
-        self.assertIn('if(interrupted) {hlog(stdout,"V894_INTERRUPTION_CLEARED by=new_stream\\n");interrupted=NO;}', generation)
-        settings = loop.split("if(g_output_notify>=0 && notify_check(", 1)[1].split("\n            }\n", 1)[0]
-        self.assertIn('interrupted=NO;', settings)
-        self.assertIn("|| interrupted) continue;", loop)            # interruptions are still respected meanwhile
-        self.assertIn('"V882_INTERRUPTION type=%s reason=%ld\\n"', loop)
+        began = loop.split("if(changed==1) {", 1)[1].split("} else own_now(&own,now);", 1)[0]
+        self.assertIn('stop_output(o,s,"interruption_began",0);', began)          # no release: no NotifyOthers
+        self.assertLess(began.index('note_session(0,"interrupted")'), began.index("own_taken(&own,now);"))
+        self.assertIn("} else own_now(&own,now);", loop)                       # ended: back at once
+        self.assertNotIn("interrupted", loop.replace('"interrupted"', "").replace("interruption", ""))
+        self.assertIn("if(!(generation&1u) || packet.generation!=generation) continue;", loop)   # packets keep decoding
+        self.assertIn('"V882_INTERRUPTION type=%s reason=%ld queue=%d\\n"', loop)
 
     def test_health_reasons_reach_the_daemon_log(self):
         health = between(read("audiohelper/AudioHelper.m"), "static void report_health(", "static int read_exact(")
@@ -725,16 +729,13 @@ int main(void) {
             self.assertGreaterEqual(tuple(map(int, version.groups())), (8, 9, 4))
 
 
-# ---- holding the output through stream changes ----
-# v9.1: the helper keeps its output through stream changes, so it can no longer feed the 23:33 route loop.
-#
-# The 23:33 export (wired earbuds plugged in, "iPhone speaker" mode) and its screen recording: Control Center switched
-# between "Headphones" and the PC every 0.71 s for minutes and nothing played. All 25 STARTs and 25 SUSPENDs in the loop
-# were sent by the phone itself (Apple's A2DP code treats the PC as an output); each one followed the helper activating
-# or deactivating its audio session, and the helper did that because every START/SUSPEND changed the stream generation.
-# No AudioQueue lived longer than 30 ms. The policy lives in audiohelper/OutputPolicy.h; the helper uses it.
+# ---- owning the output for the whole Speaka session ----
+# v9.9: the v9.8.86 device test. iOS treats the sending PC as a Bluetooth output, so Apple's A2DP code suspended the
+# PC's stream whenever the helper activated its session and started it whenever the helper let go. v9.1 let go after
+# 8 s without media, so every pause longer than that looped (13 phone STARTs and 13 phone SUSPENDs in two minutes).
+# The helper now owns the output from its connection until the session ends. Policy: audiohelper/OutputPolicy.h.
 
-class OutputHold(unittest.TestCase):
+class OutputOwnership(unittest.TestCase):
     def compile_run(self, source, cpp=False):
         compiler = shutil.which("c++" if cpp else "cc")
         self.assertIsNotNone(compiler)
@@ -756,228 +757,166 @@ class OutputHold(unittest.TestCase):
             return ran.stdout
 
     def test_policy(self):
-        out = self.compile_run(r'''
+        self.compile_run(r'''
 #include <assert.h>
-#include <stdio.h>
 #include "OutputPolicy.h"
+#include "shared/AudioRing.h"
 int main(void) {
-    hold_state_t h = {0};
-    assert(hold_may_start(&h, 0, 1) == HOLD_START_OK);
-    assert(hold_may_start(&h, 0, 0) == HOLD_START_SILENT);    /* exact digital silence never activates */
-    hold_started(&h, 1000);
-    assert(hold_may_start(&h, 1000, 1) == HOLD_START_RUNNING);
-
-    /* The 23:33 churn: the phone STARTs, ~80 ms of media, the phone SUSPENDs, ~650 ms later it STARTs again.
-     * Every change keeps the running output, and the hold never expires while it goes on. */
-    uint64_t t = 1000;
-    for (int cycle = 0; cycle < 100; cycle++) {
-        assert(hold_generation_changed(&h) == 1);
-        t += 80; hold_media(&h, t);
-        assert(hold_generation_changed(&h) == 1);
-        t += 650; assert(!hold_expired(&h, t));
+    own_state_t h; own_init(&h);
+    assert(own_may_start(&h, 0));                      /* connected: start at once, before any packet */
+    own_started(&h, 0);
+    assert(!own_may_start(&h, 0));
+    own_stream(&h, AUDIO_STREAM_STREAMING, 1000);
+    own_stream(&h, AUDIO_STREAM_PAUSED, 10000);        /* Windows paused ... */
+    for (uint64_t t = 10000; t < 10000 + 3600000; t += 5000)
+        assert(h.running && !own_should_release(&h, t));   /* ... for an hour: never let go for lack of media */
+    /* Another app takes the output: take it back shortly. */
+    own_taken(&h, 20000);
+    assert(!own_may_start(&h, 20000 + OWN_RETAKE_MS - 1) && own_may_start(&h, 20000 + OWN_RETAKE_MS));
+    own_started(&h, 20300);
+    /* Failures back off 1 s, 2 s, 3 s, 4 s, 4 s ... */
+    uint64_t t = 30000;
+    unsigned want[] = {1000, 2000, 3000, 4000, 4000};
+    for (unsigned i = 0; i < 5; i++) {
+        own_start_failed(&h, t, 0);
+        assert(!own_may_start(&h, t + want[i] - 1) && own_may_start(&h, t + want[i]));
+        t += want[i];
     }
-
-    /* The PC suspends for good (23:33:44): one release, exactly at the hold time. */
-    uint64_t last = t; hold_media(&h, last);
-    assert(!hold_expired(&h, last + HOLD_MS - 1));
-    assert(hold_expired(&h, last + HOLD_MS));
-    uint64_t r = last + HOLD_MS;
-    hold_released(&h, r, HOLD_RELEASE_AUTOMATIC);
-    assert(!hold_expired(&h, r + 10 * HOLD_MS));       /* nothing running, nothing to expire */
-    assert(hold_generation_changed(&h) == 0);
-    hold_media(&h, r + 5); assert(h.media_ms == last);           /* media is ignored while idle */
-
-    /* Letting go on its own arms the rearm wait; silence still never starts. */
-    assert(hold_may_start(&h, r, 1) == HOLD_START_REARM);
-    assert(hold_may_start(&h, r + HOLD_REARM_MS - 1, 1) == HOLD_START_REARM);
-    assert(hold_may_start(&h, r + HOLD_REARM_MS, 1) == HOLD_START_OK);
-    assert(hold_may_start(&h, r + HOLD_REARM_MS, 0) == HOLD_START_SILENT);
-
-    /* A user action or a real device change skips the wait; a requested release never arms it. */
-    hold_released(&h, 50000, HOLD_RELEASE_AUTOMATIC);
-    hold_rearm_now(&h); assert(hold_may_start(&h, 50000, 1) == HOLD_START_OK);
-    hold_released(&h, 60000, HOLD_RELEASE_REQUESTED);
-    assert(hold_may_start(&h, 60000, 1) == HOLD_START_OK);
-
-    /* However fast something asks (here: every start is refused 200 ms later), automatic activations stay at least
-     * HOLD_REARM_MS apart. v9.0 activated every ~0.7 s. */
-    hold_state_t f = {0}; unsigned starts = 0; uint64_t prev = 0;
-    for (uint64_t now = 0; now < 60000; now += 5) {
-        if (hold_may_start(&f, now, 1) != HOLD_START_OK) continue;
-        assert(!starts || now - prev >= HOLD_REARM_MS);
-        prev = now; starts++;
-        hold_started(&f, now);
-        hold_released(&f, now + 200, HOLD_RELEASE_AUTOMATIC);
-    }
-    assert(starts >= 2 && starts <= 60000 / HOLD_REARM_MS + 1);
-
-    assert(hold_route_is_device_change(1) && hold_route_is_device_change(2));
-    for (long reason = 3; reason <= 8; reason++) assert(!hold_route_is_device_change(reason));
-    for (long reason = -1; reason <= 9; reason++) assert(hold_route_reason_name(reason)[0]);
-    for (int code = 0; code <= 4; code++) assert(hold_start_reason(code)[0]);
-    /* Windows reopened the stream 6.1 s after the phone suspended it (the 21:35 log from v8.9.4's device test). */
-    assert(HOLD_MS >= 6100u && HOLD_REARM_MS >= 1000u);
-    printf("v9.1 policy passed (%u rearmed starts in 60 s)\n", starts);
+    own_now(&h, t);                                     /* an interruption ended: at once, backoff forgotten */
+    assert(own_may_start(&h, t) && h.failures == 0);
+    /* Headphones mode with none plugged in waits for a device change instead of toggling the session. */
+    own_start_failed(&h, t, 1);
+    assert(!own_may_start(&h, t + 3600000));
+    own_now(&h, t + 5000);
+    assert(own_may_start(&h, t + 5000));
+    own_started(&h, t + 5000);
+    /* The PC closes its stream: kept for a reopen, let go after the grace, owned again on a new configuration. */
+    uint64_t c = t + 10000;
+    own_stream(&h, AUDIO_STREAM_CLOSED, c);
+    assert(!own_should_release(&h, c + OWN_CLOSED_RELEASE_MS - 1) && own_should_release(&h, c + OWN_CLOSED_RELEASE_MS));
+    own_stream(&h, AUDIO_STREAM_CONFIGURED, c + 5000);  /* reopened within the grace: kept */
+    assert(!own_should_release(&h, c + 10 * OWN_CLOSED_RELEASE_MS));
+    own_stream(&h, AUDIO_STREAM_CLOSED, c + 6000);
+    own_released(&h);
+    assert(!own_may_start(&h, c + 100000));             /* released: nothing restarts by itself */
+    own_stream(&h, AUDIO_STREAM_CONFIGURED, c + 200000);
+    assert(own_may_start(&h, c + 200000));              /* the PC configured the speaker again: own it again */
     return 0;
 }
 ''')
-        self.assertIn("passed", out)
 
-    def test_loop_model_v90_versus_v91(self):
-        """A model, not iOS: the log fits two mechanisms, and the 23:33 log cannot tell them apart.
-
-        H1: the helper's AudioQueue starting makes iOS START the PC's stream; deactivating its session makes iOS SUSPEND it.
-        H2: activating the helper's session re-routes iOS away from the PC (SUSPEND); deactivating it routes iOS back
-            to the PC (START).
-        Timing is from the 23:33 log: configuring and starting took ~450 ms (active after ~250 ms), stopping ~170 ms.
-        Windows, once the phone suspends a stream it is still playing, closes it after 3.7 s and reopens it 2.3 s later
-        (the v8.9.4 device test). Under both, the v9.0 rule loops and v9.1 settles: at once (H1) or after Windows reopens (H2).
-        """
+    def test_pause_resume_model_v91_versus_v99(self):
+        """A model of the mechanism the v9.8.86 log shows, not of iOS itself: activating the helper's session while the
+        PC streams makes the phone SUSPEND the stream ~130 ms later; letting go while the stream is open (paused) makes
+        the phone START it ~130 ms later. The PC connects at 0 s, plays from 1 s, pauses at 10 s, resumes at 40 s.
+        v9.1 (8 s hold, 3 s rearm, audible-only starts) loops; v9.9 (owned from the connection) never toggles."""
         out = self.compile_run(r'''
 #include <assert.h>
 #include <stdio.h>
-#include <string.h>
 #include "OutputPolicy.h"
-enum { H1 = 1, H2 = 2 };
-enum { PC_STREAMING, PC_SUSPENDED, PC_CLOSED };
+#include "shared/AudioRing.h"
+enum { OPEN_PAUSED, STREAMING };
 typedef struct {
-    int model, v91, pc, session, queue, retry;
-    uint64_t t, gen, hgen, pc_since, start_at, sus_at, busy_until, act_at, deact_at, queue_at;
-    uint64_t ring[32]; unsigned head, n;
-    hold_state_t hold;
-    unsigned activations; uint64_t playing_ms;
+    int v99, stream, session;
+    uint64_t t, phone_suspend_at, phone_start_at, media_ms, rearm_ms, resumed_at, first_audio_after_resume;
+    unsigned phone_toggles;
+    own_state_t own;
 } W;
-static void set_active(W *w, int active) { w->gen = ((w->gen & ~1ull) + 2u) | (active ? 1u : 0u); }
-static void push(W *w) {
-    if (w->n == 32) { w->head = (w->head + 1) % 32; w->n--; }
-    w->ring[(w->head + w->n) % 32] = w->gen; w->n++;
+static void activate(W *w) {
+    w->session = 1;
+    if (w->stream == STREAMING) w->phone_suspend_at = w->t + 130;   /* the route moved to the speaker */
 }
-static int pop(W *w, uint64_t *g) {
-    if (!w->n) return 0;
-    *g = w->ring[w->head]; w->head = (w->head + 1) % 32; w->n--; return 1;
+static void release_session(W *w) {
+    w->session = 0;
+    if (w->stream == OPEN_PAUSED) w->phone_start_at = w->t + 130;   /* the route moved back to the "PC output" */
 }
-static void suspend_by_phone(W *w) {
-    if (w->pc != PC_STREAMING) return;
-    w->pc = PC_SUSPENDED; w->pc_since = w->t; set_active(w, 0); set_active(w, 0);   /* TX command + RX accept */
-}
-static void start(W *w) { w->busy_until = w->t + 450; w->act_at = w->t + 250; w->queue_at = w->t + 450; }
-static void full_stop(W *w) { w->queue = 0; w->busy_until = w->t + 170; w->deact_at = w->t + 150; }
-static void edges(W *w) {
-    if (w->act_at && w->t >= w->act_at) {
-        w->act_at = 0; w->session = 1; w->activations++;
-        if (w->model == H2) w->sus_at = w->t + 50;
-    }
-    if (w->queue_at && w->t >= w->queue_at) {
-        w->queue_at = 0; w->queue = 1;
-        if (w->model == H1) w->start_at = w->t + 130;
-    }
-    if (w->deact_at && w->t >= w->deact_at) {
-        w->deact_at = 0; w->session = 0;
-        if (w->model == H2) w->start_at = w->t + 110; else w->sus_at = w->t + 40;
-    }
-}
-static void phone(W *w) {
-    if (w->sus_at && w->t >= w->sus_at) { w->sus_at = 0; suspend_by_phone(w); }
-    if (w->start_at && w->t >= w->start_at) {
-        w->start_at = 0;
-        if (w->pc == PC_SUSPENDED) { w->pc = PC_STREAMING; w->pc_since = w->t; set_active(w, 1); }
-    }
-}
-static void pc(W *w) {
-    if (w->pc == PC_SUSPENDED && w->t - w->pc_since >= 3700) { w->pc = PC_CLOSED; w->pc_since = w->t; set_active(w, 0); }
-    if (w->pc == PC_CLOSED && w->t - w->pc_since >= 2300) {
-        set_active(w, 0);                                              /* SET_CONFIGURATION again */
-        w->pc = PC_STREAMING; w->pc_since = w->t; set_active(w, 1);    /* the PC's own START */
-    }
-    if (w->pc == PC_STREAMING && w->t % 23 == 0) push(w);              /* one SBC packet every ~23 ms */
-}
-static void helper(W *w) {
-    if (w->t < w->busy_until || w->t % 5) return;                      /* 5 ms loop; blocked inside a call */
-    uint64_t g = w->gen;
-    if (g != w->hgen) {
-        if (w->v91) (void)hold_generation_changed(&w->hold);       /* v9.1: keep */
-        else if (w->queue || w->session) { w->hgen = g; w->retry = 0; full_stop(w); return; }  /* v9.0 */
-        w->hgen = g; w->retry = 0;
-    }
-    if (w->v91 && hold_expired(&w->hold, w->t)) {
-        full_stop(w); hold_released(&w->hold, w->t, HOLD_RELEASE_AUTOMATIC); return;
-    }
-    if (w->retry) w->retry--;
-    uint64_t pg;
-    while (pop(w, &pg)) {
-        if (!(w->hgen & 1u) || pg != w->hgen) continue;
-        if (w->gen != w->hgen) break;
-        if (!w->queue && !w->retry &&
-            (!w->v91 || hold_may_start(&w->hold, w->t, 1) == HOLD_START_OK)) {
-            start(w);
-            if (w->v91) hold_started(&w->hold, w->t + 450);
-            return;
+static int run(int v99) {
+    W w = {0}; w.v99 = v99; w.stream = OPEN_PAUSED; own_init(&w.own);
+    for (w.t = 0; w.t < 60000; w.t += 10) {
+        /* The PC. */
+        if (w.t == 1000 && w.stream == OPEN_PAUSED) w.stream = STREAMING;
+        if (w.t == 10000 && w.stream == STREAMING) w.stream = OPEN_PAUSED;     /* Windows paused */
+        if (w.t == 40000) { w.resumed_at = w.t; if (w.stream == OPEN_PAUSED) w.stream = STREAMING; }
+        /* Apple's A2DP code, reacting to the helper's session. */
+        if (w.phone_suspend_at && w.t >= w.phone_suspend_at) {
+            w.phone_suspend_at = 0;
+            if (w.stream == STREAMING) { w.stream = OPEN_PAUSED; if (w.t > 10000) w.phone_toggles++; }
         }
-        if (w->v91 && w->queue) hold_media(&w->hold, w->t);
+        if (w.phone_start_at && w.t >= w.phone_start_at) {
+            w.phone_start_at = 0;
+            if (w.stream == OPEN_PAUSED) { w.stream = STREAMING; if (w.t > 10000) w.phone_toggles++; }
+        }
+        int media = w.stream == STREAMING;
+        /* The helper. */
+        if (v99) {
+            if (!w.session && own_may_start(&w.own, w.t)) { activate(&w); own_started(&w.own, w.t); }
+        } else {
+            if (media) {
+                if (!w.session && (!w.rearm_ms || w.t >= w.rearm_ms)) activate(&w);   /* audible media, rearm over */
+                if (w.session) w.media_ms = w.t;
+            }
+            if (w.session && w.t - w.media_ms >= 8000) { release_session(&w); w.rearm_ms = w.t + 3000; }
+        }
+        if (w.resumed_at && !w.first_audio_after_resume && media && w.session) w.first_audio_after_resume = w.t;
     }
-}
-static void run(W *w, int model, int v91) {
-    memset(w, 0, sizeof *w); w->model = model; w->v91 = v91;
-    w->pc = PC_STREAMING; set_active(w, 1);                            /* t=0: the PC starts playing */
-    for (w->t = 0; w->t < 60000; w->t++) {
-        if (w->t == 300) suspend_by_phone(w);   /* the seed: one phone SUSPEND while the helper is still starting */
-        edges(w); phone(w); pc(w); helper(w);
-        if (w->queue && w->pc == PC_STREAMING && (w->gen & 1u) && w->hgen == w->gen) w->playing_ms++;
-    }
+    printf("%s phone_toggles_after_the_pause=%u audio_after_resume_ms=%lld\\n", v99 ? "v9.9" : "v9.1", w.phone_toggles,
+           w.first_audio_after_resume ? (long long)(w.first_audio_after_resume - w.resumed_at) : -1ll);
+    return (int)w.phone_toggles * 1000000 + (w.first_audio_after_resume ? (int)(w.first_audio_after_resume - w.resumed_at) : 999999);
 }
 int main(void) {
-    W w;
-    for (int model = H1; model <= H2; model++) {
-        run(&w, model, 0);
-        unsigned old_activations = w.activations; uint64_t old_playing = w.playing_ms;
-        run(&w, model, 1);
-        printf("H%d: v9.0 %u activations, %llu ms played | v9.1 %u activation(s), %llu ms played (of 60000)\n",
-               model, old_activations, (unsigned long long)old_playing, w.activations, (unsigned long long)w.playing_ms);
-        assert(old_activations >= 40 && old_playing < 6000);
-        assert(w.activations <= 2);
-        assert(w.playing_ms >= (model == H1 ? 57000u : 51000u));
-    }
+    int old = run(0), now = run(1);
+    assert(old / 1000000 >= 2);                 /* v9.1: Apple's A2DP code keeps toggling the paused stream */
+    assert(now / 1000000 == 0);                 /* v9.9: not once */
+    assert(now % 1000000 <= 500);               /* v9.9: audio within half a second of the PC resuming */
     return 0;
 }
 ''')
-        print(out, end="")
+        self.assertIn("v9.9 phone_toggles_after_the_pause=0", out)
 
     def test_helper_wiring(self):
         helper = read("audiohelper/AudioHelper.m")
         self.assertIn('#include "OutputPolicy.h"', helper)
         loop = between(helper, "for(;;) {", "[[NSNotificationCenter defaultCenter] removeObserver:observer];")
-        generation = between(loop, "if(current!=generation) {", "\n            }\n")
-        self.assertIn("if(hold_generation_changed(&hold)) keep_output(o,current);", generation)
-        self.assertNotIn("stop_output(", generation)          # v9.0 stopped here, which re-routed iOS
-        self.assertNotIn("stream_generation_changed", helper)
-        self.assertIn("if(hold_expired(&hold,now)) {", loop)
-        self.assertNotIn("idle==400", helper)
+        # Owned from the connection: the start is the loop's own, before the packet drain, not a packet's.
+        owner = loop.index("if(!o->queue && own_may_start(&own,now)) {")
+        self.assertLess(owner, loop.index("for(unsigned i=0;i<AUDIO_RING_SLOTS && audio_ring_dequeue(s,&packet);i++) {"))
+        self.assertIn("int started=start_output(o,rate_hint,s);", loop)
         packets = loop.split("for(unsigned i=0;i<AUDIO_RING_SLOTS && audio_ring_dequeue(s,&packet);i++) {", 1)[1]
-        self.assertIn("int audible=level.nonzero!=nonzero_before;", packets)
-        cold = packets.split("if(!o->queue && !retry) {", 1)[1]
-        self.assertLess(cold.index("hold_may_start(&hold,helper_ms(),audible)"), cold.index("start_output(o,rate,s)"))
+        self.assertEqual(packets.count("start_output("), 1)                    # only the sample-rate rebuild
         self.assertIn('stop_output(o,s,"sample_rate_changed",0);', packets)   # a new rate keeps the session
-        # Every release in the loop tells the policy, so the rearm wait cannot be skipped by accident.
+        self.assertIn("if(o->queue) write_pcm(o,pcm,samples);", packets)
+        # Never released for lack of media; a pause keeps everything; a close lets go after the grace.
+        for gone in ("hold_", "HOLD_", "media_idle", "V91_HOLD_EXPIRED", "rearm", "silent_stream"):
+            self.assertNotIn(gone, loop)
+        generation = between(loop, "if(current!=generation) {", "\n            }\n")
+        self.assertIn("if(own.running) keep_output(o,current);", generation)
+        self.assertNotIn("stop_output(", generation)
+        self.assertIn("own_stream(&own,state,now);", loop)
+        self.assertIn('stop_output(o,s,"stream_closed",1);codec_decoder_reset(&decoder);own_released(&own);', loop)
+        # Every release in the loop tells the policy what happened.
         releases = list(re.finditer(r"stop_output\(o,s,[^;]*,1\);", loop))
-        self.assertGreaterEqual(len(releases), 7)
+        self.assertGreaterEqual(len(releases), 6)          # settings, media reset, route, error, close, rate
         for match in releases:
-            self.assertIn("hold_released(", loop[match.end():match.end() + 260], match.group(0))
-        # Route changes: speaker mode re-applies its override; the helper's own echo does not reset the backoff.
+            self.assertRegex(loop[match.end():match.end() + 200], r"own_(restart|start_failed|released)\(", match.group(0))
+        # Exclusive, non-mixing playback, and the strongest public priority before every activation.
+        for option in ("MixWithOthers", "DuckOthers", "InterruptSpokenAudioAndMixWithOthers"):
+            self.assertNotIn(option, helper)
+        self.assertEqual(helper.count("prefer_uninterrupted(session);"), 3)
+        self.assertIn("setPrefersNoInterruptionsFromSystemAlerts:YES", helper)
+        self.assertEqual(helper.count("ok=[session setActive:YES error:&error];if(ok) note_session(1,"), 3)
+        # Unchanged v9.1 invariants: speaker mode re-applies its override; a stop releases only when asked.
         self.assertIn("g_output_mode==OUTPUT_MODE_SPEAKER && !reassert_speaker(o,o->rate,s)", loop)
-        self.assertIn("} else if(device || !own) {", loop)
-        reassert = between(helper, "static int reassert_speaker(", "typedef struct { uint32_t samples,nonzero,peak; } PCMLevels;")
-        self.assertLess(reassert.index('stop_output(o,s,"route_changed_reassert",0);'),
-                        reassert.index("overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker"))
-        self.assertNotIn("setActive:", reassert)
         stop = between(helper, "static void stop_output(", "static int speaker_selected(")
         self.assertLess(stop.index("if(!release) return;"), stop.index("setActive:NO"))
         start = between(helper, "static int start_output(", "static int reassert_speaker(")
         self.assertIn("int configured=reuse?0:configure_output(rate,s);", start)
-        # Each configure_* records its activation right after setActive:YES succeeds.
-        self.assertEqual(helper.count("ok=[session setActive:YES error:&error];if(ok) note_session(1,"), 3)
         self.assertIn("AVAudioSessionMediaServicesWereResetNotification", helper)
-        self.assertIn("removeObserver:reset_observer]", helper)
-        self.assertIn("\n## v9.1\n", (ROOT / "docs/CHANGELOG.md").read_text())
+        # The tweak connects the helper once the PC configures the speaker, before START.
+        relay = read("tweak/AudioRelay.c")
+        self.assertIn("if(fd<0 && ((generation&1u) || __atomic_load_n(&g_relay_warm,__ATOMIC_ACQUIRE)) && !retry) {", relay)
+        hooks = read("tweak/Hooks.xm")
+        config = between(hooks, "static uint64_t hook_setconfigind(", "\n}\n")
+        self.assertIn("AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);", config)
 
     def test_control_log_names_the_initiator(self):
         tweak = read("tweak/Hooks.xm")
@@ -996,6 +935,7 @@ static StreamControl g_stream_control;
 static pthread_mutex_t g_stream_control_lock=PTHREAD_MUTEX_INITIALIZER;
 static char line[256];
 void AudioRelaySetActive(int) {}
+void AudioRelaySetStreamState(uint32_t) {}
 void SpeakaLogNow(const char *fmt,...) {va_list ap;va_start(ap,fmt);vsnprintf(line,sizeof line,fmt,ap);va_end(ap);}
 void SpeakaSetStatus(const char *,const char *,...) {}   /* v9.6: diag.v95.peer, checked in test_v89 */
 static void note_signal(''' + note + r'''

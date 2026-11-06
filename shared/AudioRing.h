@@ -42,7 +42,13 @@ typedef struct {
     AudioRingEventSlot forwarded[AUDIO_RING_EVENTS], decoded[AUDIO_RING_EVENTS];
     uint32_t codec;              /* 0 (==A2DP_CODEC_SBC) unless AAC was negotiated */
     uint8_t codec_config[8];     /* AAC Codec Specific Information (6 bytes used); zero for SBC */
+    uint32_t stream_state;       /* AUDIO_STREAM_*: what the PC did last, so the helper can tell a pause from a close */
 } AudioRing;
+
+/* The PC's stream as the tweak sees it (AudioRing.stream_state). A pause (SUSPEND) keeps the stream open, so the
+ * helper keeps its output; only a close or abort, with no new configuration after it, lets the helper go. */
+enum { AUDIO_STREAM_NONE = 0, AUDIO_STREAM_CONFIGURED = 1, AUDIO_STREAM_STREAMING = 2, AUDIO_STREAM_PAUSED = 3,
+       AUDIO_STREAM_CLOSED = 4 };
 typedef struct {
     uint32_t magic, version, size, pid;
     uint64_t token;
