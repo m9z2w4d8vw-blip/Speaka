@@ -29,6 +29,26 @@ int sink_prepare_caps(SinkCapabilities *dst,
     return 0;
 }
 
+/* The codec record's bytes must hold the largest codec Speaka can register: AAC-LC's 6. Compile-time, so a smaller
+ * codec_bytes can never build (v9.8.84 sized a similar buffer for SBC's 4 and wrote AAC's 6 into it). */
+typedef char sink_caps_codec_bytes_fit_aac[(AAC_CSI_BYTES <= sizeof(((SinkCapabilities *)0)->codec_bytes)) ? 1 : -1];
+
+int sink_caps_use_aac(SinkCapabilities *caps) {
+    if (!caps) return -1;
+    uint8_t *raw = (uint8_t *)caps->caps_words;
+    /* Record 1 must still be the captured SBC Media Codec record (category 7, SBC, 4 codec bytes). */
+    if (raw[16] != 0x07u || raw[18] != A2DP_CODEC_SBC || raw[19] != 4u) return -2;
+    uint8_t aac[AAC_CSI_BYTES];
+    aac_build_sink_capability(aac);
+    memset(caps->codec_bytes, 0, sizeof caps->codec_bytes);
+    memcpy(caps->codec_bytes, aac, sizeof aac);
+    raw[18] = A2DP_CODEC_AAC;
+    raw[19] = (uint8_t)AAC_CSI_BYTES;
+    uint64_t owned_ptr = (uint64_t)(uintptr_t)caps->codec_bytes;
+    memcpy(raw + 24u, &owned_ptr, sizeof owned_ptr);    /* record 1's codec pointer, as sink_prepare_caps sets it */
+    return 0;
+}
+
 /* v9.3 experimental, AAC: the protocol-level media-codec capability record for AAC-LC. Pure data from the public
  * A2DP AAC spec; advertises nothing by itself. */
 size_t sink_build_aac_codec_record(uint8_t out[8]) {

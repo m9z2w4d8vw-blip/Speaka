@@ -7,9 +7,12 @@ size_t aac_build_sink_capability(uint8_t out[AAC_CSI_BYTES]) {
     out[0] = AAC_OBJECT_TYPE_MPEG2_LC | AAC_OBJECT_TYPE_MPEG4_LC;
     out[1] = (uint8_t)(freq >> 4);                                   /* high 8 of the 12 frequency bits */
     out[2] = (uint8_t)(((freq & 0x0fu) << 4) | AAC_CHANNELS_1 | AAC_CHANNELS_2);
-    out[3] = 0x80u;                                                  /* VBR allowed, bitrate bits 22..16 = 0 */
-    out[4] = 0x00u;                                                  /* bitrate bits 15..8 */
-    out[5] = 0x00u;                                                  /* bitrate bits 7..0; 0 = unspecified */
+    /* VBR, and a maximum of 320 kbps - what AAC sinks typically advertise - rather than 0 ("unspecified"), so a
+     * source has no reason to pass over AAC. The source still chooses its bitrate at SET_CONFIGURATION. */
+    const uint32_t max_bitrate = 320000u;
+    out[3] = (uint8_t)(0x80u | ((max_bitrate >> 16) & 0x7fu));    /* VBR | bitrate bits 22..16 */
+    out[4] = (uint8_t)((max_bitrate >> 8) & 0xffu);                 /* bitrate bits 15..8 */
+    out[5] = (uint8_t)(max_bitrate & 0xffu);                        /* bitrate bits 7..0 */
     return AAC_CSI_BYTES;
 }
 

@@ -236,6 +236,11 @@ static int g_sink_armed = 0;
  * Does NOT register a second endpoint; just swaps the codec bytes in the one existing Sink SEP.
  * Fallback: if AAC negotiation fails (or Windows keeps sending SBC), set SpeakaAACSink=NO and restart BT. */
 static int g_aac_sink_mode = 0;
+/* The Sink's codec bytes live in a tail after its three 16-byte capability records: 4 for SBC, 6 for AAC-LC.
+ * v9.8.84 sized the tail for SBC only (4 bytes), so AAC mode wrote 2 bytes past the allocation; this fixes it. */
+#define SINK_CODEC_TAIL_BYTES 8u
+typedef char sink_codec_tail_fits_aac[(AAC_CSI_BYTES <= SINK_CODEC_TAIL_BYTES) ? 1 : -1];
+typedef char sink_codec_tail_fits_sbc[(4u <= SINK_CODEC_TAIL_BYTES) ? 1 : -1];
 static volatile unsigned g_sink_attempted = 0;
 static SinkCapabilities g_sink_caps;
 static volatile unsigned g_sink_caps_ready = 0;
@@ -1083,6 +1088,20 @@ static void register_sink_after_sources(uint64_t audio_context)
     }
     if (!__sync_bool_compare_and_swap(&g_sink_attempted, 0, 1)) return;
     /* From here the one attempt is used up, so every refusal below is final for this Bluetooth session. */
+    /* AAC-only Sink experiment: the records AVDTP registers for SEID 7 - what the PC reads with GET_CAPABILITIES -
+     * become AAC-LC as well, so they agree with the audio-table entry below. v9.8.84 changed only that entry, so the
+     * PC would still have been offered SBC. Refused here, before anything native is touched, if the records are not
+     * the captured SBC ones. */
+    if (g_aac_sink_mode) {
+        int rc = sink_caps_use_aac(&g_sink_caps);
+        if (rc != 0) {
+            SpeakaSetStatus("diag.v83.audio_table", "REFUSED: AAC mode could not rewrite the Sink's AVDTP capabilities (rc=%d)", rc);
+            SpeakaLogNow("V93 REFUSED: AAC mode, the captured Sink capability records were not the expected SBC ones (rc=%d)", rc);
+            return;
+        }
+        SpeakaLogHexdump("V93 SEP AVDTP caps", g_sink_caps.caps_words, sizeof g_sink_caps.caps_words);
+        SpeakaLogHexdump("V93 SEP AVDTP codec", g_sink_caps.codec_bytes, AAC_CSI_BYTES);
+    }
     uint64_t avdtp_context = 0;
     uint8_t avdtp_slots = 0;
     if (!safe_peek((uint64_t)(g_image_base + 0x9768b0u), &avdtp_context, sizeof avdtp_context) ||
@@ -1117,7 +1136,7 @@ static void register_sink_after_sources(uint64_t audio_context)
        allocator guarantees zero-initialized entries. calloc/free use the
        same libSystem allocator family. The daemon's destructor calls free. */
     uint8_t *new_table = (uint8_t *)calloc(7u, 32u);
-    uint8_t *new_caps = (uint8_t *)calloc(1u, 3u * 16u + 4u);
+    uint8_t *new_caps = (uint8_t *)calloc(1u, 3u * 16u + SINK_CODEC_TAIL_BYTES);
     if (!new_table || !new_caps) {
         SpeakaSetStatus("diag.v83.audio_table", "REFUSED: calloc failed");
         SpeakaLogNow("V83 REFUSED: calloc failed"); free(new_caps); free(new_table); return;
@@ -1141,11 +1160,11 @@ static void register_sink_after_sources(uint64_t audio_context)
     /* Entry 7 alone owns the codec bytes. The native Source codec object points at audio_context; do NOT edit it.
      * In SBC mode (the default): copy the standard A2DP SBC Sink capability bytes.
      * In AAC mode (SpeakaAACSink=YES): copy the 6-byte AAC-LC capability instead, and patch the codec-type and
-     *   length fields in the capability record so bluetoothd advertises AAC. The allocation adds 2 extra bytes for
-     *   the AAC capability (6 vs SBC's 4); the alloc already has a 4-byte tail so the 2 extra bytes fit safely.
+     *   length fields in the capability record so bluetoothd advertises AAC. The tail is SINK_CODEC_TAIL_BYTES,
+     *   which the typedefs above prove holds either codec's bytes.
      * Either way: only our private new_caps buffer is written; Apple's native tables are never modified. */
     if (g_aac_sink_mode) {
-        uint8_t kSinkAAC[6];
+        uint8_t kSinkAAC[AAC_CSI_BYTES];
         aac_build_sink_capability(kSinkAAC);
         memcpy(new_caps + 3u * 16u, kSinkAAC, sizeof kSinkAAC);
         uint64_t sink_codec_ptr = (uint64_t)(uintptr_t)(new_caps + 3u * 16u);

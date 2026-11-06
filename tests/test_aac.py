@@ -14,6 +14,7 @@ Run only where the real AudioToolbox exists, in CI's device-test job (SPEAKA_REA
 The phone runs the same decoder through the self-test (tools/device_test).
 """
 import ctypes
+import re
 import importlib.util
 import json
 import math
@@ -771,6 +772,83 @@ class AACsinkMode(unittest.TestCase):
         self.assertIn("V93 CODEC_MODE", hooks)
         self.assertIn("V93 SEP CAPS: AAC-LC mode", hooks)
         self.assertIn("codec_mode=%s", hooks)
+
+    def test_codec_tail_holds_either_codec(self):
+        """v9.8.84 sized the codec tail for SBC (4 bytes) and copied AAC's 6 into it: 2 bytes past the allocation,
+        inside bluetoothd. The tail is now a named size, and compile-time checks refuse to build if it shrinks."""
+        hooks = (ROOT / "tweak/Hooks.xm").read_text()
+        aac = (ROOT / "shared/AACConfig.h").read_text()
+        tail = int(re.search(r"#define SINK_CODEC_TAIL_BYTES (\d+)u", hooks).group(1))
+        csi = int(re.search(r"#define AAC_CSI_BYTES (\d+)u", aac).group(1))
+        self.assertGreaterEqual(tail, csi)
+        self.assertGreaterEqual(tail, 4)                              # kSinkSBC
+        self.assertIn("calloc(1u, 3u * 16u + SINK_CODEC_TAIL_BYTES)", hooks)
+        self.assertNotIn("calloc(1u, 3u * 16u + 4u)", hooks)
+        self.assertIn("uint8_t kSinkAAC[AAC_CSI_BYTES];", hooks)
+        self.assertIn("[(AAC_CSI_BYTES <= SINK_CODEC_TAIL_BYTES) ? 1 : -1]", hooks)
+        # Every codec array copied into the tail is one of the two checked ones.
+        copied = re.findall(r"memcpy\(new_caps \+ 3u \* 16u, (\w+), sizeof \1\)", hooks)
+        self.assertEqual(sorted(copied), ["kSinkAAC", "kSinkSBC"])
+
+    def test_the_aac_endpoint_switch_turns_on_aac_decoding(self):
+        # Without SpeakaAAC the helper refuses an AAC stream (silence, never SBC), so the endpoint switch implies it.
+        model = (ROOT / "app/Speaka/SpeakaModel.swift").read_text()
+        sink = model.split("@Published var aacSink: Bool", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("SPTweakClient.setAACsinkEnabled(aacSink)", sink)
+        self.assertIn("if aacSink && !aacDecode { aacDecode = true }", sink)
+
+    def test_avdtp_registration_records_become_aac(self):
+        """The records AVDTP registers for SEID 7 - what the PC reads with GET_CAPABILITIES - must say AAC-LC in AAC
+        mode. v9.8.84 changed only the audio-table entry, so the PC would still have been offered SBC."""
+        class SinkCaps(ctypes.Structure):
+            _fields_ = [("caps_words", ctypes.c_uint64 * 6), ("codec_bytes", ctypes.c_uint8 * 8),
+                        ("assigned_seid", ctypes.c_uint8)]
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = build_lib(tmp, "tweak/SinkEndpoint.c", "shared/AACConfig.c")
+            prepare, use_aac = lib.sink_prepare_caps, lib.sink_caps_use_aac
+            prepare.argtypes = [ctypes.POINTER(SinkCaps), ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8)]
+            use_aac.argtypes = [ctypes.POINTER(SinkCaps)]
+            lib.aac_build_sink_capability.argtypes = [ctypes.POINTER(ctypes.c_uint8)]
+            raw = (ctypes.c_uint8 * 48)()
+            raw[0], raw[16], raw[18], raw[19], raw[32] = 1, 7, 0, 4, 8      # transport, SBC codec, delay records
+            for k in range(48):
+                if k not in (0, 16, 17, 18, 19, 32) and not 24 <= k < 32:   # 17: media type, must stay 0 (audio)
+                    raw[k] = (k * 7) & 0xff                                    # bytes that must survive untouched
+            caps = SinkCaps()
+            self.assertEqual(prepare(ctypes.byref(caps), raw, (ctypes.c_uint8 * 4)(0x3f, 0x15, 0x02, 0x35)), 0)
+            before = ctypes.string_at(ctypes.addressof(caps.caps_words), 48)
+            self.assertEqual(use_aac(ctypes.byref(caps)), 0)
+            after = ctypes.string_at(ctypes.addressof(caps.caps_words), 48)
+            self.assertEqual((after[16], after[18], after[19]), (0x07, 0x02, 6))   # Media Codec record: AAC, 6 bytes
+            pointer = int.from_bytes(after[24:32], "little")
+            self.assertEqual(pointer, ctypes.addressof(caps.codec_bytes))
+            want = (ctypes.c_uint8 * 6)()
+            lib.aac_build_sink_capability(want)
+            self.assertEqual(bytes(caps.codec_bytes)[:6], bytes(want))
+            changed = {k for k in range(48) if before[k] != after[k]}
+            self.assertLessEqual(changed, {18, 19} | set(range(24, 32)))  # nothing else in the records moves
+            # Not the captured SBC records any more: refused, and nothing changes.
+            self.assertEqual(use_aac(ctypes.byref(caps)), -2)
+            self.assertEqual(ctypes.string_at(ctypes.addressof(caps.caps_words), 48), after)
+
+    def test_aac_records_are_rewritten_before_anything_native_changes(self):
+        hooks = (ROOT / "tweak/Hooks.xm").read_text()
+        body = hooks.split("static void register_sink_after_sources(uint64_t audio_context)", 1)[1].split("\n}\n", 1)[0]
+        claim = body.index("__sync_bool_compare_and_swap(&g_sink_attempted, 0, 1)")
+        rewrite = body.index("sink_caps_use_aac(&g_sink_caps)")
+        first_native = min(body.index("install_media_callback(avdtp_context)"), body.index("calloc(7u, 32u)"))
+        self.assertLess(claim, rewrite)
+        self.assertLess(rewrite, first_native)
+        self.assertIn("(uint64_t)(uintptr_t)&g_sink_caps.caps_words[0], 3, 1,", body)   # these records are registered
+
+    def test_sink_capability_advertises_a_320_kbps_maximum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = build_lib(tmp, "shared/AACConfig.c")
+            lib.aac_build_sink_capability.argtypes = [ctypes.POINTER(ctypes.c_uint8)]
+            cap = (ctypes.c_uint8 * 6)()
+            lib.aac_build_sink_capability(cap)
+            self.assertEqual(cap[3] & 0x80, 0x80)                                       # VBR
+            self.assertEqual(((cap[3] & 0x7f) << 16) | (cap[4] << 8) | cap[5], 320000)
 
     def test_rollback_path_is_complete(self):
         """g_aac_sink_mode is re-read from preferences at every Bluetooth restart."""

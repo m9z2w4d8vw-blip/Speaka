@@ -178,7 +178,7 @@ class CapabilityNames(unittest.TestCase):
 # V7.7 opt-in Sink experiment: native C capability ownership and source safety.
 
 class SinkCaps(ctypes.Structure):
-    _fields_=[('caps_words',ctypes.c_uint64*6),('codec_bytes',ctypes.c_uint8*4),('assigned_seid',ctypes.c_uint8)]
+    _fields_=[('caps_words',ctypes.c_uint64*6),('codec_bytes',ctypes.c_uint8*8),('assigned_seid',ctypes.c_uint8)]
 
 
 class SinkCapabilityList(unittest.TestCase):
@@ -202,9 +202,9 @@ class SinkCapabilityList(unittest.TestCase):
         ptr=int.from_bytes(ctypes.string_at(ctypes.addressof(result.caps_words)+24,8),'little')
         self.assertEqual(ptr,ctypes.addressof(result.codec_bytes))
         self.assertNotEqual(ptr,ctypes.addressof(codec))
-        self.assertEqual(bytes(result.codec_bytes),bytes(codec))
+        self.assertEqual(bytes(result.codec_bytes)[:4],bytes(codec))
         src[18]=2;codec[0]=0
-        self.assertEqual(bytes(result.codec_bytes),bytes((0x3f,0x15,0x02,0x35)))
+        self.assertEqual(bytes(result.codec_bytes)[:4],bytes((0x3f,0x15,0x02,0x35)))
         self.assertEqual(bytes(ctypes.string_at(ctypes.addressof(result.caps_words),48))[18],0)
         self.assertEqual(result.assigned_seid,0)
     def test_reject_non_sbc_or_malformed_caps(self):
@@ -628,7 +628,7 @@ class PostSourceTable(unittest.TestCase):
             self.assertIn(x,S)
     def test_memory_and_gate(self):
         self.assertIn('calloc(7u, 32u)',S)
-        self.assertIn('calloc(1u, 3u * 16u + 4u)',S)
+        self.assertIn('calloc(1u, 3u * 16u + SINK_CODEC_TAIL_BYTES)',S)   # room for SBC (4) or AAC-LC (6)
         self.assertIn('0x31u, 0x15u, 0x02u, 0xfau',S)
         self.assertIn('memcpy(new_caps + 0x18u, &sink_codec_ptr',S)
         self.assertIn('memcpy((void *)(uintptr_t)(audio_context + 0x78u)',S)

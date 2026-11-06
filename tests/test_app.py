@@ -118,6 +118,27 @@ def strip_comments_and_strings(src):
             i += 1
     return "".join(out)
 
+def objc_declared_names(text):
+    """Names an Objective-C header or source declares: macros, classes, protocols, typedefs, enum constants, and
+    file-level static functions and constants. Regex-level, for the app's own SP-prefixed names only."""
+    names = set(re.findall(r"^\s*#\s*define\s+(\w+)", text, re.M))
+    names |= set(re.findall(r"@(?:interface|implementation|protocol)\s+(\w+)", text))
+    for group in re.findall(r"@class\s+([\w\s,]+);", text):
+        names |= {n.strip() for n in group.split(",") if n.strip()}
+    names |= set(re.findall(r"typedef\s+NS_(?:ENUM|OPTIONS|CLOSED_ENUM)\s*\([^,]+,\s*(\w+)\)", text))
+    for body in re.findall(r"typedef\s+NS_(?:ENUM|OPTIONS|CLOSED_ENUM)\s*\([^)]*\)\s*\{([^}]*)\}", text):
+        names |= set(re.findall(r"^\s*(\w+)\s*(?:=[^,\n]*)?,?", body, re.M))
+    names |= set(re.findall(r"typedef\b[^;{]*?\b(\w+)\s*;", text))
+    names |= set(re.findall(r"^\s*static\b[^;={(]*?\b(\w+)\s*(?:\(|=|;)", text, re.M))
+    return names
+
+
+def objc_undeclared_sp_names(code_text, declared):
+    """SP-prefixed names (the app's own, and the SPEAKA_ macros) used in code but declared nowhere we know of."""
+    used = set(re.findall(r"\bSP[A-Z]\w*", strip_comments_and_strings(code_text)))
+    return used - declared
+
+
 
 def png_size(path):
     data = pathlib.Path(path).read_bytes()
@@ -152,6 +173,21 @@ def block(src, opener):
 
 class SpeakaApp(unittest.TestCase):
     # ------------------------------------------------------------------ protocol
+    def test_objective_c_names_are_all_declared(self):
+        # v9.8: the app's Objective-C can't be compiled off a Mac, so an invented name (SPPreferencesDomain, run 114272394413)
+        # failed only in CI's app build. Every SP-prefixed name and SPEAKA_ macro the app's Objective-C uses must be
+        # declared in its Model headers or sources, or in shared/SpeakaShared.h.
+        model = APP / "Speaka/Model"
+        declared = set()
+        for path in sorted(model.glob("*.h")) + sorted(model.glob("*.m")) + [ROOT / "shared/SpeakaShared.h"]:
+            declared |= objc_declared_names(read(path))
+        for path in sorted(model.glob("*.m")) + sorted(model.glob("*.h")):
+            self.assertEqual(objc_undeclared_sp_names(read(path), declared), set(), path.name)
+        # The check itself catches what it is for.
+        self.assertEqual(objc_undeclared_sp_names("CFStringRef d = (__bridge CFStringRef)SPPreferencesDomain;", declared),
+                         {"SPPreferencesDomain"})
+        self.assertEqual(objc_undeclared_sp_names('id v = SPCopyPref(@SPEAKA_KEY_AAC); // SPNotReal', declared), set())
+
     def test_app_speaks_the_tweaks_protocol(self):
         client = read(CLIENT_M)
         self.assertIn('#import "shared/SpeakaShared.h"', client)

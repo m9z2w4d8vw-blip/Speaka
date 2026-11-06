@@ -55,6 +55,12 @@ Later in this cycle:
   are reassembled; an in-band configuration change rebuilds the converter.
 - **CI:** a separate `device-test` job decodes the fixture with the real AudioToolbox on macOS and builds the phone
   kit; the release doesn't wait for it.
+- **AAC-only endpoint (`SpeakaAACSink`, in the app's Settings):** SEID 7 offers AAC-LC instead of SBC, for a first live
+  AAC test. Off by default; turning it off and tapping Start restores SBC. Fixed before anyone enabled it:
+  v9.8.84 changed only the audio-table entry (the PC would still have been offered SBC) and wrote AAC's 6 codec bytes
+  into a 4-byte tail. Both tables now agree, and compile-time checks size both buffers for either codec.
+- **App build:** v9.8.84's app failed to build (an undeclared name in SPTweakClient.m), so that release has only the
+  tweak; a new test checks every SP-prefixed name in the app's Objective-C is declared.
 
 ## v9.8
 

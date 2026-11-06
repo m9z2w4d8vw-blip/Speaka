@@ -92,7 +92,12 @@ final class SpeakaModel: ObservableObject {
     @Published var aacDecode: Bool = SPTweakClient.aacDecodeEnabled() {
         didSet { SPTweakClient.setAACDecodeEnabled(aacDecode) } }
     @Published var aacSink: Bool = SPTweakClient.aacSinkEnabled() {
-        didSet { SPTweakClient.setAACsinkEnabled(aacSink) } }
+        didSet {
+            SPTweakClient.setAACsinkEnabled(aacSink)
+            // An AAC endpoint needs the helper's AAC decoder; without it the helper refuses the stream (silence).
+            if aacSink && !aacDecode { aacDecode = true }
+        }
+    }
     @Published private(set) var notificationsRefused = false
 
     private let client = SPTweakClient()

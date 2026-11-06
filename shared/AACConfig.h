@@ -66,7 +66,7 @@ typedef struct {
 } AACConfig;
 
 /* Fill the 6-byte capability payload Speaka advertises as a Sink: AAC-LC (both MPEG-2 and MPEG-4 LC object types),
- * 44.1 and 48 kHz, mono and stereo, VBR allowed, bitrate unspecified (0). Returns AAC_CSI_BYTES. */
+ * 44.1 and 48 kHz, mono and stereo, VBR allowed, at most 320 kbps. Returns AAC_CSI_BYTES. */
 size_t aac_build_sink_capability(uint8_t out[AAC_CSI_BYTES]);
 
 /* Parse a 6-byte AAC Codec Specific Information payload. Returns 1 and fills out on a valid single-choice

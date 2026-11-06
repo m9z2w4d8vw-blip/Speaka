@@ -122,12 +122,18 @@ extern "C" {
 #endif
 typedef struct {
     uint64_t caps_words[6]; /* three 16-byte service capability records */
-    uint8_t codec_bytes[4];
+    uint8_t codec_bytes[8]; /* the codec record's bytes: 4 for SBC, 6 for AAC-LC (sink_caps_use_aac) */
     uint8_t assigned_seid; /* distinct from any native Source output byte */
 } SinkCapabilities;
 /* Returns zero on success; never reads beyond raw[48]/codec[4]. */
 int sink_prepare_caps(SinkCapabilities *dst,
                                const uint8_t raw[48],const uint8_t codec[4]);
+
+/* AAC-only Sink experiment (SpeakaAACSink): turn the captured SBC registration records into AAC-LC records - the
+ * record shape iOS registers for its own AAC Sources (codec type 0x02 at record+2, 6 codec bytes at record+3) -
+ * carrying Speaka's Sink capability (aac_build_sink_capability). Returns 0, or a negative value with the records
+ * untouched if they are not the captured SBC records. Only this private copy changes. */
+int sink_caps_use_aac(SinkCapabilities *caps);
 
 /* v9.3 experimental, AAC. Build the AVDTP media-codec capability record Speaka would advertise for AAC-LC: the
  * 2-byte record header (media type audio = 0x00, codec type AAC = 0x02) followed by the 6-byte AAC Codec Specific

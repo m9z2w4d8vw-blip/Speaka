@@ -280,7 +280,7 @@ struct SettingsWindow: View {
                                 .frame(width: 51 * 0.85, height: 31 * 0.85)
                         }
                         .padding(.horizontal, 14).frame(height: 44)
-                        Divider().overlay(Theme.secondary.opacity(0.3))
+                        Divider().overlay(Theme.separator)
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("AAC-only endpoint")

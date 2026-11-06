@@ -343,29 +343,30 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
     return [[NSUserDefaults standardUserDefaults] boolForKey:SPUpdateNotificationsKey];
 }
 
+// Experimental AAC switches, in Bluetooth's preferences where the helper (SpeakaAAC) and the tweak (SpeakaAACSink)
+// read them. The tweak reads SpeakaAACSink when Bluetooth restarts, so a change applies at the next Start.
 + (BOOL)aacDecodeEnabled
 {
-    CFStringRef domain = (__bridge CFStringRef)SPPreferencesDomain;
-    id val = (__bridge id)CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_AAC), domain);
-    return [val isKindOfClass:[NSNumber class]] && [val boolValue];
+    SPSynchronize();
+    id value = SPCopyPref(@SPEAKA_KEY_AAC);
+    return [value isKindOfClass:[NSNumber class]] && [value boolValue];
 }
+
 + (void)setAACDecodeEnabled:(BOOL)on
 {
-    CFStringRef domain = (__bridge CFStringRef)SPPreferencesDomain;
-    CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_AAC), (__bridge CFPropertyListRef)@(on), domain);
-    CFPreferencesAppSynchronize(domain);
+    SPWritePref(@SPEAKA_KEY_AAC, @(on));
 }
+
 + (BOOL)aacSinkEnabled
 {
-    CFStringRef domain = (__bridge CFStringRef)SPPreferencesDomain;
-    id val = (__bridge id)CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_AAC_SINK), domain);
-    return [val isKindOfClass:[NSNumber class]] && [val boolValue];
+    SPSynchronize();
+    id value = SPCopyPref(@SPEAKA_KEY_AAC_SINK);
+    return [value isKindOfClass:[NSNumber class]] && [value boolValue];
 }
+
 + (void)setAACsinkEnabled:(BOOL)on
 {
-    CFStringRef domain = (__bridge CFStringRef)SPPreferencesDomain;
-    CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_AAC_SINK), (__bridge CFPropertyListRef)@(on), domain);
-    CFPreferencesAppSynchronize(domain);
+    SPWritePref(@SPEAKA_KEY_AAC_SINK, @(on));
 }
 
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled
