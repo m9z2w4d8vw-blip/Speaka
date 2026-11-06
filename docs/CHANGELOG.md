@@ -77,6 +77,18 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **AAC startup stutter (v9.8.87 device test):** the first ~27 s of AAC were choppy, then smooth. The logs show why -
+  every packet that arrived was forwarded and decoded (forwarded==decoded, no errors), but only ~24-30 arrived per
+  second when 48 kHz needs ~47; Windows' A2DP source ramps its transmit rate over the first seconds. Nothing in
+  Speaka was the bottleneck, so no buffer can conjure the missing frames. The render callback no longer starts on the
+  first frame and splices silence between the sparse real ones; it fills a 0.25 s PCM jitter buffer, then plays, and
+  re-primes if it ever drains - turning a long stutter into one short wait, then smooth from the first audible moment.
+  The arrival deficit itself is upstream (Windows), stated in the log as `V881_RENDER priming=/reprimes=`.
+- **Interruptions that kept recurring (same test):** v9.8.87 retook the output ~250 ms after every app interruption,
+  and each retake's reactivation nudged the other app to interrupt again. The helper now tears the dead queue down
+  without a NotifyOthers deactivation, keeps the decoder and buffered PCM, and parks until iOS reports the
+  interruption ended (a long backstop still reclaims if it never does), instead of fighting. iOS offers no public way
+  for one app to be immune to other media apps, so this makes recovery clean rather than guaranteeing priority.
 - **App build:** v9.8.84's app failed to build (an undeclared name in SPTweakClient.m), so that release has only the
   tweak; a new test checks every SP-prefixed name in the app's Objective-C is declared.
 

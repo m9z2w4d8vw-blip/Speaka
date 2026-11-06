@@ -185,6 +185,18 @@ static inline void own_taken(own_state_t *h, uint64_t now)
     h->next_ms = now + OWN_RETAKE_MS;
 }
 
+/* An app interruption began (v9.9.1): iOS already stopped the queue and deactivated the session. Unlike own_taken,
+ * do NOT retake on a short timer - that is what made the interruptions in v9.8.87 recur, each retake's reactivation
+ * nudging the other app to interrupt again. Park until the "ended" notification calls own_now; a long backstop
+ * (OWN_INTERRUPT_BACKSTOP_MS) still reclaims the output if iOS never sends "ended" (it sometimes doesn't). */
+#define OWN_INTERRUPT_BACKSTOP_MS 8000u
+static inline void own_interrupted(own_state_t *h, uint64_t now)
+{
+    h->running = 0;
+    h->retaking = 1;
+    h->next_ms = now + OWN_INTERRUPT_BACKSTOP_MS;
+}
+
 /* Start as soon as possible: an interruption ended, a device was plugged in or picked, or the PC started a stream. */
 static inline void own_now(own_state_t *h, uint64_t now)
 {

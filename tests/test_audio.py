@@ -524,6 +524,87 @@ int main(void) {
             self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
             print(ran.stdout, end="")
 
+    def test_jitter_buffer_primes_before_playing_and_reprimes_on_empty(self):
+        # Part 1 (v9.9.1): the device log shows Windows ramping its A2DP transmit rate over ~25 s, sending ~24 frames/s
+        # when 47 are needed; the old render callback started on the first frame and spliced silence between the sparse
+        # real frames (audible stutter). The callback now waits for PCM_PRIME frames, then plays, and re-primes if the
+        # buffer ever empties - so the gap is one clean short wait, not continuous choppiness. Compiles the real
+        # callback, not a copy.
+        source = SOURCE.read_text()
+        render = source.split("#define PCM_CAPACITY", 1)[1].split("static void stop_output", 1)[0]
+        harness = r"""
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+typedef int32_t OSStatus;
+typedef void *AudioQueueRef;
+typedef struct { void *mAudioData; uint32_t mAudioDataByteSize; } AudioQueueBuffer;
+typedef AudioQueueBuffer *AudioQueueBufferRef;
+static OSStatus AudioQueueEnqueueBuffer(AudioQueueRef,AudioQueueBufferRef,unsigned,const void *);
+#define PCM_CAPACITY""" + render + r"""
+static OSStatus AudioQueueEnqueueBuffer(AudioQueueRef q,AudioQueueBufferRef b,unsigned p,const void *d) {
+    (void)q;(void)p;(void)d;(void)b;return 0;
+}
+/* Fill n stereo frames of value v into the ring at the write end. */
+static void fill(Output *o,unsigned n,int16_t v) {
+    for(unsigned i=0;i<n;i++){ unsigned slot=(o->read+o->count)%PCM_CAPACITY; o->pcm[slot*2]=v;o->pcm[slot*2+1]=v;o->count++; }
+}
+int main(void) {
+    Output o; int16_t data[AUDIO_FRAMES*2]; AudioQueueBuffer buffer={data,0};
+    memset(&o,0,sizeof o); assert(pthread_mutex_init(&o.lock,NULL)==0);
+    o.priming=1;                                   /* start_output sets this */
+
+    /* Below the prime threshold: the callback emits silence and consumes nothing. */
+    fill(&o,100,1000);
+    for(unsigned i=0;i<AUDIO_FRAMES*2;i++) data[i]=7;
+    render(&o,&o,&buffer);
+    assert(o.priming==1 && o.count==100);          /* nothing drained */
+    for(unsigned i=0;i<AUDIO_FRAMES*2;i++) assert(data[i]==0);   /* silence out */
+    assert(o.submitted_frames==0 && o.silence_frames==AUDIO_FRAMES);
+
+    /* Reaching the threshold ends priming; now it plays. */
+    fill(&o,PCM_PRIME,2000);                        /* 100 + PCM_PRIME buffered */
+    render(&o,&o,&buffer);
+    assert(o.priming==0 && o.count==100+PCM_PRIME-AUDIO_FRAMES);
+    assert(o.submitted_frames==AUDIO_FRAMES && data[0]==1000);   /* oldest frame first, in order */
+
+    /* Drain it dry: the callback plays what's left, then the NEXT empty call re-primes. */
+    unsigned guard=0;
+    while(o.count>0){ render(&o,&o,&buffer); assert(++guard<10000); }
+    uint64_t reprimes_before=o.reprimes;
+    render(&o,&o,&buffer);                          /* empty now */
+    assert(o.priming==1 && o.reprimes==reprimes_before+1);
+
+    /* While re-priming, a trickle below the threshold stays silent (the real starvation case). */
+    fill(&o,50,3000);
+    render(&o,&o,&buffer);
+    assert(o.priming==1 && o.count==50);
+    /* And it recovers once enough is buffered again. */
+    fill(&o,PCM_PRIME,3000);
+    render(&o,&o,&buffer);
+    assert(o.priming==0 && o.submitted_frames>0);
+
+    pthread_mutex_destroy(&o.lock);
+    puts("jitter buffer: primes, plays in order, re-primes on empty, holds through a trickle");
+    return 0;
+}
+"""
+        cc = shutil.which("cc"); self.assertIsNotNone(cc)
+        flags = ["-std=gnu11","-O2","-Wall","-Wextra","-Werror","-pthread"]
+        env = dict(os.environ)
+        if os.environ.get("BTPS_SANITIZE"):
+            flags += ["-fsanitize=address,undefined","-fno-omit-frame-pointer"]
+            env["ASAN_OPTIONS"]="detect_leaks=0"; env["UBSAN_OPTIONS"]="halt_on_error=1"
+        with tempfile.TemporaryDirectory() as td:
+            c = pathlib.Path(td)/"jb.c"; exe = pathlib.Path(td)/"jb"; c.write_text(harness)
+            built = subprocess.run([cc,*flags,str(c),"-o",str(exe)],capture_output=True,text=True,timeout=30)
+            self.assertEqual(built.returncode,0,built.stdout+built.stderr)
+            ran = subprocess.run([str(exe)],capture_output=True,text=True,timeout=10,env=env)
+            self.assertEqual(ran.returncode,0,ran.stdout+ran.stderr)
+            print(ran.stdout,end="")
+
     def test_speaker_route_and_teardown_guards(self):
         source = SOURCE.read_text()
         # The speaker path is unchanged since v8.8.1. v8.9.4 adds the only other PlayAndRecord configuration, wired
@@ -653,29 +734,35 @@ int main(void) {
 
     def test_route_changes_and_interruptions_can_be_delivered(self):
         helper = read("audiohelper/AudioHelper.m")
-        loop = between(helper, "__block int interruption=0,route_changed=0;",
+        loop = between(helper, "__block int interruption=0,route_changed=0",
                        "[[NSNotificationCenter defaultCenter] removeObserver:observer];")
         drain = loop.index("CFRunLoopRunInMode(kCFRunLoopDefaultMode,0,true)")
         self.assertLess(drain, loop.index("usleep(5000);"))
         self.assertGreater(drain, loop.index("for(;;) {"))
-        registration = helper.split("__block int interruption=0,route_changed=0;", 1)[1].split("for(;;) {", 1)[0]
+        registration = helper.split("__block int interruption=0,route_changed=0", 1)[1].split("for(;;) {", 1)[0]
         # handlers run on the posting thread, whichever it is. v9.1 adds the third: media services were reset.
         self.assertEqual(registration.count("queue:nil"), 3)
         self.assertNotIn("dispatch_get_main_queue", helper)   # nothing else is waiting to run on the main thread
 
-    def test_an_interruption_is_taken_back(self):
-        # v9.9: another app's session interrupting the helper used to stop its output and drop every packet until the
-        # PC sent a new START. Now the dead queue is dropped without deactivating (which would tell the other app to
-        # carry on), the session is marked inactive so the retake activates afresh, and the output is taken back.
+    def test_an_interruption_waits_for_the_end_instead_of_fighting(self):
+        # v9.9.1: v9.8.87 retook the output ~250 ms after every interruption, and each retake's reactivation nudged the
+        # other app to interrupt again - a recurring cycle in the device log. Now the helper tears the dead queue down
+        # without a NotifyOthers deactivation, keeps the decoder and buffered PCM, and parks until iOS says the
+        # interruption ended (a long backstop still reclaims if "ended" never arrives). Packets keep decoding meanwhile.
         helper = read("audiohelper/AudioHelper.m")
         loop = helper.split("for(;;) {", 1)[1].split("[[NSNotificationCenter defaultCenter] removeObserver:observer];", 1)[0]
-        began = loop.split("if(changed==1) {", 1)[1].split("} else own_now(&own,now);", 1)[0]
-        self.assertIn('stop_output(o,s,"interruption_began",0);', began)          # no release: no NotifyOthers
-        self.assertLess(began.index('note_session(0,"interrupted")'), began.index("own_taken(&own,now);"))
-        self.assertIn("} else own_now(&own,now);", loop)                       # ended: back at once
-        self.assertNotIn("interrupted", loop.replace('"interrupted"', "").replace("interruption", ""))
+        began = loop.split("if(changed==1) {", 1)[1].split("} else {", 1)[0]
+        self.assertIn('stop_output(o,s,"interruption_began",0);', began)       # no release: no NotifyOthers deactivation
+        self.assertLess(began.index('note_session(0,"interrupted")'), began.index("own_interrupted(&own,now);"))
+        self.assertNotIn("own_taken(", loop)                                  # no short retake loop any more
+        ended = loop.split("} else {", 1)[1].split("\n            }\n", 1)[0]
+        self.assertIn("own_now(&own,now);", ended)                            # ended: reclaim at once
+        self.assertIn("V882_INTERRUPTION_END should_resume=%d", ended)
         self.assertIn("if(!(generation&1u) || packet.generation!=generation) continue;", loop)   # packets keep decoding
-        self.assertIn('"V882_INTERRUPTION type=%s reason=%ld queue=%d\\n"', loop)
+        # The policy parks (no imminent start) and reclaims only on a long backstop or own_now.
+        policy = read("audiohelper/OutputPolicy.h")
+        self.assertIn("OWN_INTERRUPT_BACKSTOP_MS", policy)
+        self.assertLess(policy.index("static inline void own_taken"), policy.index("static inline void own_interrupted"))
 
     def test_health_reasons_reach_the_daemon_log(self):
         health = between(read("audiohelper/AudioHelper.m"), "static void report_health(", "static int read_exact(")
