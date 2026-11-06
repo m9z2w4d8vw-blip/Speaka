@@ -9,6 +9,7 @@
 #import "SPConnectedDevice.h"
 #import <dlfcn.h>
 #import <objc/message.h>
+#include "shared/PeerName.h"
 
 // Bluetooth major device classes, by index (bits 8 to 12 of the Class of Device).
 static const unsigned int SPMajorComputer = 1;
@@ -29,6 +30,7 @@ static Class SPBluetoothManagerClass(void)
 @interface SPBluetoothDevice : NSObject
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic, copy) NSString *key;     // its address, or its name if it reports none
+@property (nonatomic, copy) NSString *address; // its address as reported, or empty
 @property (nonatomic) BOOL hasClass;
 @property (nonatomic) unsigned int rawClass;   // majorClass exactly as reported, for Credits
 @property (nonatomic) BOOL computer;
@@ -89,6 +91,7 @@ static NSArray<SPBluetoothDevice *> *SPDevices(id manager, SEL list, BOOL listed
         info.name = name;
         id address = SPSend(device, @selector(address));
         info.key = ([address isKindOfClass:[NSString class]] && ((NSString *)address).length > 0) ? address : name;
+        info.address = [address isKindOfClass:[NSString class]] ? address : @"";
         if ([device respondsToSelector:@selector(majorClass)]) {
             info.hasClass = YES;
             info.rawClass = ((unsigned int (*)(id, SEL))objc_msgSend)(device, @selector(majorClass));
@@ -149,6 +152,40 @@ static NSArray<SPBluetoothDevice *> *SPAllDevices(id manager)
         return phones == 1 ? phone.name : nil;
     } @catch (NSException *exception) {
         return nil;
+    }
+}
+
++ (NSString *)computerNameForRouteUID:(NSString *)uid
+{
+    @try {
+        if (uid.length == 0)
+            return nil;
+        for (SPBluetoothDevice *device in SPAllDevices(SPManager())) {
+            if (device.address.length == 0 || !peer_address_equal(uid.UTF8String, device.address.UTF8String))
+                continue;
+            // The route's Bluetooth output can be headphones the phone also uses; those are never the PC.
+            if (peer_class_is_audio(device.hasClass, SPMajorIndex(device.rawClass)))
+                return nil;
+            return device.name;
+        }
+        return nil;
+    } @catch (NSException *exception) {
+        return nil;
+    }
+}
+
++ (BOOL)isAudioDeviceForRouteUID:(NSString *)uid
+{
+    @try {
+        if (uid.length == 0)
+            return NO;
+        for (SPBluetoothDevice *device in SPAllDevices(SPManager())) {
+            if (device.address.length && peer_address_equal(uid.UTF8String, device.address.UTF8String))
+                return peer_class_is_audio(device.hasClass, SPMajorIndex(device.rawClass)) ? YES : NO;
+        }
+        return NO;
+    } @catch (NSException *exception) {
+        return NO;
     }
 }
 

@@ -120,6 +120,7 @@ static NSString *SPOutputsDescription(id outputs)
         _waitingReason = @"";
         _diagnostics = @{};
         _routeName = @"";
+        _routeUID = @"";
     }
     return self;
 }
@@ -233,9 +234,19 @@ static NSString *SPOutputsDescription(id outputs)
     BOOL peerUp = [peer hasPrefix:@"configured"] || [peer hasPrefix:@"streaming"] || [peer hasPrefix:@"paused"];
     s.connected = s.session == SPSessionOn && (helperAttached || (peerUp && !helperEnded));
     NSString *routeName = SPBluetoothOutputName(helper[@"outputs"]);
+    NSString *routeUID = @"";
+    // v9.9.4: since v9.8.87 the helper holds the route on its own output, so the live route never lists the PC. It
+    // now reports the PC as the route last listed it - before its own activation, or while another app routed to it.
+    id pc = helper[@"pc"];
+    if ([pc isKindOfClass:[NSDictionary class]]) {
+        if (routeName.length == 0)
+            routeName = SPString(((NSDictionary *)pc)[@"name"]);
+        routeUID = SPString(((NSDictionary *)pc)[@"uid"]);
+    }
     if (routeName.length == 0 && s.session == SPSessionOn)
         routeName = SPBluetoothOutputName(SPOwnRouteOutputs());
     s.routeName = routeName;
+    s.routeUID = routeUID;
     id volume = helper[@"volume"];
     s.volumeZero = s.playing && [volume isKindOfClass:[NSNumber class]] && [volume doubleValue] < 0.05;
 

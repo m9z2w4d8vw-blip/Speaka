@@ -52,6 +52,7 @@ final class SpeakaModel: ObservableObject {
         var detail = ""
         var connected = false
         var routeName = ""
+        var routeUID = ""
     }
 
     /// The line above the big button, where Caz shows Update Available.
@@ -82,6 +83,10 @@ final class SpeakaModel: ObservableObject {
     /// v9.6: the PC's name as the audio route last showed it, kept while the PC stays connected, because the route
     /// shows it only while nothing else is playing (while it's paused, say).
     @Published private(set) var routePCName: String? = nil
+    /// v9.9.4: the device whose address the route's PC port carries, as BluetoothManager names it (shared/PeerName.h).
+    @Published private(set) var identityName: String? = nil
+    /// v9.9.4: the route's Bluetooth output is headphones or a speaker, so its name is not the PC's.
+    @Published private(set) var routeIsAudioDevice = false
     /// Settings > Kill Bluetooth: running, and why it failed, if it did.
     @Published private(set) var killingBluetooth = false
     /// Uninstall (v9.8): from the end of the 4 s hold until Speaka is gone, or it fails.
@@ -201,7 +206,9 @@ final class SpeakaModel: ObservableObject {
         case .on:
             // The PC's name: iOS's Bluetooth list, else the audio route, else (only while it streams) the one paired
             // computer.
-            let name = computerName ?? routePCName ?? (snapshot.receiving ? pairedName : nil)
+            // The order of shared/PeerName.h peer_choose_name: the streaming device by address first.
+            let name = identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??
+                (snapshot.receiving ? pairedName : nil)
             let who = name ?? "Your PC"
             guard snapshot.receiving else {
                 // Connected but not playing: just set up, or paused. The PC is still there, so name it.
@@ -282,6 +289,7 @@ final class SpeakaModel: ObservableObject {
         next.detail = status.detail
         next.connected = status.connected
         next.routeName = status.routeName
+        next.routeUID = status.routeUID
         // Right after a change the preference can still read the old value for a moment: don't flip back.
         if let changed = outputChangeDate, Date().timeIntervalSince(changed) < 2.0 {
             next.outputMode = snapshot.outputMode
@@ -330,10 +338,20 @@ final class SpeakaModel: ObservableObject {
                 if paired != pairedName {
                     pairedName = paired
                 }
+                let identity = next.routeUID.isEmpty ? nil : SPConnectedDevice.computerName(forRouteUID: next.routeUID)
+                if identity != identityName {
+                    identityName = identity
+                }
+                let audio = !next.routeUID.isEmpty && SPConnectedDevice.isAudioDevice(forRouteUID: next.routeUID)
+                if audio != routeIsAudioDevice {
+                    routeIsAudioDevice = audio
+                }
             }
-        } else if computerName != nil || pairedName != nil {
+        } else if computerName != nil || pairedName != nil || identityName != nil || routeIsAudioDevice {
             computerName = nil
             pairedName = nil
+            identityName = nil
+            routeIsAudioDevice = false
             computerNameDate = nil
         }
     }

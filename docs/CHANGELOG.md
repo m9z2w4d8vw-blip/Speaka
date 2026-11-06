@@ -77,6 +77,29 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **Startup throttle, narrowed (v9.8.91 device test):** across the v9.8.85-v9.8.91 logs, every audio stream the PC
+  started within ~42 s of a bluetoothd launch, with no phone-initiated START or SUSPEND before it, arrived at a third of
+  real time (9 of 9); every stream in that window started by Apple's own A2DP code, or after it had signalled, ran at
+  full rate (4 of 4) - one 18 s after launch. So the slow window is phone-side and cleared by native streaming, not a
+  fixed post-launch period and not Windows (my v9.8.87 entry was wrong about that). Speaka's receive path does no
+  per-packet work. v9.8.87's always-held session also removed the phone-initiated signalling that used to clear it by
+  accident. Every Start restarts bluetoothd, and Windows reconnects 7-15 s later, inside the window. Not fixed: that
+  needs bluetoothd internals. Changed: a cold stream's first starvation verdict comes after 400 ms (below 70%), so a
+  starved start is held before its first sound instead of after a second of choppy audio; every START/SUSPEND line
+  carries `since_launch_ms`, so the next log tests the hypothesis directly.
+- **Pause/resume latency (same test):** ~280 ms of each resume was Speaka's - a full 0.25 s prime every time, then
+  Windows' four leading silent frames (14:52:14). A warm resume (a connection that has played 2 s at real time) now
+  primes 64 ms, doubling after an underrun, and drops leading digital silence. Model with the measured packet gaps:
+  245 -> 48 ms from the first audio packet to sound, no underruns, no stale audio, never gated.
+- **TikTok and other apps (same test):** TikTok's session interrupted Speaka's, and iOS sent its audio to the PC -
+  Apple's A2DP code started the PC's stream at 14:52:32.736 and suspended it when TikTok stopped (14:52:38.536). The
+  session now mixes with other apps in every output mode (never a Bluetooth option, so Speaka's own output can't reach
+  the PC); if another app still pulls the shared route away, Speaka falls back to exclusive playback once. Unverified:
+  whether iOS keeps the shared route on Speaka's output while another app mixes in - `V102_MIX fallback` says if not.
+- **The PC's name (same build):** the app named the PC from the audio route, which lists it only while nothing holds
+  the route; since v9.8.87 the helper holds it permanently, hence "Your PC". The helper now captures the PC from the
+  route before its own activation and on every route change (before and after), and the app matches the port's
+  address with BluetoothManager's devices, never naming headphones as the PC (shared/PeerName.h).
 - **Health lease during the input gate (v9.8.90 regression, fixed):** gated on a starved input, the output renders
   nothing but its queue still runs, so the helper reported "playing" with a frozen render count. The lease lapsed
   1.5 s into every gated stretch (12:05:55.870 -> 12:05:57.443 `render_age_ms=1516`, again 12:07:07 -> 12:07:08), the

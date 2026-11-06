@@ -245,7 +245,7 @@ class SpeakaApp(unittest.TestCase):
         headers = read(CLIENT_H) + read(DEVICE_H)
         pinned = set(re.findall(r"NS_SWIFT_NAME\((\w+)\(", headers))
         self.assertEqual(pinned, {"outputModes", "readStatus", "setOutputMode", "sendAction", "pollRequest",
-                                  "connectedComputerName", "pairedComputerName", "lookupSummary",
+                                  "connectedComputerName", "pairedComputerName", "computerName", "isAudioDevice", "lookupSummary",
                                   "updateNotificationsEnabled", "setUpdateNotificationsEnabled", "notifiedVersion",
                                   "setNotifiedVersion", "removeLeftoverPreferences",
                                   "aacDecodeEnabled", "setAACDecodeEnabled", "aacSinkEnabled", "setAACsinkEnabled"})
@@ -466,6 +466,98 @@ class SpeakaApp(unittest.TestCase):
         for text in written:
             self.assertIn(f'"{text}"', possible, f"the log can show {text!r}, but its column isn't sized for it")
 
+    def test_the_pc_is_named_from_its_route_identity(self):
+        """Priority 4 (v9.9.4): the app named the PC from the audio route, where iOS lists it whenever nothing else holds
+        the route (outputs=LAPTOP-UGIVBIA5 [BluetoothA2DPOutput]). Since v9.8.87 the helper holds the route from the
+        moment the PC connects, so the route only showed the speaker and the app showed "Your PC". The helper now captures
+        the PC from the route before its own activation and on route changes; the app matches the port's address with
+        BluetoothManager's devices. shared/PeerName.h decides, here against realistic routes and device lists."""
+        harness = r"""
+#include <assert.h>
+#include <string.h>
+#include "shared/PeerName.h"
+int main(void) {
+    char a[18];
+    /* UIDs as iOS reports Bluetooth ports: the address anywhere in the UID, any case, ':' or '-'. */
+    assert(peer_uid_address("78:4F:43:12:34:56-tacl", a) && !strcmp(a, "78:4F:43:12:34:56"));
+    assert(peer_uid_address("78:4f:43:12:34:56-tacl", a) && !strcmp(a, "78:4F:43:12:34:56"));
+    assert(peer_uid_address("BT-78-4f-43-12-34-56-tsco", a) && !strcmp(a, "78:4F:43:12:34:56"));
+    assert(!peer_uid_address("Speaker", a) && !peer_uid_address("", a) && !peer_uid_address(0, a));
+    assert(!peer_uid_address("078:4F:43:12:34:56", a) || strcmp(a, "78:4F:43:12:34:56"));   /* not a longer hex run */
+    assert(peer_address_equal("78:4f:43:12:34:56-tacl", "78:4F:43:12:34:56"));
+    assert(!peer_address_equal("78:4f:43:12:34:56-tacl", "78:4F:43:12:34:57"));
+    /* Which route output is the PC. */
+    const char *n1[] = {"Speaker", "AirPods Pro", "LAPTOP-UGIVBIA5"};
+    const char *t1[] = {"Speaker", "BluetoothA2DPOutput", "BluetoothA2DPOutput"};
+    assert(peer_pick_port(n1, t1, 3) == 2);                 /* a Windows default name wins over AirPods */
+    const char *n2[] = {"Parv's Workstation"}, *t2[] = {"BluetoothA2DPOutput"};
+    assert(peer_pick_port(n2, t2, 1) == 0);                 /* a custom name is fine on its own */
+    const char *n3[] = {"Speaker"}, *t3[] = {"Speaker"};
+    assert(peer_pick_port(n3, t3, 1) == -1);                /* the speaker alone names nothing */
+    /* The order the app shows a name in. */
+    peer_names_t n = {"Parv's Workstation", 0, "Other Laptop", "Parv's Workstation", "Old PC", 1};
+    assert(!strcmp(peer_choose_name(&n), "Parv's Workstation"));      /* the device streaming, by address, first */
+    n.identity = 0;
+    assert(!strcmp(peer_choose_name(&n), "Other Laptop"));            /* then a connected computer */
+    n.connected_computer = 0;
+    assert(!strcmp(peer_choose_name(&n), "Parv's Workstation"));      /* then the route's own name */
+    n.route = 0;
+    assert(!strcmp(peer_choose_name(&n), "Old PC"));                  /* the one paired computer, while receiving */
+    n.receiving = 0;
+    assert(peer_choose_name(&n) == 0);                                /* not while idle: "Your PC" / connect prompt */
+    /* The route's Bluetooth output is the user's AirPods: neither its identity nor its name is the PC's. */
+    peer_names_t buds = {"AirPods Pro", 1, 0, "AirPods Pro", 0, 1};
+    assert(peer_choose_name(&buds) == 0);
+    /* Two computers paired and none listed as connected: the paired guess is withheld (nil), so no wrong name. */
+    peer_names_t two = {0, 0, 0, 0, 0, 1};
+    assert(peer_choose_name(&two) == 0);
+    /* A different PC connects: the captured port changes and so does the name - nothing is cached here. */
+    peer_names_t first = {0, 0, 0, "DESKTOP-A1", 0, 1}, second = {0, 0, 0, "DESKTOP-B2", 0, 1};
+    assert(!strcmp(peer_choose_name(&first), "DESKTOP-A1") && !strcmp(peer_choose_name(&second), "DESKTOP-B2"));
+    return 0;
+}
+"""
+        cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+        self.assertIsNotNone(cc)
+        with tempfile.TemporaryDirectory() as td:
+            for lang, name, std in (("c", "peer.c", "-std=gnu11"), ("c++", "peer.cpp", "-std=c++17")):
+                src = pathlib.Path(td) / name; exe = pathlib.Path(td) / (name + ".out"); src.write_text(harness)
+                build = subprocess.run([cc if lang == "c" else (shutil.which("c++") or cc), std, "-Wall", "-Wextra",
+                                        "-Werror", "-I" + str(ROOT), str(src), "-o", str(exe)],
+                                       capture_output=True, text=True, timeout=60)
+                self.assertEqual(build.returncode, 0, build.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(ran.returncode, 0, ran.stderr)
+        # The helper captures the PC from the route before its first activation and on every change (the route before
+        # it, which at its own activation is the system's, and after it), and publishes it.
+        helper = read(ROOT / "audiohelper/AudioHelper.m")
+        setup = block_until(helper, "    int own_logged=-1;\n", "    for(;;) {")
+        self.assertIn('capture_pc_port([AVAudioSession sharedInstance].currentRoute,"before_activation");', setup)
+        self.assertIn("forget_pc_port();", setup)
+        observer = block_until(helper, "addObserverForName:AVAudioSessionRouteChangeNotification", "}];")
+        self.assertIn("note.userInfo[AVAudioSessionRouteChangePreviousRouteKey]", observer)
+        self.assertIn('capture_pc_port(previous,"previous_route");', observer)
+        capture = block_until(helper, "static void capture_pc_port(", "\n}\n")
+        self.assertIn("peer_pick_port(names,types,(unsigned)outputs.count)", capture)
+        self.assertIn('@"pc":pc?:@{}', helper)
+        self.assertIn('own_released(&own);forget_pc_port();', helper)              # a session that let go forgets it
+        # The app reads it, matches it by address, and never names headphones as the PC.
+        client = read(ROOT / "app/Speaka/Model/SPTweakClient.m")
+        self.assertIn('id pc = helper[@"pc"];', client)
+        self.assertIn('routeUID = SPString(((NSDictionary *)pc)[@"uid"]);', client)
+        device = read(ROOT / "app/Speaka/Model/SPConnectedDevice.m")
+        for method in ("+ (NSString *)computerNameForRouteUID:(NSString *)uid\n{", "+ (BOOL)isAudioDeviceForRouteUID:(NSString *)uid\n{"):
+            body = block(device, method)
+            self.assertIn("peer_address_equal(uid.UTF8String, device.address.UTF8String)", body)
+            self.assertIn("peer_class_is_audio(device.hasClass, SPMajorIndex(device.rawClass))", body)
+            self.assertIn("@catch (NSException *exception)", body)
+        model = read(MODEL)
+        # Swift's order is peer_choose_name's: identity, connected computer, route (unless audio), paired while receiving.
+        self.assertIn("let name = identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??\n"
+                      "                (snapshot.receiving ? pairedName : nil)", model)
+        self.assertIn("SPConnectedDevice.computerName(forRouteUID: next.routeUID)", model)
+        self.assertIn("SPConnectedDevice.isAudioDevice(forRouteUID: next.routeUID)", model)
+
     def test_the_pcs_name_shows_as_soon_as_it_connects(self):
         """The PC is named from iOS's Bluetooth list once it's connected, before any audio, whatever form its device class
         comes in; while it streams, the one paired computer names it even if iOS doesn't list it as connected."""
@@ -507,7 +599,7 @@ class SpeakaApp(unittest.TestCase):
         self.assertIn("SPConnectedDevice.pairedComputerName()", lookup)
         line = block(model, "var statusLine: StatusLine? {")
         self.assertLess(line.index('text: "\\(who) · connected"'), line.index('text: "Connect from your PC"'))
-        self.assertIn("let name = computerName ?? routePCName ?? (snapshot.receiving ? pairedName : nil)", line)
+        self.assertIn("let name = identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??", line)
         self.assertLess(line.index('let who = name ?? "Your PC"'), line.index("guard snapshot.receiving else {"))
 
     # ------------------------------------------------------------------ updates

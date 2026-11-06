@@ -292,6 +292,14 @@ static inline void own_released(own_state_t *h)
 #define INPUT_STARVED_PCT 80u        /* a window below this share of real time: starved */
 #define INPUT_HEALTHY_PCT 92u        /* ... and this many consecutive windows at or above this: healthy again */
 #define INPUT_RECOVER_WINDOWS 1u
+/* v9.9.4: a cold stream - the first on a connection, or after starvation - gets its first verdict after 400 ms, not
+ * 1 s, below 70%. Starved input (31% in the v9.8.91 test) fills the 0.25 s lead in ~0.8 s, so the gate now holds
+ * before the first audio instead of after a second of choppy sound; a healthy stream fills it in 0.25 s, before
+ * the verdict, and a healthy first window (~19 packets) is far above 70%. A warm resume instead needs two starved
+ * 1 s windows: one slow second (Windows easing in) must not gate an established stream. */
+#define INPUT_FIRST_WINDOW_MS 400u
+#define INPUT_FIRST_STARVED_PCT 70u
+#define INPUT_WARM_STARVE_WINDOWS 2u
 
 typedef struct {
     uint64_t window_ms;          /* start of the current window; 0 = not measuring yet */
@@ -303,6 +311,9 @@ typedef struct {
     uint64_t starved_ms;         /* when the current starvation began */
     uint64_t starved_total_ms;   /* across the stream, for the log */
     unsigned starvations;
+    unsigned warm;               /* v9.9.4: a resume on a connection that has already streamed healthily */
+    unsigned windows;            /* complete windows so far in this stream */
+    unsigned starved_windows;    /* consecutive starved windows (warm streams need INPUT_WARM_STARVE_WINDOWS) */
 } input_rate_t;
 
 /* A stream (re)started or paused: start measuring afresh. A pause is not starvation. */
@@ -323,15 +334,20 @@ static inline int input_rate_add(input_rate_t *r, unsigned frames, unsigned outp
         r->window_ms = now ? now : 1u;
     }
     r->frames += frames;
-    if (now < r->window_ms || now - r->window_ms < INPUT_WINDOW_MS) return 0;
+    int first_cold = !r->warm && r->windows == 0;
+    uint64_t window = first_cold ? INPUT_FIRST_WINDOW_MS : INPUT_WINDOW_MS;
+    if (now < r->window_ms || now - r->window_ms < window) return 0;
     uint64_t elapsed = now - r->window_ms;
     r->rate = (unsigned)(r->frames * 1000u / elapsed);
     r->frames = 0;
     r->window_ms = now;
     uint64_t pct = (uint64_t)r->rate * 100u / output_rate;
+    r->windows++;
     if (!r->starved) {
-        if (pct < INPUT_STARVED_PCT) {
-            r->starved = 1; r->healthy_windows = 0; r->starved_ms = now; r->starvations++;
+        unsigned bar = first_cold ? INPUT_FIRST_STARVED_PCT : INPUT_STARVED_PCT;
+        r->starved_windows = pct < bar ? r->starved_windows + 1u : 0u;
+        if (r->starved_windows >= (r->warm ? INPUT_WARM_STARVE_WINDOWS : 1u)) {
+            r->starved = 1; r->healthy_windows = 0; r->starved_ms = now; r->starvations++; r->starved_windows = 0;
             return 1;
         }
         return 0;
@@ -358,6 +374,38 @@ static inline int input_rate_add(input_rate_t *r, unsigned frames, unsigned outp
 static inline int health_holding(int stream_active, int has_queue, int paused, int input_starved)
 {
     return stream_active && has_queue && (paused || input_starved);
+}
+
+/* Mark a freshly reset stream as a warm resume (v9.9.4). */
+static inline void input_rate_warm(input_rate_t *r) { r->warm = 1; }
+
+/* ---- the audio session's category options per output mode (v9.9.4) ----
+ * v9.8.91: TikTok's non-mixing session interrupted Speaka's (14:52:27, 14:52:32), and while it played iOS sent its
+ * audio to the PC - Apple's A2DP code started the PC's stream at 14:52:32.736 and suspended it when TikTok stopped
+ * (14:52:38.536). Speaka's session now mixes, so an ordinary app's audio plays alongside it instead of taking it, and
+ * Speaka's session stays active - and with it a route that, for these categories, can't be the PC. Never
+ * AllowBluetooth or AllowBluetoothA2DP: PlayAndRecord without them cannot reach the sending PC; "any" uses Playback
+ * and keeps its own never-play check. Values are AVAudioSessionCategoryOptions (public, stable). */
+#define SESSION_OPT_MIX_WITH_OTHERS 0x1u
+#define SESSION_OPT_ALLOW_BLUETOOTH 0x4u
+#define SESSION_OPT_DEFAULT_TO_SPEAKER 0x8u
+#define SESSION_OPT_ALLOW_BLUETOOTH_A2DP 0x20u
+static inline unsigned output_session_options(int speaker_mode, int mixing)
+{
+    return (mixing ? SESSION_OPT_MIX_WITH_OTHERS : 0u) | (speaker_mode ? SESSION_OPT_DEFAULT_TO_SPEAKER : 0u);
+}
+
+/* Mixing is the default. If another app's audio pulls the shared route away from Speaka's output and re-asserting it
+ * fails, the session stops mixing once - exclusive playback takes the route back, as before v9.9.4 - for the rest of
+ * the helper's session, so the two never alternate. */
+typedef struct { unsigned mixing, fallbacks; } mix_state_t;
+static inline void mix_init(mix_state_t *m) { m->mixing = 1; m->fallbacks = 0; }
+static inline int mix_route_lost(mix_state_t *m)
+{
+    if (!m->mixing) return 0;
+    m->mixing = 0;
+    m->fallbacks++;
+    return 1;
 }
 
 /* AVAudioSessionRouteChangeReason values (public, stable since iOS 6). A route change the helper did not cause and

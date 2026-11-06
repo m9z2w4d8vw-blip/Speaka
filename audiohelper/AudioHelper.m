@@ -10,6 +10,7 @@
 #include "CodecDecoder.h"
 #include "AACSelfTest.h"
 #include "OutputPolicy.h"
+#include "../shared/PeerName.h"
 #include "../shared/SpeakaShared.h"
 #import <stdio.h>
 #import <Foundation/Foundation.h>
@@ -78,6 +79,10 @@ static void note_session(int active,const char *why) {
  * not sent, so a sustained arrival deficit still limits how soon smooth playback begins. 0.25 s is well within a
  * speaker's latency budget and covers ordinary Bluetooth jitter. */
 #define PCM_PRIME 12000u    /* stereo frames (~0.25 s at 48 kHz) buffered before playback starts or resumes */
+/* v9.9.4: a warm resume - a pause inside a connection that has already streamed at real time - needs far less lead:
+ * the v9.8.91 resumes' packets arrived at most 38 ms apart. 3072 frames (64 ms) instead of 250 ms; an underrun
+ * doubles the stream's target (to PCM_PRIME), so a jittery link earns its lead back instead of stuttering. */
+#define PCM_PRIME_WARM 3072u
 typedef struct {
     pthread_mutex_t lock;
     int16_t pcm[PCM_CAPACITY*2];
@@ -92,6 +97,8 @@ typedef struct {
     unsigned paused;         /* v9.9.2: an interruption stopped the queue; queue and PCM are kept for the resume */
     uint64_t silence_gated, silence_priming, silence_underrun, silence_busy;   /* why silence was played (render) */
     uint32_t decoded_frames; /* PCM frames decoded: the progress a paused helper reports to keep the lease */
+    unsigned prime_target;   /* v9.9.4: this stream's lead (0 = PCM_PRIME); doubles after an underrun */
+    unsigned trim_silence;   /* v9.9.4: a warm resume drops Windows' leading digital silence until real audio */
     AudioQueueRef queue;
 } Output;
 
@@ -110,8 +117,13 @@ static void render(void *context,AudioQueueRef queue,AudioQueueBufferRef buffer)
         if(__atomic_load_n(&o->input_starved,__ATOMIC_RELAXED)) why=1;
         /* v9.9.1: hold off while priming; once the lead is built, play. If the buffer empties mid-stream, prime
          * again so the next audio is continuous instead of silence spliced between sparse frames. */
-        else if(o->priming) { if(o->count>=PCM_PRIME) o->priming=0; else why=4; }
-        else if(o->count==0) { o->priming=1; o->reprimes++; why=2; }
+        else if(o->priming) { if(o->count>=(o->prime_target?o->prime_target:PCM_PRIME)) o->priming=0; else why=4; }
+        else if(o->count==0) {
+            o->priming=1; o->reprimes++; why=2;
+            /* v9.9.4: a lead that ran dry was too small for this link: double it, up to the cold lead. */
+            if(o->prime_target && o->prime_target<PCM_PRIME)
+                o->prime_target=o->prime_target*2u<PCM_PRIME?o->prime_target*2u:PCM_PRIME;
+        }
         if(!why) {
             take=o->count<AUDIO_FRAMES?o->count:AUDIO_FRAMES;
             for(unsigned i=0;i<take;i++) {
@@ -222,6 +234,10 @@ static int route_verdict(AVAudioSession *session,NSString **device) {
 }
 static dispatch_queue_t g_status_queue;
 static NSString *g_status_state,*g_status_reason;
+/* v9.9.4: the PC as the audio route listed it while the receiver was connected ({name,uid,type}), for the app to
+ * name it; and whether the session mixes with other apps' audio (OutputPolicy.h, mix_state_t). */
+static NSDictionary *g_pc_port;
+static mix_state_t g_mix={1,0};
 static uint64_t g_status_written_ms;
 static uint64_t helper_ms(void) {
     struct timespec ts;
@@ -230,6 +246,24 @@ static uint64_t helper_ms(void) {
 }
 /* Tells Settings what is playing where: immediately on a change, otherwise at most every 5 s. The write happens
  * on a private queue so a slow preferences daemon never stalls packet draining. */
+/* v9.9.4: remember the PC if this route lists it (PeerName.h). Reading a route plays and changes nothing. */
+static void capture_pc_port(AVAudioSessionRouteDescription *route,const char *when) {
+    NSArray<AVAudioSessionPortDescription *> *outputs=route.outputs;
+    if(outputs.count==0 || outputs.count>8) return;
+    const char *names[8],*types[8];
+    for(NSUInteger i=0;i<outputs.count;i++) {names[i]=outputs[i].portName.UTF8String?:"";types[i]=outputs[i].portType.UTF8String?:"";}
+    int pick=peer_pick_port(names,types,(unsigned)outputs.count);
+    if(pick<0) return;
+    AVAudioSessionPortDescription *port=outputs[(NSUInteger)pick];
+    NSDictionary *pc=@{@"name":port.portName?:@"",@"uid":port.UID?:@"",@"type":port.portType?:@""};
+    @synchronized([AVAudioSession class]) {
+        if([g_pc_port isEqualToDictionary:pc]) return;
+        g_pc_port=pc;
+    }
+    hlog(stdout,"V102_PC_ROUTE name=%s uid=%s type=%s when=%s\n",port.portName.UTF8String?:"",
+         port.UID.UTF8String?:"",port.portType.UTF8String?:"",when);
+}
+static void forget_pc_port(void) { @synchronized([AVAudioSession class]) { g_pc_port=nil; } }
 static void publish_status(NSString *state,NSString *reason,BOOL force) {
     uint64_t now=helper_ms();
     reason=reason?:@"";
@@ -241,9 +275,12 @@ static void publish_status(NSString *state,NSString *reason,BOOL force) {
     for(AVAudioSessionPortDescription *port in session.currentRoute.outputs)
         [outputs addObject:@{@"name":port.portName?:@"",@"type":port.portType?:@"",@"uid":port.UID?:@""}];
     /* v8.9.3: the route's output volume (0..1). The 21:05 log showed 0% while "playing", which is silent. */
+    NSDictionary *pc=nil;
+    @synchronized([AVAudioSession class]) { pc=g_pc_port; }
     NSDictionary *status=@{@"version":@1,@"state":state,@"reason":reason,
         @"mode":@(output_mode_name(g_output_mode)),@"outputs":outputs,@"volume":@(session.outputVolume),
-        @"time":@([[NSDate date] timeIntervalSince1970]),@"pid":@(getpid())};
+        @"time":@([[NSDate date] timeIntervalSince1970]),@"pid":@(getpid()),@"pc":pc?:@{},
+        @"mixing":@(g_mix.mixing)};
     if(!g_status_queue) g_status_queue=dispatch_queue_create("com.parv.speaka.helper.status",DISPATCH_QUEUE_SERIAL);
     dispatch_async(g_status_queue,^{
         CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_HELPER_STATUS),(__bridge CFPropertyListRef)status,CFSTR(SPEAKA_PREFS_DOMAIN));
@@ -295,9 +332,10 @@ static int configure_speaker(unsigned rate,AudioRing *s) {
     /* Playback implicitly permits A2DP: v8.8 chose the sending laptop as output.
      * Speaker override is supported only with PlayAndRecord. No input queue,
      * microphone tap, recording request, Bluetooth or AirPlay option is used. */
+    /* v9.9.4: DefaultToSpeaker, and MixWithOthers unless this session has fallen back (OutputPolicy.h). */
     BOOL ok=[session setCategory:AVAudioSessionCategoryPlayAndRecord
                            mode:AVAudioSessionModeDefault
-                        options:AVAudioSessionCategoryOptionDefaultToSpeaker error:&error];
+                        options:(AVAudioSessionCategoryOptions)output_session_options(1,(int)g_mix.mixing) error:&error];
     if(ok) {prefer_uninterrupted(session);stage="activate";ok=[session setActive:YES error:&error];if(ok) note_session(1,"speaker");}
     if(ok) {stage="speaker_override";ok=[session overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:&error];}
     if(!ok) {
@@ -325,7 +363,8 @@ static int configure_speaker(unsigned rate,AudioRing *s) {
 static int configure_external(unsigned rate,AudioRing *s) {
     AVAudioSession *session=[AVAudioSession sharedInstance];NSError *error=nil;NSString *device=nil;
     const char *stage="category";
-    BOOL ok=[session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&error];
+    BOOL ok=[session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault
+                         options:(AVAudioSessionCategoryOptions)output_session_options(0,(int)g_mix.mixing) error:&error];
     if(ok) {
         int verdict=route_verdict(session,&device);
         if(verdict) {note_refusal(session,"candidate",rate,s,verdict,device);return -2;}
@@ -366,7 +405,8 @@ static int builtin_only(AVAudioSession *session) {
 static int configure_wired(unsigned rate,AudioRing *s) {
     AVAudioSession *session=[AVAudioSession sharedInstance];NSError *error=nil;NSString *device=nil;
     const char *stage="category";
-    BOOL ok=[session setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeDefault options:0 error:&error];
+    BOOL ok=[session setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeDefault
+                         options:(AVAudioSessionCategoryOptions)output_session_options(0,(int)g_mix.mixing) error:&error];
     if(ok) {
         (void)[session overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:NULL];
         /* Before activating, only a built-in speaker/earpiece candidate is conclusive: nothing is plugged in, whether
@@ -471,8 +511,9 @@ static int resume_output(Output *o,unsigned rate,AudioRing *s) {
     if(g_output_mode==OUTPUT_MODE_SPEAKER) (void)[session overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:NULL];
     if(route_verdict(session,NULL)) {hlog(stdout,"V100_RESUME_FAIL stage=route\n");return -2;}
     pthread_mutex_lock(&o->lock);
-    if(o->count>PCM_PRIME) {unsigned drop=o->count-PCM_PRIME;o->read=(o->read+drop)%PCM_CAPACITY;o->count=PCM_PRIME;}
-    o->priming=o->count<PCM_PRIME;               /* resume from the newest 0.25 s */
+    unsigned lead=o->prime_target?o->prime_target:PCM_PRIME;
+    if(o->count>lead) {unsigned drop=o->count-lead;o->read=(o->read+drop)%PCM_CAPACITY;o->count=lead;}
+    o->priming=o->count<lead;                    /* resume from the newest lead */
     pthread_mutex_unlock(&o->lock);
     OSStatus e=AudioQueueStart(o->queue,NULL);
     if(e) {hlog(stdout,"V100_RESUME_FAIL stage=queue_start status=%d\n",(int)e);return -4;}
@@ -558,7 +599,8 @@ static void write_pcm(Output *o,const int16_t *pcm,unsigned frames) {
 /* v9.1: the stream changed (the PC or the phone started, suspended, closed or reconfigured it) while the output was
  * running. Keep the queue and the session; drop only the PCM queued for the old stream. */
 static void keep_output(Output *o,uint64_t generation) {
-    pthread_mutex_lock(&o->lock);o->read=o->count=0;pthread_mutex_unlock(&o->lock);
+    /* Emptied on purpose (a new stream or a pause): prime again without counting it as an underrun. */
+    pthread_mutex_lock(&o->lock);o->read=o->count=0;o->priming=1;pthread_mutex_unlock(&o->lock);
     hlog(stdout,"V91_STREAM_CHANGE generation=%llu active=%u output=kept\n",(unsigned long long)(generation>>1),
          (unsigned)(generation&1u));
 }
@@ -645,6 +687,11 @@ static void stream(int fd) {
     if(stream_state==AUDIO_STREAM_CLOSED) own_released(&own);   /* reconnected after the PC closed: wait for it */
     unsigned rate_hint=codec_decoder_rate_hint(&decoder);
     int own_logged=-1;
+    /* v9.9.4: each helper session starts mixing (OutputPolicy.h) with no PC known. The route before the first
+     * activation is the system's, which lists the PC: read it now (reading changes nothing), and on every change. */
+    mix_init(&g_mix);forget_pc_port();
+    capture_pc_port([AVAudioSession sharedInstance].currentRoute,"before_activation");
+    int warm=0;uint64_t healthy_since=0;   /* v9.9.4: has this connection streamed at real time yet? */
     input_rate_t input;input_rate_reset(&input,helper_ms(),(int)(__atomic_load_n(&s->generation,__ATOMIC_ACQUIRE)&1u));
     uint64_t other_quiet_since=0,last_poll=0;   /* v9.9.2: the other app's audio stopping clears an interruption */
     PCMLevels level={0};
@@ -671,6 +718,11 @@ static void stream(int fd) {
             long reason=[value isKindOfClass:[NSNumber class]]?[value longValue]:-1L;
             __atomic_store_n(&route_reason,reason,__ATOMIC_RELAXED);
             if(own_route_is_device_change(reason)) __atomic_store_n(&route_device,1,__ATOMIC_RELAXED);
+            /* v9.9.4: the route before this change (when the helper itself activates, the system route, which
+             * lists the PC) and after it (another app routing to the PC): either may name the PC. */
+            id previous=note.userInfo[AVAudioSessionRouteChangePreviousRouteKey];
+            if([previous isKindOfClass:[AVAudioSessionRouteDescription class]]) capture_pc_port(previous,"previous_route");
+            capture_pc_port([AVAudioSession sharedInstance].currentRoute,"route_change");
             __atomic_store_n(&route_changed,1,__ATOMIC_RELEASE);
         }];
     /* v9.1: after a media-services reset the old session and queue are gone; start again from nothing. */
@@ -732,6 +784,12 @@ static void stream(int fd) {
                         /* v9.1: speaker mode re-applies its override on the live session before giving up. */
                         if(g_output_mode==OUTPUT_MODE_SPEAKER && !reassert_speaker(o,o->rate,s)) {
                             own_started(&own,helper_ms());publish_status(@"playing",@"",YES);
+                        } else if(mix_route_lost(&g_mix)) {
+                            /* v9.9.4: mixing let another app's audio take the shared route from Speaka's output.
+                             * Play exclusively from now on, as before v9.9.4: rebuild without MixWithOthers. */
+                            hlog(stdout,"V102_MIX fallback=exclusive reason=route_lost mode=%s\n",output_mode_name(g_output_mode));
+                            stop_output(o,s,"mix_fallback",0);codec_decoder_reset(&decoder);
+                            own_restart(&own,helper_ms());
                         } else {
                             /* The selected mode's output went away (headphones unplugged): wait for it to return. */
                             stop_output(o,s,"route_changed",1);codec_decoder_reset(&decoder);
@@ -751,6 +809,13 @@ static void stream(int fd) {
                 /* v9.9.2: a new stream (or a pause) is measured afresh; a pause is not starvation. */
                 if(input.starved) hlog(stdout,"V100_INPUT healthy reason=stream_change\n");
                 input_rate_reset(&input,now,(int)(current&1u));__atomic_store_n(&o->input_starved,0,__ATOMIC_RELAXED);
+                /* v9.9.4: a resume on a warm connection gets the 64 ms lead, the two-window gate and its leading
+                 * silence trimmed; a cold stream keeps the 0.25 s lead and the early starvation verdict. */
+                if(warm) input_rate_warm(&input);
+                pthread_mutex_lock(&o->lock);
+                o->prime_target=warm?PCM_PRIME_WARM:PCM_PRIME;o->trim_silence=warm&&(current&1u);
+                pthread_mutex_unlock(&o->lock);
+                healthy_since=0;
                 if(!(current&1u)) publish_status(@"idle",@"PC paused or stopped the stream",NO);
                 else if(o->queue && !o->paused) publish_status(@"playing",@"",NO);
             }
@@ -767,9 +832,17 @@ static void stream(int fd) {
                 hlog(stdout,"V99_STREAM state=%u (was %u) output=%d\n",state,stream_state,o->queue!=NULL);
                 own_stream(&own,state,now);stream_state=state;
             }
+            /* v9.9.4: a connection is warm once a stream has played 2 s at real time without being held. */
+            if((generation&1u) && o->queue && !o->paused && !input.starved && input.windows>0) {
+                if(!healthy_since) healthy_since=now;
+                else if(!warm && now-healthy_since>=2000u) {
+                    warm=1;hlog(stdout,"V102_WARM the connection streams at real time: resumes use a %u-frame lead\n",PCM_PRIME_WARM);
+                }
+            } else healthy_since=0;
+            if(state==AUDIO_STREAM_CLOSED && warm) warm=0;   /* a new connection starts cold */
             if(own_should_release(&own,now)) {
                 hlog(stdout,"V99_OWN release: the PC closed its stream %u s ago and opened none\n",OWN_CLOSED_RELEASE_MS/1000u);
-                stop_output(o,s,"stream_closed",1);codec_decoder_reset(&decoder);own_released(&own);
+                stop_output(o,s,"stream_closed",1);codec_decoder_reset(&decoder);own_released(&own);forget_pc_port();
             }
             /* v9.9.2: while interrupted, the other app's audio stopping clears the interruption (it doesn't always send
              * "ended"). Quiet must hold for 0.5 s, beginning at least 0.5 s after the interruption, so the moment the
@@ -817,6 +890,7 @@ static void stream(int fd) {
             if(input.window_ms) {
                 int change=input_rate_add(&input,0,o->rate?o->rate:rate_hint,now);
                 if(change) {
+                    if(change>0) warm=0;
                     if(change<0) {pthread_mutex_lock(&o->lock);o->priming=o->count<PCM_PRIME;pthread_mutex_unlock(&o->lock);}
                     __atomic_store_n(&o->input_starved,change>0,__ATOMIC_RELAXED);
                     hlog(stdout,"V100_INPUT %s rate=%u/%u (%u%%) starvations=%u starved_total_ms=%llu\n",
@@ -840,6 +914,7 @@ static void stream(int fd) {
                     __atomic_fetch_add(&o->decoded_frames,samples,__ATOMIC_RELAXED);
                     int change=input_rate_add(&input,samples,o->rate?o->rate:rate,helper_ms());
                     if(change) {
+                        if(change>0) warm=0;
                         if(change<0) {pthread_mutex_lock(&o->lock);o->priming=o->count<PCM_PRIME;pthread_mutex_unlock(&o->lock);}
                         __atomic_store_n(&o->input_starved,change>0,__ATOMIC_RELAXED);
                         hlog(stdout,"V100_INPUT %s rate=%u/%u starvations=%u starved_total_ms=%llu\n",
@@ -855,9 +930,17 @@ static void stream(int fd) {
                             own_start_failed(&own,helper_ms(),restarted==-2);
                         } else own_started(&own,helper_ms());
                     }
+                    /* v9.9.4: a warm resume starts with Windows' silent frames (14:52:14: four 16-byte packets, ~85 ms);
+                     * playing them only delays the music, so digital silence is dropped until the first real sample. */
+                    int keep=1;
+                    if(o->trim_silence) {
+                        int silent=1;
+                        for(unsigned k=0;k<samples*2u && silent;k++) silent=pcm[k]==0;
+                        if(silent) keep=0; else o->trim_silence=0;
+                    }
                     /* v9.9.2: held (input starved, or paused by an interruption): keep only the newest lead. */
-                    if(o->queue && (o->paused || __atomic_load_n(&o->input_starved,__ATOMIC_RELAXED))) hold_pcm(o,pcm,samples);
-                    else if(o->queue) write_pcm(o,pcm,samples);
+                    if(keep && o->queue && (o->paused || __atomic_load_n(&o->input_starved,__ATOMIC_RELAXED))) hold_pcm(o,pcm,samples);
+                    else if(keep && o->queue) write_pcm(o,pcm,samples);
                 }
                 /* If bounded drain left packets, poll again instead of losing a wakeup. */
                 if(__atomic_load_n(&s->media.read,__ATOMIC_RELAXED)==

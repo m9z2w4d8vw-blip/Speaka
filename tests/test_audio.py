@@ -742,7 +742,7 @@ int main(void) {
            (unsigned long long)now.gated,now.first_audio_after_ms,now.underrun_after);
     assert(old.reprimes_slow>=15 && old.reprimes_slow<=40);   /* the model reproduces the device's ~26 cycles */
     assert(old.onsets_slow>=15);
-    assert(now.onsets_slow<=2);                                 /* held, not bursting: at most an initial blip */
+    assert(now.onsets_slow==0);    /* v9.9.4: the 400 ms cold verdict holds before the first sound - no 1 s blip */
     assert(now.gated>(uint64_t)48000*20);                       /* most of the starved window is a clean hold */
     assert(now.first_audio_after_ms>=0 && now.first_audio_after_ms<=1500);   /* plays soon after real time returns */
     assert(now.underrun_after==0);                              /* and then continuously */
@@ -792,8 +792,9 @@ static OSStatus AudioQueueEnqueueBuffer(AudioQueueRef q,AudioQueueBufferRef b,un
 #include "tweak/Tweak.h"
 typedef struct { long gated_at, first_unready_while_receiving, unready_after_stop; unsigned unready_reports_recovery;
                  uint64_t silence_gated; } R;
-/* Phases: 0-12 s starved at 44% of real time, 12-22 s real time, 22-25 s nothing arrives (stream still active). */
-static double rate_at(double s) { return s < 12.0 ? 0.44 * 46.875 : s < 22.0 ? 46.875 : 0.0; }
+/* Phases: 0-1.5 s real time (the lease is established), 1.5-12 s starved at 44% of real time, 12-22 s real time,
+ * 22-25 s nothing arrives (stream still active). */
+static double rate_at(double s) { return s < 1.5 ? 46.875 : s < 12.0 ? 0.44 * 46.875 : s < 22.0 ? 46.875 : 0.0; }
 static R run(int fixed) {
     static Output o; memset(&o,0,sizeof o); pthread_mutex_init(&o.lock,NULL); o.priming=1;
     int16_t pcm[2048]; for (int i=0;i<2048;i++) pcm[i]=1000;
@@ -825,7 +826,7 @@ static R run(int fixed) {
             sink_health_sample(&h,media,beat,t/1000);
             sink_health_render(&h,3,counter,holding?2u:1u,t/1000);
             int ready=sink_health_ready(&h,1,t/1000);
-            if (!ready && sec>1.0 && sec<12.0 && r.first_unready_while_receiving<0) r.first_unready_while_receiving=(long)(t/1000);
+            if (!ready && sec>1.6 && sec<12.0 && r.first_unready_while_receiving<0) r.first_unready_while_receiving=(long)(t/1000);
             if (!ready && sec>=12.5 && sec<22.0) r.unready_reports_recovery++;
             if (!ready && sec>=22.0 && r.unready_after_stop<0) r.unready_after_stop=(long)(t/1000)-22000;
         }
@@ -862,18 +863,138 @@ int main(void) {
             self.assertEqual(ran.returncode,0,ran.stdout+ran.stderr)
             print(ran.stdout,end="")
 
+    def test_warm_pause_resume_latency_and_continuity(self):
+        """Priority 2 (v9.9.4): Windows pause/resume on an established connection. Measured at 14:52:14 in v9.8.91: the
+        first packet 54 ms after START, four silent 16-byte frames (~85 ms) first, packet gaps up to 38 ms. v9.8.91
+        primed 0.25 s on every resume and played the silence; a warm resume primes 64 ms, drops the leading digital
+        silence, and doubles its lead after an underrun. Ten cycles through the real render callback, PCM writers,
+        keep_output and input monitor, with the measured gaps; one cycle carries a 70 ms gap."""
+        source = SOURCE.read_text()
+        render = source.split("#define PCM_CAPACITY", 1)[1].split("static void stop_output", 1)[0]
+        writers = source.split("static void hold_pcm(", 1)[1].split("static void keep_output(", 1)[0]
+        keep = source.split("static void keep_output(", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        harness = r"""
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+typedef int32_t OSStatus;
+typedef void *AudioQueueRef;
+typedef struct { void *mAudioData; uint32_t mAudioDataByteSize; } AudioQueueBuffer;
+typedef AudioQueueBuffer *AudioQueueBufferRef;
+static OSStatus AudioQueueEnqueueBuffer(AudioQueueRef q,AudioQueueBufferRef b,unsigned p,const void *d){(void)q;(void)b;(void)p;(void)d;return 0;}
+#define hlog(f,...) ((void)0)
+#define PCM_CAPACITY""" + render + "static void hold_pcm(" + writers + "static void keep_output(" + keep + r"""
+#include "OutputPolicy.h"
+static const int GAPS[] = {18,17,27,28,19,19,19,32,24,0,38,7,25,31};   /* ms, v9.8.91 14:52:14 and 14:52:32 */
+typedef struct { long latency_ms[10]; unsigned stale, underruns_healthy, underruns_jitter, gated, bumped; } R;
+static R run(int v994) {
+    static Output o; memset(&o,0,sizeof o); pthread_mutex_init(&o.lock,NULL); o.priming=1;
+    int16_t pcm[2048], data[AUDIO_FRAMES*2]; AudioQueueBuffer buf={data,0};
+    input_rate_t in; R r; memset(&r,0,sizeof r);
+    uint64_t t=0, next_render=0; unsigned g=0;
+    for (unsigned cycle=0; cycle<10; cycle++) {
+        /* START: the helper's stream change, cold-or-warm (the connection is warm: it has streamed). */
+        keep_output(&o,0); input_rate_reset(&in,t/1000,1);
+        if (v994) { input_rate_warm(&in); pthread_mutex_lock(&o.lock); o.prime_target=PCM_PRIME_WARM; o.trim_silence=1; pthread_mutex_unlock(&o.lock); }
+        o.input_starved=0;
+        int16_t value=(int16_t)(100*(cycle+1));
+        uint64_t first_audio_pkt=0, end=t+3000000u, next_pkt=t+54000u; unsigned pkt=0; long heard=-1;
+        double sched=(double)next_pkt;
+        uint64_t und_before=o.silence_underrun, reprimes_before=o.reprimes; unsigned jitter_cycle=cycle==6;
+        while (t<end) {
+            if (t>=next_pkt) {
+                int silent = pkt<4;                                    /* Windows' four silent frames */
+                for (int i=0;i<2048;i++) pcm[i]=silent?0:value;
+                if (!silent && !first_audio_pkt) first_audio_pkt=t;
+                int c=input_rate_add(&in,1024,48000,t/1000);
+                if (c>0) r.gated++;
+                int keepit=1;
+                if (v994 && o.trim_silence) { int all=1; for (int i=0;i<2048 && all;i++) all=pcm[i]==0; if (all) keepit=0; else o.trim_silence=0; }
+                if (keepit) write_pcm(&o,pcm,1024);
+                /* The measured gaps (clumps of two included), scaled to a real-time mean: they average 21.71 ms,
+                 * and a live stream averages 21.33 ms (1024 frames at 48 kHz). */
+                int gap = (jitter_cycle && pkt==60) ? 70 : GAPS[(g++)%14];
+                sched += gap * 1000.0 * (21333.3 / 21714.3);
+                next_pkt = (uint64_t)sched;
+                pkt++;
+            }
+            if (t>=next_render) {
+                render(&o,&o,&buf);
+                if (heard<0 && first_audio_pkt) for (unsigned i=0;i<AUDIO_FRAMES*2;i++) if (data[i]) {
+                    heard=(long)((t-first_audio_pkt)/1000); if (data[i]!=value) r.stale++; break; }
+                next_render+=10667;
+            }
+            t+=1000;
+        }
+        r.latency_ms[cycle]=heard;
+        uint64_t und=o.silence_underrun-und_before;              /* frames of underrun silence */
+        uint64_t events=o.reprimes-reprimes_before;             /* times the lead ran dry */
+        if (jitter_cycle) r.underruns_jitter=(unsigned)events; else r.underruns_healthy+=(unsigned)und;
+        if (v994 && jitter_cycle && o.prime_target>PCM_PRIME_WARM) r.bumped=1;
+        /* Pause: SUSPEND - the stream change empties the ring; 1.5 s without packets, the output keeps running. */
+        keep_output(&o,0); input_rate_reset(&in,t/1000,0); o.input_starved=0;
+        for (uint64_t stop=t+1500000u; t<stop; t+=1000) if (t>=next_render) { render(&o,&o,&buf); next_render+=10667; }
+    }
+    pthread_mutex_destroy(&o.lock);
+    return r;
+}
+static long median(const long *v) {
+    long s[10]; memcpy(s,v,sizeof s);
+    for (int i=0;i<10;i++)
+        for (int j=i+1;j<10;j++)
+            if (s[j]<s[i]) { long x=s[i]; s[i]=s[j]; s[j]=x; }
+    return s[5];
+}
+int main(void) {
+    R old=run(0), now=run(1);
+    printf("v9.8.91 resume: median %ld ms from the first audio packet to sound; underruns %u; stale %u\n",
+           median(old.latency_ms), old.underruns_healthy, old.stale);
+    printf("v9.9.4  resume: median %ld ms; underrun frames (healthy cycles) %u; 70 ms gap cycle: %u underrun(s), lead bumped %u;"
+           " stale %u; gated %u\n", median(now.latency_ms), now.underruns_healthy, now.underruns_jitter, now.bumped,
+           now.stale, now.gated);
+    for (int i=0;i<10;i++) assert(now.latency_ms[i]>=0 && old.latency_ms[i]>=0);
+    assert(median(old.latency_ms) >= 150);        /* v9.8.91: the full 0.25 s lead (behind the silence) on every resume */
+    assert(median(now.latency_ms) <= 100);        /* v9.9.4: tens of milliseconds */
+    assert(now.stale == 0 && old.stale == 0);     /* the first sound after a resume is that resume's audio */
+    assert(now.underruns_healthy == 0);           /* the measured jitter never drains the 64 ms lead */
+    assert(now.underruns_jitter <= 1 && now.bumped);   /* a 70 ms gap costs at most one underrun, then the lead grows */
+    assert(now.gated == 0);                       /* a healthy resume is never mistaken for starvation */
+    return 0;
+}
+"""
+        cc = shutil.which("cc"); self.assertIsNotNone(cc)
+        # -Wno-unused-parameter: the hlog stub drops keep_output's generation argument; -Wno-unused-function: the
+        # extracted writers include hold_pcm, which a healthy resume never needs.
+        flags = ["-std=gnu11","-O2","-Wall","-Wextra","-Werror","-Wno-unused-parameter","-Wno-unused-function","-pthread","-I"+str(ROOT/"audiohelper"),"-I"+str(ROOT)]
+        with tempfile.TemporaryDirectory() as td:
+            c = pathlib.Path(td)/"resume.c"; exe = pathlib.Path(td)/"resume"; c.write_text(harness)
+            built = subprocess.run([cc,*flags,str(c),"-o",str(exe)],capture_output=True,text=True,timeout=60)
+            self.assertEqual(built.returncode,0,built.stdout+built.stderr)
+            ran = subprocess.run([str(exe)],capture_output=True,text=True,timeout=60)
+            self.assertEqual(ran.returncode,0,ran.stdout+ran.stderr)
+            print(ran.stdout,end="")
+        # The model's stream change is the helper's: same lead, same trim, same warm marking.
+        helper = source
+        loop = between(helper, "for(;;) {", "[[NSNotificationCenter defaultCenter] removeObserver:observer];")
+        generation = between(loop, "if(current!=generation) {", "\n            }\n")
+        for line in ("if(warm) input_rate_warm(&input);", "o->prime_target=warm?PCM_PRIME_WARM:PCM_PRIME;o->trim_silence=warm&&(current&1u);"):
+            self.assertIn(line, generation)
+
     def test_speaker_route_and_teardown_guards(self):
         source = SOURCE.read_text()
         # The speaker path is unchanged since v8.8.1. v8.9.4 adds the only other PlayAndRecord configuration, wired
         # headphones mode, with no options; neither can reach Bluetooth or AirPlay, and nothing ever records.
         configure = source.split("static int configure_speaker(", 1)[1].split("static int configure_external(", 1)[0]
         self.assertIn("AVAudioSessionCategoryPlayAndRecord", configure)
-        self.assertIn("AVAudioSessionCategoryOptionDefaultToSpeaker", configure)
+        self.assertIn("output_session_options(1,(int)g_mix.mixing)", configure)   # v9.9.4: DefaultToSpeaker via the policy
+        self.assertIn("#define SESSION_OPT_DEFAULT_TO_SPEAKER 0x8u", read("audiohelper/OutputPolicy.h"))
         self.assertIn("overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker", configure)
         self.assertIn("!speaker_selected(session)", configure)
         self.assertEqual(source.count("AVAudioSessionCategoryPlayAndRecord"), 2)
         wired = source.split("static int configure_wired(", 1)[1].split("static int configure_output(", 1)[0]
-        self.assertIn("setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeDefault options:0", wired)
+        self.assertIn("output_session_options(0,(int)g_mix.mixing)", wired)      # v9.9.4: mixing, no Bluetooth option
         for option in ("AllowBluetooth", "AllowBluetoothA2DP", "AllowAirPlay"):
             self.assertNotIn("AVAudioSessionCategoryOption" + option, source)
         for api in ("AudioQueueNewInput", "requestRecordPermission", "setPreferredInput", "inputNode", "AVAudioRecorder"):
@@ -969,7 +1090,9 @@ int main(void) {
     def test_wired_mode_cannot_reach_bluetooth_and_beats_a_later_pc(self):
         helper = read("audiohelper/AudioHelper.m")
         wired = between(helper, "static int configure_wired(", "static int configure_output(")
-        category = wired.index("setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeDefault options:0")
+        # v9.9.4: options come from the policy (mixing, never Bluetooth); PlayAndRecord without them cannot reach the PC.
+        category = wired.index("setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeDefault\n"
+                               "                         options:(AVAudioSessionCategoryOptions)output_session_options(0,(int)g_mix.mixing)")
         override = wired.index("overrideOutputAudioPort:AVAudioSessionPortOverrideNone")
         precheck = wired.index("if(verdict && builtin_only(session))")
         activate = wired.index("setActive:YES")
@@ -1273,7 +1396,7 @@ int main(void) {
         packets = loop.split("for(unsigned i=0;i<AUDIO_RING_SLOTS && audio_ring_dequeue(s,&packet);i++) {", 1)[1]
         self.assertEqual(packets.count("start_output("), 1)                    # only the sample-rate rebuild
         self.assertIn('stop_output(o,s,"sample_rate_changed",0);', packets)   # a new rate keeps the session
-        self.assertIn("if(o->queue) write_pcm(o,pcm,samples);", packets)
+        self.assertIn("else if(keep && o->queue) write_pcm(o,pcm,samples);", packets)
         # Never released for lack of media; a pause keeps everything; a close lets go after the grace.
         # The v9.1 hold policy is gone (hold_pcm, v9.9.2's held-output writer, is unrelated).
         for gone in ("hold_expired", "hold_may_start", "hold_started", "hold_released", "hold_media", "HOLD_",
@@ -1289,9 +1412,11 @@ int main(void) {
         self.assertGreaterEqual(len(releases), 6)          # settings, media reset, route, error, close, rate
         for match in releases:
             self.assertRegex(loop[match.end():match.end() + 200], r"own_(restart|start_failed|released)\(", match.group(0))
-        # Exclusive, non-mixing playback, and the strongest public priority before every activation.
-        for option in ("MixWithOthers", "DuckOthers", "InterruptSpokenAudioAndMixWithOthers"):
+        # v9.9.4: the session mixes (OutputPolicy.h) - never ducking others, never a Bluetooth route option - and keeps
+        # the strongest public priority before every activation.
+        for option in ("DuckOthers", "InterruptSpokenAudioAndMixWithOthers", "AllowBluetoothA2DP", "OptionAllowBluetooth"):
             self.assertNotIn(option, helper)
+        self.assertEqual(helper.count("output_session_options("), 3)                # every configure_* uses the policy
         self.assertEqual(helper.count("prefer_uninterrupted(session);"), 4)   # every activation: 3 configure_* + resume
         self.assertIn("setPrefersNoInterruptionsFromSystemAlerts:YES", helper)
         self.assertEqual(helper.count("ok=[session setActive:YES error:&error];if(ok) note_session(1,"), 3)
@@ -1343,6 +1468,52 @@ int main(void) {
         self.assertIn('pause_output(o,s,"interruption_began");', began)          # interruptions: unchanged
         self.assertIn('stop_output(o,s,"ipc_closed",1);', helper)                 # shutdown: releases the session
 
+    def test_mixing_session_policy_and_fallback(self):
+        # Priority 3 (v9.9.4): TikTok's non-mixing session interrupted Speaka's (v9.8.91, 14:52:27 and 14:52:32) and, while
+        # it played, iOS sent its audio to the PC - Apple's A2DP code started the PC's stream at 14:52:32.736 and suspended
+        # it as TikTok stopped (14:52:38.536). Speaka's session now mixes in every mode, so an ordinary app's audio plays
+        # alongside instead of taking it; it never carries a Bluetooth option, so its own output can't reach the PC; and if
+        # another app's audio still pulls the shared route away, it falls back to exclusive playback once, never toggling.
+        self.compile_run(r"""
+#include <assert.h>
+#include "OutputPolicy.h"
+int main(void) {
+    for (int speaker = 0; speaker <= 1; speaker++)
+        for (int mixing = 0; mixing <= 1; mixing++) {
+            unsigned o = output_session_options(speaker, mixing);
+            assert(!(o & SESSION_OPT_ALLOW_BLUETOOTH) && !(o & SESSION_OPT_ALLOW_BLUETOOTH_A2DP));   /* never the PC */
+            assert(((o & SESSION_OPT_MIX_WITH_OTHERS) != 0) == (mixing != 0));
+            assert(((o & SESSION_OPT_DEFAULT_TO_SPEAKER) != 0) == (speaker != 0));
+        }
+    assert(SESSION_OPT_MIX_WITH_OTHERS == 0x1u && SESSION_OPT_DEFAULT_TO_SPEAKER == 0x8u);   /* the SDK's values */
+    assert(SESSION_OPT_ALLOW_BLUETOOTH == 0x4u && SESSION_OPT_ALLOW_BLUETOOTH_A2DP == 0x20u);
+    mix_state_t m; mix_init(&m);
+    assert(m.mixing == 1);                       /* a helper session starts mixing */
+    assert(mix_route_lost(&m) == 1 && m.mixing == 0 && m.fallbacks == 1);   /* the route was taken: exclusive */
+    assert(mix_route_lost(&m) == 0 && m.fallbacks == 1);                    /* once: never back and forth */
+    mix_init(&m); assert(m.mixing == 1 && m.fallbacks == 0);                /* the next helper session mixes again */
+    return 0;
+}
+""")
+        helper = read("audiohelper/AudioHelper.m")
+        for name, speaker in (("configure_speaker", 1), ("configure_external", 0), ("configure_wired", 0)):
+            body = between(helper, "static int %s(" % name, "\n}\n")
+            self.assertIn("output_session_options(%d,(int)g_mix.mixing)" % speaker, body, name)
+        loop = between(helper, "for(;;) {", "[[NSNotificationCenter defaultCenter] removeObserver:observer];")
+        route = loop.split("if(o->queue && !o->paused) {\n                    log_route(", 1)[1].split("} else if(device || !own_echo) {", 1)[0]
+        # The fallback comes after re-asserting the speaker and before giving the output up; it rebuilds in place.
+        self.assertLess(route.index("reassert_speaker(o,o->rate,s)"), route.index("mix_route_lost(&g_mix)"))
+        self.assertLess(route.index("mix_route_lost(&g_mix)"), route.index('stop_output(o,s,"route_changed",1)'))
+        fallback = route.split("mix_route_lost(&g_mix)", 1)[1].split("} else {", 1)[0]
+        self.assertIn('stop_output(o,s,"mix_fallback",0);', fallback)        # the session stays active
+        self.assertIn("own_restart(&own,helper_ms());", fallback)
+        setup = between(helper, "    int own_logged=-1;\n", "    for(;;) {")
+        self.assertIn("mix_init(&g_mix);", setup)
+        self.assertIn('@"mixing":@(g_mix.mixing)', helper)                   # the app and the log can tell
+        # System interruptions (calls, alarms) are still handled by the v9.9.2 pause/resume path.
+        began = loop.split("if(changed==1) {", 1)[1].split("} else {", 1)[0]
+        self.assertIn('pause_output(o,s,"interruption_began");', began)
+
     def test_control_log_names_the_initiator(self):
         tweak = read("tweak/Hooks.xm")
         note = between(tweak, "static void note_signal(", "/* v8.8.2: the verified native idle check")
@@ -1363,6 +1534,7 @@ void AudioRelaySetActive(int) {}
 void AudioRelaySetStreamState(uint32_t) {}
 void SpeakaLogNow(const char *fmt,...) {va_list ap;va_start(ap,fmt);vsnprintf(line,sizeof line,fmt,ap);va_end(ap);}
 void SpeakaSetStatus(const char *,const char *,...) {}   /* v9.6: diag.v95.peer, checked in test_v89 */
+static uint64_t speaka_since_launch_ms(void) {return 1234;}
 static void note_signal(''' + note + r'''
 static void expect(unsigned direction,const uint8_t *p,size_t n,const char *tail) {
     line[0]=0;note_signal(direction,0x108,p,n);
@@ -1380,7 +1552,8 @@ int main() {
     expect(1,phone_suspend,3,"active=0 by=phone");
     expect(0,phone_suspend_ok,2,"active=0 by=phone");
     line[0]=0;note_signal(1,0x108,phone_start,3);assert(!line[0]);   /* a START command alone changes nothing */
-    expect(0,phone_start_ok,2,"msg=2 sig=7 active=1 by=phone");
+    /* v9.9.4: who started it and how long after this bluetoothd launched - the startup throttle's two facts. */
+    expect(0,phone_start_ok,2,"msg=2 sig=7 active=1 by=phone since_launch_ms=1234");
     expect(0,pc_suspend,3,"active=0 by=pc");
     expect(1,pc_suspend_ok,2,"active=0 by=pc");
     line[0]=0;note_signal(0,0x108,pc_start,3);assert(!line[0]);

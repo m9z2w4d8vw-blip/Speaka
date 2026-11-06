@@ -322,6 +322,15 @@ static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a
     }
     return hook_setconfigind_observe(a0,a1,a2,a3,a4,a5,a6,a7);
 }
+/* v9.9.4: ms since this bluetoothd loaded the tweak, on every START/SUSPEND line. Across six builds, every stream
+ * the PC started within ~42 s of a launch, with no phone-initiated START or SUSPEND before it, arrived at a third of
+ * real time (9 of 9), while every stream within that window started by - or after - Apple's own A2DP code ran at
+ * full rate (4 of 4). This puts both facts on one line. */
+static uint64_t g_load_mach;
+static uint64_t speaka_since_launch_ms(void)
+{
+    return g_load_mach ? mach_elapsed_us(g_load_mach, mach_absolute_time()) / 1000u : 0u;
+}
 static void note_signal(unsigned direction,uint64_t cid,const uint8_t *p,size_t size)
 {
     if (!g_relay_ready || !g_sink_accepted) return;
@@ -336,9 +345,9 @@ static void note_signal(unsigned direction,uint64_t cid,const uint8_t *p,size_t 
         /* v9.1: by= names who sent the command this line belongs to. A command (msg=0) is its sender's; a response
          * answers the other side's command. In the 23:33 loop every START and SUSPEND was by=phone: Apple's own A2DP
          * code driving the PC's stream as if the iPhone were the source. Logging only; nothing is blocked. */
-        SpeakaLogNow("V882_CONTROL direction=%s CID=%#llx tx=%u msg=%u sig=%u active=%d by=%s",
+        SpeakaLogNow("V882_CONTROL direction=%s CID=%#llx tx=%u msg=%u sig=%u active=%d by=%s since_launch_ms=%llu",
             direction?"TX":"RX",(unsigned long long)cid,p[0]>>4,p[0]&3u,p[1]&63u,change,
-            ((direction==1u)==((p[0]&3u)==0u))?"phone":"pc");
+            ((direction==1u)==((p[0]&3u)==0u))?"phone":"pc",(unsigned long long)speaka_since_launch_ms());
         /* v9.6: a START accepted streams; SUSPEND is a pause, and the PC is still connected; CLOSE or ABORT ends it.
          * (A link that just drops sends none of these, so the last one stays until bluetoothd restarts.) */
         SpeakaSetStatus("diag.v95.peer","%s",change==1?"streaming":(p[1]&63u)==9u?"paused":"closed");
@@ -1739,6 +1748,7 @@ static int sink_receive_ready(void)
 %ctor {
     const char *prog = getprogname();
     if (!prog || strcmp(prog, "bluetoothd") != 0) return;      /* the filter plist should guarantee this; be paranoid */
+    g_load_mach = mach_absolute_time();                          /* v9.9.4: since_launch_ms= on START/SUSPEND */
 
     SpeakaLogInit();
     SpeakaSessionStart();   /* v8.9: Settings Start/Stop works even if every hook below is refused */

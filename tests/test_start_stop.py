@@ -188,6 +188,7 @@ void AudioRelaySetActive(int active) {last_active=active;changes++;}
 static unsigned last_state=0;
 void AudioRelaySetStreamState(uint32_t state) {last_state=state;}   /* v9.9: what the helper is told */
 void SpeakaLogNow(const char *,...) {}
+static uint64_t speaka_since_launch_ms(void) {return 0;}
 static void note_signal(''' + note + r'''
 int main() {
     memset(&g_stream_control,0,sizeof g_stream_control);
