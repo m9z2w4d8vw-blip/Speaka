@@ -143,6 +143,10 @@ typedef struct {
     unsigned retaking;   /* something else took the output, and the next start takes it back */
     uint64_t closed_ms;  /* when the PC closed its stream; 0 while a stream is configured */
     unsigned released;   /* let go after the close grace; the next configuration owns again */
+    unsigned interrupted;     /* v9.9.2: another session holds the audio; only the interruption rules may resume */
+    uint64_t interrupted_ms;  /* when it began */
+    uint64_t resumed_ms;      /* when the output last came back after one, to recognise another app fighting */
+    unsigned fights;          /* re-interrupted within OWN_FIGHT_WINDOW_MS of coming back, consecutively */
 } own_state_t;
 
 static inline void own_init(own_state_t *h) { memset(h, 0, sizeof *h); }   /* next_ms 0: start at once */
@@ -171,7 +175,8 @@ static inline void own_started(own_state_t *h, uint64_t now)
 static inline void own_start_failed(own_state_t *h, uint64_t now, int route_refused)
 {
     h->running = 0;
-    if (route_refused) { h->next_ms = OWN_NEVER; return; }
+    /* v9.9.2: a refused route means the session did activate - any interruption is over; now it waits for a device. */
+    if (route_refused) { h->interrupted = 0; h->next_ms = OWN_NEVER; return; }
     if (h->failures < 16u) h->failures++;
     uint64_t wait = (uint64_t)OWN_RETRY_MS * h->failures;
     h->next_ms = now + (wait > OWN_RETRY_MAX_MS ? OWN_RETRY_MAX_MS : wait);
@@ -185,22 +190,56 @@ static inline void own_taken(own_state_t *h, uint64_t now)
     h->next_ms = now + OWN_RETAKE_MS;
 }
 
-/* An app interruption began (v9.9.1): iOS already stopped the queue and deactivated the session. Unlike own_taken,
- * do NOT retake on a short timer - that is what made the interruptions in v9.8.87 recur, each retake's reactivation
- * nudging the other app to interrupt again. Park until the "ended" notification calls own_now; a long backstop
- * (OWN_INTERRUPT_BACKSTOP_MS) still reclaims the output if iOS never sends "ended" (it sometimes doesn't). */
-#define OWN_INTERRUPT_BACKSTOP_MS 8000u
+/* ---- interruptions (v9.9.2) ----
+ * v9.9.1 parked for the "ended" notification with an 8 s backstop. In the v9.8.89 test (11:05:31) the other app kept
+ * playing, so no "ended" came: 8.8 s of silence, then the backstop's reactivation - during which Apple's A2DP code
+ * suspended the PC's stream (11:05:39.816), because nothing was holding the idle guard's lease. Now:
+ *   - "ended", or the other app's audio stopping (polled; it doesn't always send "ended"), resumes at once;
+ *   - if the other app is still playing after OWN_TAKEOVER_MS, Speaka takes the output back - the receiver is meant to
+ *     win - and if the app takes it straight back, each takeover waits twice as long (to OWN_TAKEOVER_MAX_MS), so two
+ *     players can never loop;
+ *   - nothing else (a START, a route change) resumes an interrupted output (own_now refuses);
+ *   - a call or an alarm makes the activation fail: own_start_failed backs off and the interruption stays in force.
+ * The queue and PCM are kept across the interruption, and the helper keeps the stream's lease (it decodes on). */
+#define OWN_TAKEOVER_MS 3000u
+#define OWN_TAKEOVER_MAX_MS 24000u
+#define OWN_FIGHT_WINDOW_MS 10000u
 static inline void own_interrupted(own_state_t *h, uint64_t now)
 {
     h->running = 0;
     h->retaking = 1;
-    h->next_ms = now + OWN_INTERRUPT_BACKSTOP_MS;
+    if (h->resumed_ms && now >= h->resumed_ms && now - h->resumed_ms < OWN_FIGHT_WINDOW_MS) {
+        if (h->fights < 8u) h->fights++;
+    } else {
+        h->fights = 0;
+    }
+    h->interrupted = 1;
+    h->interrupted_ms = now;
+    unsigned shift = h->fights < 3u ? h->fights : 3u;
+    uint64_t wait = (uint64_t)OWN_TAKEOVER_MS << shift;
+    h->next_ms = now + (wait > OWN_TAKEOVER_MAX_MS ? OWN_TAKEOVER_MAX_MS : wait);
+}
+
+/* The interruption is over: iOS said so ("ended"), or the other app's audio stopped. Resume now. */
+static inline void own_interruption_cleared(own_state_t *h, uint64_t now)
+{
+    if (h->interrupted && !h->running) { h->next_ms = now; h->failures = 0; }
+}
+
+/* The output came back after an interruption (or started for the first time). */
+static inline void own_resumed(own_state_t *h, uint64_t now)
+{
+    if (h->interrupted) h->resumed_ms = now;
+    h->interrupted = 0;
+    own_started(h, now);
 }
 
 /* Start as soon as possible: an interruption ended, a device was plugged in or picked, or the PC started a stream. */
 static inline void own_now(own_state_t *h, uint64_t now)
 {
-    if (h->running) return;
+    /* v9.9.2: a START, a route change or a device change must not resume over an interruption: only
+     * own_interruption_cleared and the takeover deadline may. In v9.9.1 both paths reset next_ms. */
+    if (h->running || h->interrupted) return;
     h->next_ms = now;
     h->failures = 0;
 }
@@ -236,6 +275,77 @@ static inline void own_released(own_state_t *h)
 {
     h->running = 0;
     h->released = 1;
+}
+
+/* ---- input starvation (v9.9.2) ----
+ * The v9.8.85, .87 and .89 device logs: for the first ~40 s after bluetoothd starts, the PC's packets arrive at roughly
+ * half of real time (13-27 a second instead of 47), in order, with contiguous RTP sequence numbers and timestamps -
+ * nothing lost and nothing for a buffer to wait for. v9.9.1's 0.25 s jitter buffer filled, played, ran dry and
+ * re-primed 26 times: bursts of sound separated by silence. A buffer cannot make half-rate input continuous, so the
+ * helper measures the decoded PCM rate against the output rate and, while the input cannot sustain playback, holds the
+ * output silent (keeping only the newest 0.25 s) instead of bursting; when the input is back at real time it plays at
+ * once from that lead. Healthy streams never trip it. 1 s windows: one AAC packet is ~2% of a window, so ordinary
+ * Bluetooth jitter (a packet or two either way) stays clear of both thresholds - the device's healthy windows ran
+ * 96-100% of real time and its starved ones 28-57%. (500 ms windows with a 97% bar, tried first, recovered 4 s late
+ * and re-tripped on jitter in the measured-pattern test: one packet was 4.3% of a window.) */
+#define INPUT_WINDOW_MS 1000u
+#define INPUT_STARVED_PCT 80u        /* a window below this share of real time: starved */
+#define INPUT_HEALTHY_PCT 92u        /* ... and this many consecutive windows at or above this: healthy again */
+#define INPUT_RECOVER_WINDOWS 1u
+
+typedef struct {
+    uint64_t window_ms;          /* start of the current window; 0 = not measuring yet */
+    unsigned armed;              /* an active stream: the first decoded PCM starts the first window */
+    uint64_t frames;             /* PCM frames decoded in it */
+    unsigned rate;               /* the last complete window, frames per second */
+    unsigned starved;            /* the output is being held because the input can't sustain it */
+    unsigned healthy_windows;    /* consecutive healthy windows while starved */
+    uint64_t starved_ms;         /* when the current starvation began */
+    uint64_t starved_total_ms;   /* across the stream, for the log */
+    unsigned starvations;
+} input_rate_t;
+
+/* A stream (re)started or paused: start measuring afresh. A pause is not starvation. */
+static inline void input_rate_reset(input_rate_t *r, uint64_t now, int active)
+{
+    (void)now;
+    memset(r, 0, sizeof *r);
+    r->armed = active ? 1u : 0u;
+}
+
+/* Count decoded PCM; call often (with 0 frames too) so windows close on time. Returns +1 when the output must now be
+ * held (starved), -1 when it may play again, 0 otherwise. output_rate: the queue's frames per second. */
+static inline int input_rate_add(input_rate_t *r, unsigned frames, unsigned output_rate, uint64_t now)
+{
+    if (!output_rate) return 0;
+    if (!r->window_ms) {                                  /* the first PCM of the stream starts measuring */
+        if (!r->armed || !frames) return 0;
+        r->window_ms = now ? now : 1u;
+    }
+    r->frames += frames;
+    if (now < r->window_ms || now - r->window_ms < INPUT_WINDOW_MS) return 0;
+    uint64_t elapsed = now - r->window_ms;
+    r->rate = (unsigned)(r->frames * 1000u / elapsed);
+    r->frames = 0;
+    r->window_ms = now;
+    uint64_t pct = (uint64_t)r->rate * 100u / output_rate;
+    if (!r->starved) {
+        if (pct < INPUT_STARVED_PCT) {
+            r->starved = 1; r->healthy_windows = 0; r->starved_ms = now; r->starvations++;
+            return 1;
+        }
+        return 0;
+    }
+    if (pct >= INPUT_HEALTHY_PCT) {
+        if (++r->healthy_windows >= INPUT_RECOVER_WINDOWS) {
+            r->starved = 0;
+            r->starved_total_ms += now - r->starved_ms;
+            return -1;
+        }
+    } else {
+        r->healthy_windows = 0;
+    }
+    return 0;
 }
 
 /* AVAudioSessionRouteChangeReason values (public, stable since iOS 6). A route change the helper did not cause and

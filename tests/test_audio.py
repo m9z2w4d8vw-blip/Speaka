@@ -127,6 +127,36 @@ class IdleGuard(unittest.TestCase):
             ran = subprocess.run([str(exe)], text=True, capture_output=True, timeout=10, env=env)
             self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
 
+    def test_holding_through_an_interruption_keeps_the_lease_while_decoding(self):
+        # v9.9.2: in v9.8.89 the lease needed rendered frames, so it lapsed 1.5 s into an interruption and Apple's A2DP
+        # code suspended the stream when the helper came back (11:05:39.816). A paused helper now reports "holding" with
+        # decode progress as its counter; the relay passes holding as playing, so the lease lasts exactly as long as the
+        # helper consumes the stream - and lapses as soon as it stops.
+        self.compile_run(r"""
+#include <assert.h>
+#include "tweak/Tweak.h"
+int main(void) {
+    SinkHealth h; sink_health_reset(&h,3,100,1000);
+    uint64_t media=100,beat=1000; uint32_t decoded=0;
+    for (uint64_t t=200; t<=20000; t+=200) {                 /* 20 s of interruption: decoding goes on */
+        media++; beat++; decoded+=1024;
+        sink_health_sample(&h,media,beat,t);
+        sink_health_render(&h,3,decoded,1,t);                 /* the relay passes holding (2) as playing */
+        assert(sink_health_ready(&h,1,t));
+    }
+    /* Decoding stops (the stream ended, or the helper stalled): the lease lapses within 1.5 s. */
+    for (uint64_t t=20200; t<=21500; t+=100) { beat++; sink_health_sample(&h,media,beat,t); sink_health_render(&h,3,decoded,1,t); }
+    assert(!sink_health_ready(&h,1,21701));
+    return 0;
+}
+""")
+        relay = read("tweak/AudioRelay.c")
+        self.assertIn("sink_health_render(health,e.bytes,e.frames,e.result==1||e.result==2,now);", relay)
+        helper = read("audiohelper/AudioHelper.m")
+        health = between(helper, "static void report_health(Output *o,AudioRing *s,uint64_t generation) {", "\n}\n")
+        self.assertIn("if(o->paused && (generation&1u)) {", health)
+        self.assertIn("__atomic_load_n(&o->decoded_frames,__ATOMIC_RELAXED),2});", health)
+
     def test_health_requires_current_media_heartbeat_and_rendering(self):
         self.compile_run(r'''
 #include <assert.h>
@@ -605,6 +635,108 @@ int main(void) {
             self.assertEqual(ran.returncode,0,ran.stdout+ran.stderr)
             print(ran.stdout,end="")
 
+    def test_startup_starvation_measured_packet_pattern(self):
+        """The v9.8.89 startup (11:04:28-11:05:08), packet by packet: the arrival rates measured in each 2 s window of the
+        device log (13-27 packets/s for 26 s, then ~47/s), one 1024-frame AAC frame per packet, contiguous - through the
+        real render callback, the real PCM writers and the real input monitor. v9.9.1's behaviour (no input gate)
+        must reproduce the device's fill/play/run-dry cycles (26 re-primes measured); v9.9.2 must hold the output
+        instead of bursting during the starved window, play continuously once the input is at real time, and keep a
+        healthy start's latency low."""
+        source = SOURCE.read_text()
+        render = source.split("#define PCM_CAPACITY", 1)[1].split("static void stop_output", 1)[0]
+        writers = source.split("static void hold_pcm(", 1)[1].split("static void keep_output(", 1)[0]
+        harness = r"""
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+typedef int32_t OSStatus;
+typedef void *AudioQueueRef;
+typedef struct { void *mAudioData; uint32_t mAudioDataByteSize; } AudioQueueBuffer;
+typedef AudioQueueBuffer *AudioQueueBufferRef;
+static OSStatus AudioQueueEnqueueBuffer(AudioQueueRef q,AudioQueueBufferRef b,unsigned p,const void *d){(void)q;(void)b;(void)p;(void)d;return 0;}
+#define PCM_CAPACITY""" + render + "static void hold_pcm(" + writers + r"""
+#include "OutputPolicy.h"
+/* Packets per second in each 2 s window of the device log, 11:04:30 to 11:05:08. */
+static const double MEASURED[] = {21.5,25.8,23.5,24.8,13.9,13.4,13.5,24.5,26.2,26.4,26.5,26.3,26.9,
+                                  44.9,46.4,47.1,46.5,47.2,46.9,47.0};
+typedef struct { unsigned reprimes_slow, onsets_slow, underrun_after; long first_audio_after_ms, first_audio_ms;
+                 uint64_t gated, silence_slow, audio_slow; } Result;
+static Result run(int gate, const double *rates, unsigned windows, double healthy_from_s) {
+    static Output o; memset(&o,0,sizeof o); pthread_mutex_init(&o.lock,NULL); o.priming=1;
+    int16_t pcm[1024*2]; for (int i=0;i<2048;i++) pcm[i]=1000;
+    int16_t data[AUDIO_FRAMES*2]; AudioQueueBuffer buf={data,0};
+    input_rate_t in; input_rate_reset(&in,0,1);
+    Result r={0,0,0,-1,-1,0,0,0};
+    uint64_t total_us=(uint64_t)windows*2000000u, next_render=0, next_pkt=0; unsigned seed=12345; double sched=0;
+    int was_audible=0; double healthy_us=healthy_from_s*1e6;
+    for (uint64_t t=0;t<total_us;t+=1000) {                               /* 1 ms steps */
+        unsigned w=(unsigned)(t/2000000u); double rate=rates[w<windows?w:windows-1];
+        if (t>=next_pkt) {                                                  /* a packet arrives: decode, measure, write */
+            int c=input_rate_add(&in,1024,48000,t/1000);
+            if (gate && c) { if (c<0) o.priming=o.count<PCM_PRIME; o.input_starved=c>0; }
+            if (gate && o.input_starved) hold_pcm(&o,pcm,1024); else write_pcm(&o,pcm,1024);
+            /* The next packet is scheduled from this one's scheduled time (not from the 1 ms step it fired on),
+             * so the long-run rate is exactly the measured one; the jitter is around that schedule. */
+            seed=seed*1103515245u+12345u; long jitter=(long)((seed>>16)%7)-3;   /* +-3 ms */
+            sched+=1e6/rate; next_pkt=(uint64_t)(sched+jitter*1000.0>0?sched+jitter*1000.0:0);
+        }
+        if (t%5000==0) {                                                    /* the main loop closes windows on time */
+            int c=input_rate_add(&in,0,48000,t/1000);
+            if (gate && c) { if (c<0) o.priming=o.count<PCM_PRIME; o.input_starved=c>0; }
+        }
+        if (t>=next_render) {                                               /* 512 frames at 48 kHz */
+            uint64_t before=o.submitted_frames, und=o.silence_underrun; unsigned rep=(unsigned)o.reprimes;
+            render(&o,&o,&buf);
+            int audible=o.submitted_frames>before;
+            int slow=t<(uint64_t)healthy_us;
+            if (slow) { if (audible && !was_audible) r.onsets_slow++; r.reprimes_slow+=(unsigned)o.reprimes-rep;
+                        if (audible) r.audio_slow+=AUDIO_FRAMES; else r.silence_slow+=AUDIO_FRAMES; }
+            if (audible && r.first_audio_ms<0) r.first_audio_ms=(long)(t/1000);
+            if (!slow && audible && r.first_audio_after_ms<0) r.first_audio_after_ms=(long)((t-(uint64_t)healthy_us)/1000);
+            if (!slow && t>(uint64_t)healthy_us+2000000u) r.underrun_after+=(unsigned)(o.silence_underrun-und);
+            was_audible=audible;
+            next_render+=10667;
+        }
+    }
+    r.gated=o.silence_gated;
+    pthread_mutex_destroy(&o.lock);
+    return r;
+}
+int main(void) {
+    /* The measured startup: starved for the first 26 s (13 windows), near real time after. */
+    Result old=run(0,MEASURED,20,26.0), now=run(1,MEASURED,20,26.0);   /* from 26 s: 44.9/s = 96% of real time */
+    printf("v9.9.1 (no gate): reprimes in the starved window=%u, audible bursts=%u\n",old.reprimes_slow,old.onsets_slow);
+    printf("v9.9.2 (gate):    reprimes in the starved window=%u, audible bursts=%u, gated=%llu frames,"
+           " audio %ld ms after the input reached real time, underruns after=%u\n",now.reprimes_slow,now.onsets_slow,
+           (unsigned long long)now.gated,now.first_audio_after_ms,now.underrun_after);
+    assert(old.reprimes_slow>=15 && old.reprimes_slow<=40);   /* the model reproduces the device's ~26 cycles */
+    assert(old.onsets_slow>=15);
+    assert(now.onsets_slow<=2);                                 /* held, not bursting: at most an initial blip */
+    assert(now.gated>(uint64_t)48000*20);                       /* most of the starved window is a clean hold */
+    assert(now.first_audio_after_ms>=0 && now.first_audio_after_ms<=1500);   /* plays soon after real time returns */
+    assert(now.underrun_after==0);                              /* and then continuously */
+    /* A healthy stream (a resume within a connection: 47/s from the first packet) must not be gated or delayed. */
+    static const double HEALTHY[]={47.0,46.9,47.1,46.8,47.0};
+    Result h=run(1,HEALTHY,5,0.0);
+    printf("healthy start: first audio at %ld ms, gated=%llu frames, underruns=%u\n",h.first_audio_ms,
+           (unsigned long long)h.gated,h.underrun_after);
+    assert(h.first_audio_ms>=0 && h.first_audio_ms<=350);       /* the 0.25 s lead, not a measurement delay */
+    assert(h.gated==0 && h.underrun_after==0);
+    return 0;
+}
+"""
+        cc = shutil.which("cc"); self.assertIsNotNone(cc)
+        flags = ["-std=gnu11","-O2","-Wall","-Wextra","-Werror","-pthread","-I"+str(ROOT/"audiohelper"),"-I"+str(ROOT)]
+        with tempfile.TemporaryDirectory() as td:
+            c = pathlib.Path(td)/"startup.c"; exe = pathlib.Path(td)/"startup"; c.write_text(harness)
+            built = subprocess.run([cc,*flags,str(c),"-o",str(exe)],capture_output=True,text=True,timeout=60)
+            self.assertEqual(built.returncode,0,built.stdout+built.stderr)
+            ran = subprocess.run([str(exe)],capture_output=True,text=True,timeout=60)
+            self.assertEqual(ran.returncode,0,ran.stdout+ran.stderr)
+            print(ran.stdout,end="")
+
     def test_speaker_route_and_teardown_guards(self):
         source = SOURCE.read_text()
         # The speaker path is unchanged since v8.8.1. v8.9.4 adds the only other PlayAndRecord configuration, wired
@@ -744,25 +876,70 @@ int main(void) {
         self.assertEqual(registration.count("queue:nil"), 3)
         self.assertNotIn("dispatch_get_main_queue", helper)   # nothing else is waiting to run on the main thread
 
-    def test_an_interruption_waits_for_the_end_instead_of_fighting(self):
-        # v9.9.1: v9.8.87 retook the output ~250 ms after every interruption, and each retake's reactivation nudged the
-        # other app to interrupt again - a recurring cycle in the device log. Now the helper tears the dead queue down
-        # without a NotifyOthers deactivation, keeps the decoder and buffered PCM, and parks until iOS says the
-        # interruption ended (a long backstop still reclaims if "ended" never arrives). Packets keep decoding meanwhile.
+    def test_an_interruption_pauses_in_place_and_resumes_by_the_rules(self):
+        # v9.9.2: the queue is paused, not disposed; the PCM and decoder are kept; resuming is decided only by the
+        # interruption rules (ended, the other audio stopping, or the takeover), and resumes the same queue.
         helper = read("audiohelper/AudioHelper.m")
         loop = helper.split("for(;;) {", 1)[1].split("[[NSNotificationCenter defaultCenter] removeObserver:observer];", 1)[0]
         began = loop.split("if(changed==1) {", 1)[1].split("} else {", 1)[0]
-        self.assertIn('stop_output(o,s,"interruption_began",0);', began)       # no release: no NotifyOthers deactivation
+        self.assertIn('pause_output(o,s,"interruption_began");', began)
+        self.assertNotIn("stop_output(", began)                                 # v9.9.1 disposed the queue here
         self.assertLess(began.index('note_session(0,"interrupted")'), began.index("own_interrupted(&own,now);"))
-        self.assertNotIn("own_taken(", loop)                                  # no short retake loop any more
         ended = loop.split("} else {", 1)[1].split("\n            }\n", 1)[0]
-        self.assertIn("own_now(&own,now);", ended)                            # ended: reclaim at once
-        self.assertIn("V882_INTERRUPTION_END should_resume=%d", ended)
+        self.assertIn("own_interruption_cleared(&own,now);", ended)
+        # The other app's audio stopping clears it: quiet for 0.5 s, at least 0.5 s after it began.
+        self.assertIn("[[AVAudioSession sharedInstance] isOtherAudioPlaying]", loop)
+        self.assertIn("now-other_quiet_since>=500u && now-own.interrupted_ms>=500u", loop)
+        # Resuming reuses the paused queue; a rebuild only when it can't be resumed or the rate changed.
+        pause = between(helper, "static void pause_output(", "\n}\n")
+        self.assertNotIn("AudioQueueDispose", pause)
+        resume = between(helper, "static int resume_output(", "\n}\n")
+        self.assertIn("AudioQueueStart(o->queue,NULL)", resume)
+        self.assertNotIn("AudioQueueNewOutput", resume)
+        self.assertIn("if(started==-4 || started==-3) {", loop)                 # activation refused (-1): keep paused
+        # A paused queue is not a running output anywhere in the loop.
+        for site in ("if(o->queue && !o->paused) {\n                    log_route(", "if(o->queue && !o->paused && o->rate!=rate) {",
+                     "else if(o->queue && !o->paused && !own.running) own_started(&own,now);",
+                     "if((!o->queue || o->paused) && own_may_start(&own,now)) {"):
+            self.assertIn(site, loop)
         self.assertIn("if(!(generation&1u) || packet.generation!=generation) continue;", loop)   # packets keep decoding
-        # The policy parks (no imminent start) and reclaims only on a long backstop or own_now.
-        policy = read("audiohelper/OutputPolicy.h")
-        self.assertIn("OWN_INTERRUPT_BACKSTOP_MS", policy)
-        self.assertLess(policy.index("static inline void own_taken"), policy.index("static inline void own_interrupted"))
+        # The comment says what is actually kept (v9.9.1's said "the buffered PCM" while the ring was cleared).
+        self.assertIn("What is kept: the", began)
+
+    def test_interruption_policy_against_the_v9_8_89_timeline(self):
+        # 11:05:31.050 an app takes the audio and keeps playing. v9.9.1 waited 8.8 s; v9.9.2 takes it back at 3 s, never
+        # lets a START or route change resume early, resumes at once when the app stops, and backs off a fight.
+        out = OutputOwnership.compile_run(self, r"""
+#include <assert.h>
+#include "OutputPolicy.h"
+#include "shared/AudioRing.h"
+int main(void) {
+    own_state_t h; own_init(&h); own_started(&h,0);
+    own_interrupted(&h,10000);                                 /* the app takes the audio */
+    own_stream(&h,AUDIO_STREAM_STREAMING,10500);               /* a START mid-interruption ... */
+    own_now(&h,10600);                                         /* ... or a route change */
+    assert(!own_may_start(&h,10600));                          /* neither resumes it (v9.9.1: both did) */
+    assert(!own_may_start(&h,10000+OWN_TAKEOVER_MS-1) && own_may_start(&h,10000+OWN_TAKEOVER_MS));
+    own_resumed(&h,13000);                                     /* takeover at 3 s, not 8.8 s */
+    /* The app takes it straight back, twice: each takeover waits twice as long. */
+    own_interrupted(&h,14000); assert(h.fights==1 && !own_may_start(&h,14000+2*OWN_TAKEOVER_MS-1));
+    own_resumed(&h,20000);
+    own_interrupted(&h,21000); assert(h.fights==2 && !own_may_start(&h,21000+4*OWN_TAKEOVER_MS-1));
+    assert(own_may_start(&h,21000+4*OWN_TAKEOVER_MS));
+    /* The app stops: resume at once, and the fight count resets after a quiet spell. */
+    own_interruption_cleared(&h,22000); assert(own_may_start(&h,22000));
+    own_resumed(&h,22000);
+    own_interrupted(&h,60000); assert(h.fights==0);
+    /* A call: activation fails, the interruption stays, attempts back off. */
+    own_interruption_cleared(&h,61000); own_start_failed(&h,61000,0);
+    assert(h.interrupted && !own_may_start(&h,61999) && own_may_start(&h,62000));
+    /* A refused route (headphones gone) ends the interruption, so plugging them back in resumes. */
+    own_start_failed(&h,62000,1); assert(!h.interrupted && !own_may_start(&h,999999));
+    own_now(&h,70000); assert(own_may_start(&h,70000));
+    return 0;
+}
+""")
+        self.assertEqual(out, "")
 
     def test_health_reasons_reach_the_daemon_log(self):
         health = between(read("audiohelper/AudioHelper.m"), "static void report_health(", "static int read_exact(")
@@ -965,15 +1142,17 @@ int main(void) {
         self.assertIn('#include "OutputPolicy.h"', helper)
         loop = between(helper, "for(;;) {", "[[NSNotificationCenter defaultCenter] removeObserver:observer];")
         # Owned from the connection: the start is the loop's own, before the packet drain, not a packet's.
-        owner = loop.index("if(!o->queue && own_may_start(&own,now)) {")
+        owner = loop.index("if((!o->queue || o->paused) && own_may_start(&own,now)) {")
         self.assertLess(owner, loop.index("for(unsigned i=0;i<AUDIO_RING_SLOTS && audio_ring_dequeue(s,&packet);i++) {"))
-        self.assertIn("int started=start_output(o,rate_hint,s);", loop)
+        self.assertIn("} else started=start_output(o,rate_hint,s);", loop)
         packets = loop.split("for(unsigned i=0;i<AUDIO_RING_SLOTS && audio_ring_dequeue(s,&packet);i++) {", 1)[1]
         self.assertEqual(packets.count("start_output("), 1)                    # only the sample-rate rebuild
         self.assertIn('stop_output(o,s,"sample_rate_changed",0);', packets)   # a new rate keeps the session
         self.assertIn("if(o->queue) write_pcm(o,pcm,samples);", packets)
         # Never released for lack of media; a pause keeps everything; a close lets go after the grace.
-        for gone in ("hold_", "HOLD_", "media_idle", "V91_HOLD_EXPIRED", "rearm", "silent_stream"):
+        # The v9.1 hold policy is gone (hold_pcm, v9.9.2's held-output writer, is unrelated).
+        for gone in ("hold_expired", "hold_may_start", "hold_started", "hold_released", "hold_media", "HOLD_",
+                     "media_idle", "V91_HOLD_EXPIRED", "rearm", "silent_stream"):
             self.assertNotIn(gone, loop)
         generation = between(loop, "if(current!=generation) {", "\n            }\n")
         self.assertIn("if(own.running) keep_output(o,current);", generation)
@@ -988,7 +1167,7 @@ int main(void) {
         # Exclusive, non-mixing playback, and the strongest public priority before every activation.
         for option in ("MixWithOthers", "DuckOthers", "InterruptSpokenAudioAndMixWithOthers"):
             self.assertNotIn(option, helper)
-        self.assertEqual(helper.count("prefer_uninterrupted(session);"), 3)
+        self.assertEqual(helper.count("prefer_uninterrupted(session);"), 4)   # every activation: 3 configure_* + resume
         self.assertIn("setPrefersNoInterruptionsFromSystemAlerts:YES", helper)
         self.assertEqual(helper.count("ok=[session setActive:YES error:&error];if(ok) note_session(1,"), 3)
         # Unchanged v9.1 invariants: speaker mode re-applies its override; a stop releases only when asked.

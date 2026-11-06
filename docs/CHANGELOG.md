@@ -77,13 +77,31 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **Startup stutter, measured (v9.8.89 device test):** the first ~26 s after a Start arrive at 13-27 packets/s
+  instead of 47, in order - contiguous RTP sequence numbers, timestamps +1024 each, forwarded == decoded - so nothing
+  is lost at Speaka's interception point; the packets are delivered late. The window ends ~42.5 s after bluetoothd
+  launches (v9.8.87: 42.7 s, v9.8.89: 42.5 s) and appears identically in v9.8.85, whose helper never activated any
+  audio session; a resume inside an established connection runs at full rate from its first packet. v9.9.1's 0.25 s
+  jitter buffer filled, played and re-primed 26 times in that window. The helper now measures the decoded PCM rate
+  (1 s windows; starved below 80% of real time, healthy again at 92%) and holds the output silent while the input
+  can't sustain it, keeping the newest 0.25 s, then plays at once and continuously when it can. Silence is reported by
+  cause (gated / priming / underrun / busy) with the measured input rate. This makes the window coherent; it does
+  not shorten it - that needs the cause upstream of Speaka (the next device test isolates it).
+- **Interruptions (same test):** at 11:05:31 another app took the audio and kept playing; v9.9.1 waited 8.8 s for an
+  "ended" that never came, then reactivated - and Apple's A2DP code suspended the PC's stream (11:05:39.816), because
+  the idle guard's lease needs rendered frames and had lapsed 1.5 s in. The queue is now paused, not disposed (v9.9.1
+  also cleared the PCM, though its comment said otherwise); the helper reports "holding" with decode progress, which
+  keeps the lease while it consumes the stream; and the interruption resumes only by its own rules - at once on
+  "ended" or when the other app's audio stops, else a takeover after 3 s that doubles (to 24 s) if the app takes it
+  straight back. A START or a route change can no longer resume an interrupted output early (v9.9.1's own_now could).
 - **AAC startup stutter (v9.8.87 device test):** the first ~27 s of AAC were choppy, then smooth. The logs show why -
   every packet that arrived was forwarded and decoded (forwarded==decoded, no errors), but only ~24-30 arrived per
-  second when 48 kHz needs ~47; Windows' A2DP source ramps its transmit rate over the first seconds. Nothing in
-  Speaka was the bottleneck, so no buffer can conjure the missing frames. The render callback no longer starts on the
+  second when 48 kHz needs ~47. (This entry first blamed Windows ramping its transmit rate; the v9.8.89 entry
+  above shows that unsupported - Windows resumes at full rate inside a connection - and what the data does show.)
+  Nothing in Speaka's decode path was the bottleneck, so no buffer can conjure the missing frames. The render callback no longer starts on the
   first frame and splices silence between the sparse real ones; it fills a 0.25 s PCM jitter buffer, then plays, and
   re-primes if it ever drains - turning a long stutter into one short wait, then smooth from the first audible moment.
-  The arrival deficit itself is upstream (Windows), stated in the log as `V881_RENDER priming=/reprimes=`.
+  The arrival deficit itself is upstream of Speaka's decode path, visible in the log as `V881_RENDER priming=/reprimes=`.
 - **Interruptions that kept recurring (same test):** v9.8.87 retook the output ~250 ms after every app interruption,
   and each retake's reactivation nudged the other app to interrupt again. The helper now tears the dead queue down
   without a NotifyOthers deactivation, keeps the decoder and buffered PCM, and parks until iOS reports the

@@ -88,6 +88,10 @@ typedef struct {
     uint64_t render_tick; /* cumulative enqueued PCM frames; never reset by logs */
     unsigned priming;     /* v9.9.1: 1 while filling the jitter buffer; the callback emits silence meanwhile */
     uint64_t reprimes;    /* times the buffer drained mid-stream and had to re-fill */
+    int32_t input_starved;   /* v9.9.2: the input can't sustain playback: hold (silence, no drain, keep newest) */
+    unsigned paused;         /* v9.9.2: an interruption stopped the queue; queue and PCM are kept for the resume */
+    uint64_t silence_gated, silence_priming, silence_underrun, silence_busy;   /* why silence was played (render) */
+    uint32_t decoded_frames; /* PCM frames decoded: the progress a paused helper reports to keep the lease */
     AudioQueueRef queue;
 } Output;
 
@@ -99,12 +103,16 @@ static void render(void *context,AudioQueueRef queue,AudioQueueBufferRef buffer)
     unsigned take=0,nonzero=0;
     memset(out,0,AUDIO_FRAMES*4u);
     /* Never wait on the decoder. If it holds the PCM lock, emit silence. */
+    int why=0;   /* 0 playing, 1 gated (input starved), 2 underrun (ring ran dry), 3 busy (lock), 4 priming the lead */
     if(pthread_mutex_trylock(&o->lock)==0) {
+        /* v9.9.2: while the input can't sustain real time, hold: silence, and leave the PCM in place (the writer
+         * keeps only the newest PCM_PRIME frames), so playback restarts at once from a full lead. */
+        if(__atomic_load_n(&o->input_starved,__ATOMIC_RELAXED)) why=1;
         /* v9.9.1: hold off while priming; once the lead is built, play. If the buffer empties mid-stream, prime
          * again so the next audio is continuous instead of silence spliced between sparse frames. */
-        if(o->priming) { if(o->count>=PCM_PRIME) o->priming=0; }
-        else if(o->count==0) { o->priming=1; o->reprimes++; }
-        if(!o->priming) {
+        else if(o->priming) { if(o->count>=PCM_PRIME) o->priming=0; else why=4; }
+        else if(o->count==0) { o->priming=1; o->reprimes++; why=2; }
+        if(!why) {
             take=o->count<AUDIO_FRAMES?o->count:AUDIO_FRAMES;
             for(unsigned i=0;i<take;i++) {
                 unsigned slot=(o->read+i)%PCM_CAPACITY;
@@ -112,9 +120,10 @@ static void render(void *context,AudioQueueRef queue,AudioQueueBufferRef buffer)
                 nonzero+=(out[i*2]!=0)+(out[i*2+1]!=0);
             }
             o->read=(o->read+take)%PCM_CAPACITY;o->count-=take;
+            if(take<AUDIO_FRAMES) why=2;   /* ran dry part-way through this buffer */
         }
         pthread_mutex_unlock(&o->lock);
-    }
+    } else why=3;
     if(__atomic_load_n(&o->stopping,__ATOMIC_ACQUIRE)) return;
     buffer->mAudioDataByteSize=AUDIO_FRAMES*4u;
     OSStatus e=AudioQueueEnqueueBuffer(queue,buffer,0,NULL);
@@ -128,6 +137,8 @@ static void render(void *context,AudioQueueRef queue,AudioQueueBufferRef buffer)
         __atomic_fetch_add(&o->submitted_frames,take,__ATOMIC_RELAXED);
         __atomic_fetch_add(&o->submitted_nonzero,nonzero,__ATOMIC_RELAXED);
         __atomic_fetch_add(&o->silence_frames,AUDIO_FRAMES-take,__ATOMIC_RELAXED);
+        uint64_t *cause=why==1?&o->silence_gated:why==4?&o->silence_priming:why==3?&o->silence_busy:&o->silence_underrun;
+        if(take<AUDIO_FRAMES) __atomic_fetch_add(cause,AUDIO_FRAMES-take,__ATOMIC_RELAXED);
     }
 }
 static void stop_output(Output *o,AudioRing *s,const char *reason,int release) {
@@ -144,7 +155,7 @@ static void stop_output(Output *o,AudioRing *s,const char *reason,int release) {
             (uint32_t)current_generation,
             (uint32_t)__atomic_load_n(&o->render_tick,__ATOMIC_RELAXED),0});
         AudioQueueStop(o->queue,true);
-        AudioQueueDispose(o->queue,true);o->queue=NULL;o->rate=0;
+        AudioQueueDispose(o->queue,true);o->queue=NULL;o->rate=0;o->paused=0;
         __atomic_store_n(&o->error,0,__ATOMIC_RELAXED);
         pthread_mutex_lock(&o->lock);o->read=o->count=0;pthread_mutex_unlock(&o->lock);
         audio_ring_event(s,1,(AudioRingEvent){RING_EVENT_AUDIO,0,0,1});
@@ -434,6 +445,41 @@ static int start_output(Output *o,unsigned rate,AudioRing *s) {
  * the route changes (with wired earbuds plugged in, the earbuds take over), so the override is applied again on the
  * live session instead of deactivating it: deactivating re-routes iOS, which is what fed the 23:33 loop. The queue
  * stops first, so nothing plays on the wrong output meanwhile. Returns 0 when it plays on the speaker again. */
+/* v9.9.2: an interruption. iOS has already stopped the queue and deactivated the session; keep the queue object and
+ * the PCM (v9.9.1 disposed the queue and cleared the ring, though its comment said the PCM was kept). The decoder
+ * runs on, so the stream stays current, and the helper reports "holding" so the idle guard keeps the stream. */
+static void pause_output(Output *o,AudioRing *s,const char *reason) {
+    if(!o->queue || o->paused) return;
+    o->paused=1;
+    (void)AudioQueuePause(o->queue);              /* already stopped by iOS; harmless, and explicit */
+    uint64_t g=__atomic_load_n(&s->generation,__ATOMIC_ACQUIRE);
+    hlog(stdout,"V100_OUTPUT_PAUSED reason=%s generation=%llu active=%u queue=kept pcm=kept\n",reason,
+         (unsigned long long)(g>>1),(unsigned)(g&1u));
+}
+/* Resume a paused queue on a re-activated session: no new queue, no dispose. 0 ok; -1 activation refused (a call, an
+ * alarm: keep the paused queue and back off); -2 route refused; -3 the stream's rate changed and -4 the queue would
+ * not start (the caller rebuilds from scratch for both). */
+static int resume_output(Output *o,unsigned rate,AudioRing *s) {
+    if(!o->queue || !o->paused) return -1;
+    if(rate && rate!=o->rate) return -3;
+    AVAudioSession *session=[AVAudioSession sharedInstance];NSError *error=nil;
+    prefer_uninterrupted(session);
+    if(![session setActive:YES error:&error]) {
+        hlog(stdout,"V100_RESUME_FAIL stage=activate code=%ld\n",(long)error.code);return -1;
+    }
+    note_session(1,"resumed");
+    if(g_output_mode==OUTPUT_MODE_SPEAKER) (void)[session overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:NULL];
+    if(route_verdict(session,NULL)) {hlog(stdout,"V100_RESUME_FAIL stage=route\n");return -2;}
+    pthread_mutex_lock(&o->lock);
+    if(o->count>PCM_PRIME) {unsigned drop=o->count-PCM_PRIME;o->read=(o->read+drop)%PCM_CAPACITY;o->count=PCM_PRIME;}
+    o->priming=o->count<PCM_PRIME;               /* resume from the newest 0.25 s */
+    pthread_mutex_unlock(&o->lock);
+    OSStatus e=AudioQueueStart(o->queue,NULL);
+    if(e) {hlog(stdout,"V100_RESUME_FAIL stage=queue_start status=%d\n",(int)e);return -4;}
+    o->paused=0;
+    log_route(session,"resumed",o->rate,s);
+    return 0;
+}
 static int reassert_speaker(Output *o,unsigned rate,AudioRing *s) {
     AVAudioSession *session=[AVAudioSession sharedInstance];NSError *error=nil;
     stop_output(o,s,"route_changed_reassert",0);
@@ -452,27 +498,50 @@ static void measure_pcm(PCMLevels *level,const int16_t *pcm,unsigned frames) {
         if(magnitude>level->peak) level->peak=magnitude;
     }
 }
-static void report_progress(Output *o,PCMLevels *level,AudioRing *s,uint64_t generation) {
+static void report_progress(Output *o,PCMLevels *level,AudioRing *s,uint64_t generation,const input_rate_t *in) {
     uint64_t callbacks=__atomic_exchange_n(&o->render_callbacks,0,__ATOMIC_RELAXED);
     uint64_t submitted=__atomic_exchange_n(&o->submitted_frames,0,__ATOMIC_RELAXED);
     uint64_t nonzero=__atomic_exchange_n(&o->submitted_nonzero,0,__ATOMIC_RELAXED);
     uint64_t silence=__atomic_exchange_n(&o->silence_frames,0,__ATOMIC_RELAXED);
+    uint64_t gated=__atomic_exchange_n(&o->silence_gated,0,__ATOMIC_RELAXED);
+    uint64_t priming=__atomic_exchange_n(&o->silence_priming,0,__ATOMIC_RELAXED);
+    uint64_t underrun=__atomic_exchange_n(&o->silence_underrun,0,__ATOMIC_RELAXED);
+    uint64_t busy=__atomic_exchange_n(&o->silence_busy,0,__ATOMIC_RELAXED);
     UInt32 running=0,size=sizeof running;
     OSStatus status=o->queue?AudioQueueGetProperty(o->queue,kAudioQueueProperty_IsRunning,&running,&size):-1;
     pthread_mutex_lock(&o->lock);unsigned queued=o->count;pthread_mutex_unlock(&o->lock);
     int route_ok=!route_verdict([AVAudioSession sharedInstance],NULL);
     hlog(stdout,"V881_PCM samples=%u nonzero=%u peak=%u\n",level->samples,level->nonzero,level->peak);
     uint64_t reprimes=__atomic_load_n(&o->reprimes,__ATOMIC_RELAXED);
-    hlog(stdout,"V881_RENDER callbacks=%llu pcm_frames=%llu nonzero_samples=%llu silence_frames=%llu queued_frames=%u dropped_frames=%llu queue_running=%u query_status=%d route_ok=%d priming=%u reprimes=%llu mode=%s\n",
+    /* v9.9.2: silence by cause - gated = input starved (held on purpose), priming = building the 0.25 s lead,
+     * underrun = the ring ran dry with the input judged healthy (output side), busy = PCM lock contention. */
+    hlog(stdout,"V881_RENDER callbacks=%llu pcm_frames=%llu nonzero_samples=%llu silence_frames=%llu queued_frames=%u dropped_frames=%llu queue_running=%u query_status=%d route_ok=%d priming=%u reprimes=%llu in_rate=%u input=%s silence_gated=%llu silence_priming=%llu silence_underrun=%llu silence_busy=%llu paused=%u mode=%s\n",
         (unsigned long long)callbacks,(unsigned long long)submitted,(unsigned long long)nonzero,
         (unsigned long long)silence,queued,(unsigned long long)o->dropped,(unsigned)running,(int)status,route_ok,
-        o->priming,(unsigned long long)reprimes,output_mode_name(g_output_mode));
+        o->priming,(unsigned long long)reprimes,in?in->rate:0u,in&&in->starved?"starved":"healthy",
+        (unsigned long long)gated,(unsigned long long)priming,(unsigned long long)underrun,(unsigned long long)busy,
+        o->paused,output_mode_name(g_output_mode));
     fflush(stdout);
     /* v9.1: a kept output in a stream gap stays "idle" (PC paused) instead of flipping back to "playing". */
-    if(o->queue && (generation&1u)) publish_status(route_ok?@"playing":@"waiting",route_ok?@"":@"output route changed",NO);
+    if(o->queue && !o->paused && (generation&1u)) publish_status(route_ok?@"playing":@"waiting",route_ok?@"":@"output route changed",NO);
     audio_ring_event(s,1,(AudioRingEvent){RING_EVENT_PCM,level->peak,level->samples,(int32_t)level->nonzero});
     audio_ring_event(s,1,(AudioRingEvent){RING_EVENT_RENDER,(uint32_t)silence,(uint32_t)submitted,(int32_t)callbacks});
     *level=(PCMLevels){0};
+}
+/* v9.9.2: while the output is held (input starved, or paused by an interruption) keep only the newest PCM_PRIME
+ * frames, so it restarts at once from a full lead at low latency. These trims are by design, not counted as drops. */
+static void hold_pcm(Output *o,const int16_t *pcm,unsigned frames) {
+    if(frames>PCM_PRIME) {pcm+=(frames-PCM_PRIME)*2u;frames=PCM_PRIME;}
+    pthread_mutex_lock(&o->lock);
+    if(o->count+frames>PCM_PRIME) {
+        unsigned drop=o->count+frames-PCM_PRIME;if(drop>o->count) drop=o->count;
+        o->read=(o->read+drop)%PCM_CAPACITY;o->count-=drop;
+    }
+    for(unsigned i=0;i<frames;i++) {
+        unsigned slot=(o->read+o->count+i)%PCM_CAPACITY;
+        o->pcm[slot*2]=pcm[i*2];o->pcm[slot*2+1]=pcm[i*2+1];
+    }
+    o->count+=frames;pthread_mutex_unlock(&o->lock);
 }
 static void write_pcm(Output *o,const int16_t *pcm,unsigned frames) {
     pthread_mutex_lock(&o->lock);
@@ -494,6 +563,14 @@ static void keep_output(Output *o,uint64_t generation) {
          (unsigned)(generation&1u));
 }
 static void report_health(Output *o,AudioRing *s,uint64_t generation) {
+    /* v9.9.2: "holding" (2): paused by an interruption with the stream active and decoding. The counter is decode
+     * progress, so the idle guard keeps the stream exactly as long as the helper keeps consuming it. Without it, the
+     * lease lapsed 1.5 s into an interruption and Apple's A2DP code suspended the stream (v9.8.89, 11:05:39.816). */
+    if(o->paused && (generation&1u)) {
+        audio_ring_event(s,1,(AudioRingEvent){RING_EVENT_HEALTH,(uint32_t)generation,
+            __atomic_load_n(&o->decoded_frames,__ATOMIC_RELAXED),2});
+        return;
+    }
     UInt32 running=0,size=sizeof running;
     OSStatus status=o->queue?AudioQueueGetProperty(o->queue,kAudioQueueProperty_IsRunning,&running,&size):-1;
     /* v8.9.4: the reason bits travel as a negative result so the daemon can log them; 1 still means playing.
@@ -566,6 +643,8 @@ static void stream(int fd) {
     if(stream_state==AUDIO_STREAM_CLOSED) own_released(&own);   /* reconnected after the PC closed: wait for it */
     unsigned rate_hint=codec_decoder_rate_hint(&decoder);
     int own_logged=-1;
+    input_rate_t input;input_rate_reset(&input,helper_ms(),(int)(__atomic_load_n(&s->generation,__ATOMIC_ACQUIRE)&1u));
+    uint64_t other_quiet_since=0,last_poll=0;   /* v9.9.2: the other app's audio stopping clears an interruption */
     PCMLevels level={0};
     __block int interruption=0,route_changed=0,interruption_should_resume=0;__block long interruption_reason=-1;
     __block long route_reason=-1;__block int route_device=0,media_reset=0;
@@ -604,8 +683,8 @@ static void stream(int fd) {
             __atomic_fetch_add(&s->helper_heartbeat,1,__ATOMIC_RELEASE);
             uint64_t now=helper_ms();
             /* Every path below keeps own.running equal to "a queue is running"; this only guards against a miss. */
-            if(!o->queue && own.running) own_start_failed(&own,now,0);
-            else if(o->queue && !own.running) own_started(&own,now);
+            if((!o->queue || o->paused) && own.running) own_start_failed(&own,now,0);
+            else if(o->queue && !o->paused && !own.running) own_started(&own,now);
             if(__atomic_exchange_n(&media_reset,0,__ATOMIC_ACQUIRE)) {
                 hlog(stdout,"V91_MEDIA_SERVICES_RESET queue=%d session=%d\n",o->queue!=NULL,g_session_active);
                 stop_output(o,s,"media_services_reset",1);codec_decoder_reset(&decoder);
@@ -616,18 +695,20 @@ static void stream(int fd) {
                 hlog(stdout,"V882_INTERRUPTION type=%s reason=%ld queue=%d\n",changed==1?"began":"ended",
                      __atomic_load_n(&interruption_reason,__ATOMIC_RELAXED),o->queue!=NULL);fflush(stdout);
                 if(changed==1) {
-                    /* v9.9.1: iOS has already stopped our queue and deactivated us. Tear the dead queue down without
-                     * a NotifyOthers deactivation (which would tell the interrupting app to keep going), keep the
-                     * decoder and the buffered PCM, and wait for the "ended" notification rather than fighting the
-                     * other app with an immediate retake - the thing that made the interruptions recur in v9.8.87.
-                     * OWN_NEVER parks the owner until "ended"; a long-stop backstop still retakes if none arrives. */
-                    stop_output(o,s,"interruption_began",0);
+                    /* v9.9.2: iOS has already stopped our queue and deactivated our session. What is kept: the
+                     * AudioQueue object (paused, not disposed), the newest 0.25 s of PCM (hold_pcm trims the ring while
+                     * paused), the decoder and its state (packets keep decoding), and the stream's idle-guard lease
+                     * (report_health says "holding" while decoding progresses). What is not: the session (iOS ended it)
+                     * - no NotifyOthers deactivation is sent, which would tell the interrupting app to carry on.
+                     * Resuming (OutputPolicy.h, own_interrupted): at once on "ended" or when the other app's audio
+                     * stops; otherwise a takeover after OWN_TAKEOVER_MS, doubling if the app takes it straight back. */
+                    pause_output(o,s,"interruption_began");
                     if(g_session_active) note_session(0,"interrupted");
-                    own_interrupted(&own,now);
+                    own_interrupted(&own,now);other_quiet_since=0;
                 } else {
                     int resume=__atomic_load_n(&interruption_should_resume,__ATOMIC_RELAXED);
                     hlog(stdout,"V882_INTERRUPTION_END should_resume=%d\n",resume);
-                    own_now(&own,now);                 /* ended: reclaim the output now, whatever iOS advised */
+                    own_interruption_cleared(&own,now);   /* ended: resume now, whatever iOS advised */
                 }
             }
             int settings_changed=0;
@@ -643,7 +724,7 @@ static void stream(int fd) {
                 int own_echo=g_session_changed_ms && now>=g_session_changed_ms && now-g_session_changed_ms<1500u;
                 hlog(stdout,"V91_ROUTE_CHANGE reason=%ld(%s) device_change=%d own_echo=%d playing=%d\n",reason,
                      own_route_reason_name(reason),device,own_echo,o->queue!=NULL);
-                if(o->queue) {
+                if(o->queue && !o->paused) {
                     log_route(session,"changed",o->rate,s);
                     if(route_verdict(session,NULL)) {
                         /* v9.1: speaker mode re-applies its override on the live session before giving up. */
@@ -665,8 +746,11 @@ static void stream(int fd) {
                  * bluetoothd START or SUSPEND the PC's stream. Only stale PCM is dropped. */
                 if(own.running) keep_output(o,current);
                 codec_decoder_reset(&decoder);generation=current;
+                /* v9.9.2: a new stream (or a pause) is measured afresh; a pause is not starvation. */
+                if(input.starved) hlog(stdout,"V100_INPUT healthy reason=stream_change\n");
+                input_rate_reset(&input,now,(int)(current&1u));__atomic_store_n(&o->input_starved,0,__ATOMIC_RELAXED);
                 if(!(current&1u)) publish_status(@"idle",@"PC paused or stopped the stream",NO);
-                else if(o->queue) publish_status(@"playing",@"",NO);
+                else if(o->queue && !o->paused) publish_status(@"playing",@"",NO);
             }
             int32_t audio_error=__atomic_exchange_n(&o->error,0,__ATOMIC_RELAXED);
             if(audio_error) {
@@ -685,21 +769,58 @@ static void stream(int fd) {
                 hlog(stdout,"V99_OWN release: the PC closed its stream %u s ago and opened none\n",OWN_CLOSED_RELEASE_MS/1000u);
                 stop_output(o,s,"stream_closed",1);codec_decoder_reset(&decoder);own_released(&own);
             }
+            /* v9.9.2: while interrupted, the other app's audio stopping clears the interruption (it doesn't always send
+             * "ended"). Quiet must hold for 0.5 s, beginning at least 0.5 s after the interruption, so the moment the
+             * other app is still activating is not mistaken for it having stopped. */
+            if(own.interrupted && now-last_poll>=250u) {
+                last_poll=now;
+                if([[AVAudioSession sharedInstance] isOtherAudioPlaying]) other_quiet_since=0;
+                else if(!other_quiet_since) other_quiet_since=now;
+                if(other_quiet_since && now-other_quiet_since>=500u && now-own.interrupted_ms>=500u &&
+                   own.next_ms>now) {
+                    hlog(stdout,"V100_INTERRUPTION_CLEARED by=other_audio_stopped after_ms=%llu\n",
+                         (unsigned long long)(now-own.interrupted_ms));
+                    own_interruption_cleared(&own,now);
+                }
+            }
             /* v9.9: own the output: start it now - at connection, before the PC's first packet - and take it back
-             * whenever it is lost. The queue plays silence until PCM arrives. */
-            if(!o->queue && own_may_start(&own,now)) {
-                int retake=own.retaking;
-                int started=start_output(o,rate_hint,s);
+             * whenever it is lost. The queue plays silence until PCM arrives. v9.9.2: after an interruption the same
+             * queue is resumed in place; a new one is built only if there is none or resuming fails. */
+            if((!o->queue || o->paused) && own_may_start(&own,now)) {
+                int retake=own.interrupted||own.retaking;
+                uint64_t lost_ms=own.interrupted?now-own.interrupted_ms:0;
+                int resumed=0,started;
+                if(o->queue && o->paused) {
+                    started=resume_output(o,rate_hint,s);
+                    if(started==-4 || started==-3) {          /* rebuild: the queue can't be resumed, or a new rate */
+                        stop_output(o,s,started==-3?"resume_rate_changed":"resume_failed",0);
+                        started=start_output(o,rate_hint,s);
+                    } else resumed=!started;
+                } else started=start_output(o,rate_hint,s);
                 if(started) own_start_failed(&own,helper_ms(),started==-2);
-                else own_started(&own,helper_ms());
+                else own_resumed(&own,helper_ms());
                 /* Ready before the PC plays: the app shows "playing" only once the stream is active (report_progress). */
                 if(!started && !(generation&1u)) publish_status(@"idle",@"ready for the PC",YES);
+                else if(!started) publish_status(@"playing",@"",YES);
                 int code=started?(started==-2?2:1):0;
                 if(code!=own_logged || retake) {
-                    hlog(stdout,"V99_OWN %s%s rate=%u failures=%u next_in_ms=%lld\n",retake?"retake ":"",
-                         !started?"started":started==-2?"waiting_for_output":"start_failed",rate_hint,own.failures,
+                    hlog(stdout,"V99_OWN %s%s rate=%u failures=%u fights=%u lost_ms=%llu next_in_ms=%lld\n",
+                         retake?"retake ":"",!started?(resumed?"resumed_in_place":"started"):started==-2?"waiting_for_output":"start_failed",
+                         rate_hint,own.failures,own.fights,(unsigned long long)lost_ms,
                          own.next_ms==OWN_NEVER?-1ll:(own.next_ms>now?(long long)(own.next_ms-now):0ll));
                     own_logged=code;
+                }
+            }
+            /* v9.9.2: close the input-rate window on time even when no packet arrives. */
+            if(input.window_ms) {
+                int change=input_rate_add(&input,0,o->rate?o->rate:rate_hint,now);
+                if(change) {
+                    if(change<0) {pthread_mutex_lock(&o->lock);o->priming=o->count<PCM_PRIME;pthread_mutex_unlock(&o->lock);}
+                    __atomic_store_n(&o->input_starved,change>0,__ATOMIC_RELAXED);
+                    hlog(stdout,"V100_INPUT %s rate=%u/%u (%u%%) starvations=%u starved_total_ms=%llu\n",
+                         change>0?"starved":"healthy",input.rate,o->rate?o->rate:rate_hint,
+                         (o->rate?o->rate:rate_hint)?(unsigned)((uint64_t)input.rate*100u/(o->rate?o->rate:rate_hint)):0u,
+                         input.starvations,(unsigned long long)input.starved_total_ms);
                 }
             }
             uint64_t signal=__atomic_load_n(&s->doorbell,__ATOMIC_ACQUIRE);
@@ -714,7 +835,16 @@ static void stream(int fd) {
                     /* Recheck after decoding so a concurrent STOP cannot queue stale PCM. */
                     if(__atomic_load_n(&s->generation,__ATOMIC_ACQUIRE)!=generation) break;
                     rate_hint=rate;                     /* the next (re)start uses the stream's real rate */
-                    if(o->queue && o->rate!=rate) {
+                    __atomic_fetch_add(&o->decoded_frames,samples,__ATOMIC_RELAXED);
+                    int change=input_rate_add(&input,samples,o->rate?o->rate:rate,helper_ms());
+                    if(change) {
+                        if(change<0) {pthread_mutex_lock(&o->lock);o->priming=o->count<PCM_PRIME;pthread_mutex_unlock(&o->lock);}
+                        __atomic_store_n(&o->input_starved,change>0,__ATOMIC_RELAXED);
+                        hlog(stdout,"V100_INPUT %s rate=%u/%u starvations=%u starved_total_ms=%llu\n",
+                             change>0?"starved":"healthy",input.rate,o->rate?o->rate:rate,input.starvations,
+                             (unsigned long long)input.starved_total_ms);
+                    }
+                    if(o->queue && !o->paused && o->rate!=rate) {
                         /* v9.1: a new sample rate rebuilds only the queue; the session stays active. */
                         stop_output(o,s,"sample_rate_changed",0);
                         int restarted=start_output(o,rate,s);
@@ -723,7 +853,9 @@ static void stream(int fd) {
                             own_start_failed(&own,helper_ms(),restarted==-2);
                         } else own_started(&own,helper_ms());
                     }
-                    if(o->queue) write_pcm(o,pcm,samples);
+                    /* v9.9.2: held (input starved, or paused by an interruption): keep only the newest lead. */
+                    if(o->queue && (o->paused || __atomic_load_n(&o->input_starved,__ATOMIC_RELAXED))) hold_pcm(o,pcm,samples);
+                    else if(o->queue) write_pcm(o,pcm,samples);
                 }
                 /* If bounded drain left packets, poll again instead of losing a wakeup. */
                 if(__atomic_load_n(&s->media.read,__ATOMIC_RELAXED)==
@@ -732,7 +864,7 @@ static void stream(int fd) {
             diagnostic_ticks++;
             if(diagnostic_ticks%40u==0) report_health(o,s,generation);
             if(diagnostic_ticks%200u==0 && ((generation&1u) || level.samples))
-                report_progress(o,&level,s,generation);
+                report_progress(o,&level,s,generation,&input);
         }
         /* v8.9.4: this loop runs on the helper's main thread and never ran its run loop, and not one route change or
          * interruption was handled in any session, although earbuds were plugged in during playback. If AVAudioSession

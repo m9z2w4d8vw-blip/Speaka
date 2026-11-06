@@ -183,7 +183,9 @@ static void drain_logs(AudioRing *s,SinkHealth *health,uint64_t now) {
         if(!audio_ring_pop(&s->decode_log,s->decoded,sizeof s->decoded[0],
                         AUDIO_RING_EVENTS,&e,sizeof e)) break;
         if(e.kind==RING_EVENT_HEALTH) {
-            sink_health_render(health,e.bytes,e.frames,e.result==1,now);
+            /* v9.9.2: 1 = playing (counter: rendered frames); 2 = holding through an interruption (counter: decoded
+             * frames). Both keep the lease while their counter advances: the helper is consuming the stream. */
+            sink_health_render(health,e.bytes,e.frames,e.result==1||e.result==2,now);
             g_relay_health_why=e.result<0?(unsigned)(-(int64_t)e.result):0u;
         }
         else if(e.kind==RING_EVENT_DECODE) {
