@@ -60,6 +60,43 @@ struct WindowCard<Content: View>: View {
     }
 }
 
+/// A button like those under Actions in Dopamine's Settings (Refresh Jailbreak Apps, Hide Jailbreak, ...), measured
+/// from an iPhone 13 screenshot at 3x: 266 x 36 pt in the 330 pt window, 32 pt in from each side (the window's 16 pt
+/// content padding plus `WindowActionButton.inset`); a 1 pt border inside the edge, white at 15%, over no fill; 10 pt
+/// circular corners (UIKit's layer radius, not continuous: the traced corner fits a circle to 0.5 px); the symbol at
+/// 18 pt and the title at 17 pt Regular, white, 13 pt apart as drawn (10 pt of spacing plus the side bearings),
+/// centred. Stacked 8 pt apart.
+struct WindowActionButton: View {
+    static let height: CGFloat = 36
+    static let inset: CGFloat = 16      // beyond the window's 16 pt padding: 32 pt from the window's edges
+    static let spacing: CGFloat = 8
+
+    let title: String
+    let symbol: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .regular))
+                Text(title)
+                    .font(.system(size: 17, weight: .regular))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.height)
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .circular)
+                .strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .circular))
+        }
+        .buttonStyle(MenuButtonStyle())
+    }
+}
+
 /// Where the audio plays: the same three choices as Settings > Speaka > Play audio on, then iOS's own picker for
 /// Bluetooth earbuds in Any device mode.
 struct OutputWindow: View {
@@ -215,30 +252,28 @@ struct RoutePickerAnchor: UIViewRepresentable {
 /// Settings: Kill Bluetooth (the README's `killall -9 bluetoothd`, through the root helper) and Update notifications.
 struct SettingsWindow: View {
     @ObservedObject var model: SpeakaModel
+    /// v9.9.2: Credits lives here now (the menu's fourth row is Connect to).
+    let showCredits: () -> Void
 
     private var busy: Bool { model.killingBluetooth || model.request != nil }
 
     var body: some View {
         // v9.8: a size smaller: rows 44 pt (were 50) with 12 pt corners, text at Caz's 15 pt for Settings rows, the
         // switch at 85%. Neither row has a description; a line shows only when something failed, at Caz's 12 pt.
+        // v9.9.2: the buttons are Dopamine's Actions buttons (WindowActionButton); the switch row is unchanged.
         WindowCard(title: "Settings") {
             VStack(spacing: 10) {
-                Button {
-                    model.killBluetooth()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                        Text(model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth")
+                // v9.9.2: Dopamine's Actions buttons - Kill Bluetooth and Credits, 266 x 36 pt, 8 pt apart.
+                VStack(spacing: WindowActionButton.spacing) {
+                    WindowActionButton(title: model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth",
+                                       symbol: "arrow.triangle.2.circlepath") {
+                        model.killBluetooth()
                     }
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(Theme.menu, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .disabled(busy)
+                    .opacity(busy ? 0.5 : 1)
+                    WindowActionButton(title: "Credits", symbol: "info.circle", action: showCredits)
                 }
-                .buttonStyle(.plain)
-                .disabled(busy)
-                .opacity(busy ? 0.5 : 1)
+                .padding(.horizontal, WindowActionButton.inset)
                 if let failure = model.killResult {
                     Text(failure)
                         .font(.system(size: 12))
@@ -279,9 +314,11 @@ struct SettingsWindow: View {
 }
 
 struct CreditsWindow: View {
+    /// v9.9.2: opened from Settings, so it has a way back there.
+    var onBack: (() -> Void)? = nil
 
     var body: some View {
-        WindowCard(title: "Credits") {
+        WindowCard(title: "Credits", onBack: onBack) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Speaka")
@@ -333,4 +370,18 @@ struct CreditsWindow: View {
         }
         return "MIT License\n\nCopyright (c) 2023-2024 Lars Fröder (opa334)"
     }()
+}
+
+/// v9.9.2: the menu's fourth row - where connecting to a computer will live. A window of its own, empty for now.
+struct ConnectWindow: View {
+    var body: some View {
+        WindowCard(title: "Connect to") {
+            Text("Computers you can connect to will appear here.")
+                .font(.system(size: 15))
+                .foregroundStyle(Theme.secondary)
+                .multilineTextAlignment(.center)
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
 }

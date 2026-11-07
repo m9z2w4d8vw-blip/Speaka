@@ -9,6 +9,10 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **The menu's fourth row is Connect to**, a window of its own for connecting to a computer (empty for now). **Credits
+  moved into Settings**, with a back button to Settings. Settings' **Kill Bluetooth** and **Credits** are Dopamine's
+  Actions buttons, measured from an iPhone 13 screenshot: 266 x 36 pt, 32 pt in from the window's sides, a 1 pt border
+  at 15% white with no fill, 10 pt circular corners, an 18 pt symbol and a 17 pt Regular title, 8 pt apart.
 - **Fixed: a false "No room for the speaker" after a successful Start (device test of 9.9).** The dual layout
   allocates eight endpoint slots and the device registered both Sinks, but the live audit printed a fixed
   `expected=7` and the app's room step accepted only `live_slots=7`. The failure was recorded with the session already

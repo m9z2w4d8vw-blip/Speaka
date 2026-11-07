@@ -93,12 +93,13 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
 - **The header** reads *by Parv*, or, when something needs you, says what in the warning colour: for example that the
   volume is at zero, or that Bluetooth was turned off and on.
 - **Settings** has **Kill Bluetooth** (`killall -9 bluetoothd`, from the app: Bluetooth restarts at once, without the
-  speaker) and **Update notifications**.
+  speaker), **Credits** (the app's and the tweak's versions, and the license of the interface, which Speaka shares
+  with Caz) and **Update notifications**. Its buttons are Dopamine's Actions buttons.
 - **Audio Output** chooses where the sound plays; see [Where the audio plays](#where-the-audio-plays).
 - **Uninstall**, held for 4 seconds, removes the tweak, Speaka's logs, settings and downloads, and the app. A tap does
   nothing; while you hold, a gray fill sweeps across the row, and letting go early cancels. If the tweak can't be
   removed, nothing else is, and the header says why.
-- **Credits** shows the app's and the tweak's versions, and the license of the interface, which Speaka shares with Caz.
+- **Connect to** opens its own window, the place for connecting to a computer; it's empty for now.
 
 ### Updates
 
@@ -362,7 +363,7 @@ Every release, newest first, is in [docs/CHANGELOG.md](docs/CHANGELOG.md).
   commit `6e505650145c9973d08a0bdd5e5f5e1914305e40` and isn't committed.
 - The app's interface, updater included, is [**Caz**](https://github.com/m9z2w4d8vw-blip/Caz)'s, on Speaka's own
   background. Caz's is adapted from [**Dopamine**](https://github.com/opa334/Dopamine) by Lars Fröder (opa334) and its
-  contributors under the MIT License, which ships in the app under **Credits**.
+  contributors under the MIT License, which ships in the app under **Settings > Credits**.
 - The app's title is a picture of "Speaka" drawn in [Fonarto](https://www.fontspace.com/fonarto-2-font-f104632)
   Regular, the same way as Caz's (`app/scripts/make_wordmark.py`). Fonarto is by Locomotype and free for personal and
   commercial use; only the picture ships, not the font.

@@ -12,7 +12,7 @@ import SwiftUI
 import UIKit
 
 enum SpeakaWindow: Equatable {
-    case settings, output, credits, update
+    case settings, output, credits, connect, update
 }
 
 struct ContentView: View {
@@ -181,11 +181,13 @@ struct ContentView: View {
     private func windowView(_ window: SpeakaWindow, size: CGSize) -> some View {
         switch window {
         case .settings:
-            SettingsWindow(model: model)
+            SettingsWindow(model: model) { self.window = .credits }   // v9.9.2: Credits moved here
         case .output:
             OutputWindow(model: model)
         case .credits:
-            CreditsWindow()
+            CreditsWindow { self.window = .settings }
+        case .connect:
+            ConnectWindow()
         case .update:
             UpdateFlowView(updater: updater, screenWidth: size.width)
         }
@@ -205,8 +207,9 @@ struct ContentView: View {
             MenuItem(id: "uninstall", title: "Uninstall", symbol: "trash",
                      enabled: model.request == nil && !updater.isBusy,
                      holdSeconds: 4, busy: locked) { model.uninstall() },
-            MenuItem(id: "credits", title: "Credits", symbol: "info.circle",
-                     chevron: true, enabled: !locked) { window = .credits },
+            // v9.9.2: Connect to, where Credits was (Credits is in Settings now).
+            MenuItem(id: "connect", title: "Connect to", symbol: "link",
+                     chevron: true, enabled: !locked) { window = .connect },
         ]
     }
 }

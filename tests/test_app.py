@@ -890,8 +890,8 @@ int main(void) {
         menu = block(content, "private var menuItems: [MenuItem] {")
         self.assertLess(menu.index('MenuItem(id: "settings", title: "Settings", symbol: "gearshape",'),
                         menu.index('MenuItem(id: "output", title: "Audio Output"'))
-        self.assertIn("case settings, output, credits, update", content)
-        self.assertIn("case .settings:\n            SettingsWindow(model: model)", content)
+        self.assertIn("case settings, output, credits, connect, update", content)   # v9.9.2: Connect to
+        self.assertIn("case .settings:\n            SettingsWindow(model: model) { self.window = .credits }", content)
         windows = read(WINDOWS)
         settings = block(windows, "struct SettingsWindow: View {")
         self.assertIn('WindowCard(title: "Settings") {', settings)
@@ -1603,10 +1603,10 @@ class Menu(unittest.TestCase):
     def test_four_rows_in_order(self):
         items = block_until(read(SPEAKA_SOURCES / "ContentView.swift"), "    private var menuItems: [MenuItem] {", "\n    }\n")
         ids = re.findall(r'MenuItem\(id: "(\w+)"', items)
-        self.assertEqual(ids, ["settings", "output", "uninstall", "credits"])
+        self.assertEqual(ids, ["settings", "output", "uninstall", "connect"])   # v9.9.2: Credits is in Settings
         rows = dict(zip(ids, re.split(r'MenuItem\(id: "\w+"', items)[1:]))
         self.assertIn("let locked = model.uninstalling", items)
-        for name in ("settings", "output", "credits"):
+        for name in ("settings", "output", "connect"):
             self.assertIn("chevron: true, enabled: !locked", rows[name])      # locked once Uninstall starts
         uninstall = rows["uninstall"]
         self.assertIn('title: "Uninstall", symbol: "trash"', uninstall)
@@ -1683,9 +1683,11 @@ class SettingsWindow(unittest.TestCase):
     def test_smaller_and_without_descriptions(self):
         windows = read(SPEAKA_SOURCES / "Windows.swift")
         settings = block_until(windows, "struct SettingsWindow: View {")
-        self.assertEqual(settings.count(".frame(height: 44)"), 2)   # Kill BT, Update notifs (v9.9.11: no AAC switches)
-        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 2)   # the two standard rows
-        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 2)
+        # v9.9.2: Kill Bluetooth (and Credits) are Dopamine's Actions buttons (WindowActionButton); the switch row
+        # keeps Speaka's 44 pt, 12 pt continuous, 15 pt medium row.
+        self.assertEqual(settings.count(".frame(height: 44)"), 1)
+        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 1)
+        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 1)
         self.assertNotIn("Experimental AAC", settings)
         self.assertIn("VStack(spacing: 10)", settings)
         self.assertIn(".scaleEffect(0.85)\n                        .frame(width: 51 * 0.85, height: 31 * 0.85)", settings)
@@ -2024,4 +2026,71 @@ int main(void) {
         for m in re.finditer(r"\n(\s*)problem = nil\n\s*problemSession = nil\n", model):
             self.assertIn("problemStep = nil", model[m.end():m.end() + 40])
         self.assertIn("var headerDetail: String { headerWarning ?? codecWarning ?? \"by Parv\" }", model)   # unchanged
+
+
+class DopamineActions(unittest.TestCase):
+    """v9.9.2: Settings' buttons are Dopamine's Actions buttons (Refresh Jailbreak Apps, Hide Jailbreak, ...), measured
+    from an iPhone 13 screenshot at 3x: 798 x 108 px = 266 x 36 pt, 96 px (32 pt) in from each side of the 330 pt
+    window, a 3 px (1 pt) border inside the edge at about 15% white over no fill (inside matched the card to 0.4 of a
+    level), 10 pt circular corners (the traced corner fits a circle to 0.52 px RMS, a continuous corner to 0.83), the
+    symbol 22 x 18 pt (18 pt), the title's cap height 12.0 pt (17 pt) at Regular's stem, 13 pt apart, centred to 0.2
+    pt, and 24 px (8 pt) between buttons. Credits moved there; the menu's fourth row is Connect to."""
+
+    def windows(self):
+        return read(SPEAKA_SOURCES / "Windows.swift")
+
+    def test_the_button_is_dopamines(self):
+        button = block_until(self.windows(), "struct WindowActionButton: View {")
+        self.assertIn("static let height: CGFloat = 36", button)
+        self.assertIn("static let inset: CGFloat = 16", button)
+        self.assertIn("static let spacing: CGFloat = 8", button)
+        self.assertIn("HStack(spacing: 10) {", button)
+        self.assertIn('Image(systemName: symbol)\n                    .font(.system(size: 18, weight: .regular))', button)
+        self.assertIn("Text(title)\n                    .font(.system(size: 17, weight: .regular))", button)
+        self.assertIn(".foregroundStyle(.white)", button)
+        self.assertIn(".frame(maxWidth: .infinity)\n            .frame(height: Self.height)", button)
+        self.assertIn(".overlay(RoundedRectangle(cornerRadius: 10, style: .circular)\n"
+                      "                .strokeBorder(Color.white.opacity(0.15), lineWidth: 1))", button)   # inside the edge
+        self.assertNotIn(".background(", button)                                            # no fill
+        self.assertNotIn(".continuous", button)                                             # UIKit's circular corners
+        self.assertIn(".buttonStyle(MenuButtonStyle())", button)                            # dims while pressed
+        # 266 pt on an iPhone 13: 390 - 2 x 30 (the window) - 2 x 16 (its content padding) - 2 x 16 (the inset).
+        theme = read(SPEAKA_SOURCES / "Theme.swift")
+        modal = int(re.search(r"static let modalPadding: CGFloat = (\d+)", theme).group(1))
+        settings = block_until(self.windows(), "struct SettingsWindow: View {")
+        content = int(re.search(r"\.frame\(maxWidth: \.infinity, maxHeight: \.infinity, alignment: \.top\)\n\s*\.padding\((\d+)\)", settings).group(1))
+        self.assertEqual(390 - 2 * modal - 2 * content - 2 * 16, 266)
+
+    def test_settings_has_kill_bluetooth_and_credits(self):
+        settings = block_until(self.windows(), "struct SettingsWindow: View {")
+        self.assertIn("let showCredits: () -> Void", settings)
+        group = settings.split("VStack(spacing: WindowActionButton.spacing) {", 1)[1].split(".padding(.horizontal, WindowActionButton.inset)", 1)[0]
+        self.assertIn('WindowActionButton(title: model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth",\n'
+                      '                                       symbol: "arrow.triangle.2.circlepath") {\n'
+                      '                        model.killBluetooth()', group)
+        self.assertIn(".disabled(busy)\n                    .opacity(busy ? 0.5 : 1)", group)        # not during a Start or Stop
+        self.assertIn('WindowActionButton(title: "Credits", symbol: "info.circle", action: showCredits)', group)
+        self.assertLess(group.index('"Kill Bluetooth"'), group.index('title: "Credits"'))
+        # The kill failure and the switch row follow, as before.
+        self.assertLess(settings.index(".padding(.horizontal, WindowActionButton.inset)"), settings.index("if let failure = model.killResult {"))
+        self.assertLess(settings.index("if let failure = model.killResult {"), settings.index('Text("Update notifications")'))
+
+    def test_credits_opens_from_settings_and_goes_back(self):
+        content = read(SPEAKA_SOURCES / "ContentView.swift")
+        self.assertIn("case .credits:\n            CreditsWindow { self.window = .settings }", content)
+        credits = block_until(self.windows(), "struct CreditsWindow: View {")
+        self.assertIn("var onBack: (() -> Void)? = nil", credits)
+        self.assertIn('WindowCard(title: "Credits", onBack: onBack) {', credits)
+        menu = block_until(content, "    private var menuItems: [MenuItem] {", "\n    }\n")
+        self.assertNotIn('title: "Credits"', menu)
+        self.assertNotIn("window = .credits", menu)
+
+    def test_connect_to_takes_the_fourth_row(self):
+        content = read(SPEAKA_SOURCES / "ContentView.swift")
+        menu = block_until(content, "    private var menuItems: [MenuItem] {", "\n    }\n")
+        self.assertIn('MenuItem(id: "connect", title: "Connect to", symbol: "link",\n'
+                      '                     chevron: true, enabled: !locked) { window = .connect },', menu)
+        self.assertIn("case .connect:\n            ConnectWindow()", content)
+        window = block_until(self.windows(), "struct ConnectWindow: View {")
+        self.assertIn('WindowCard(title: "Connect to") {', window)
 
