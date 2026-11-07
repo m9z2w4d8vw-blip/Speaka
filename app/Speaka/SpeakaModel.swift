@@ -49,6 +49,7 @@ final class SpeakaModel: ObservableObject {
         var playingOn = ""
         var waitingReason = ""
         var volumeZero = false
+        var activeCodec = ""
         var detail = ""
         var connected = false
         var routeName = ""
@@ -95,15 +96,6 @@ final class SpeakaModel: ObservableObject {
     @Published private(set) var killResult: String? = nil
     /// Settings > Update notifications, and whether iOS refused permission the last time it was turned on.
     @Published private(set) var updateNotifications = SPTweakClient.updateNotificationsEnabled()
-    @Published var aacDecode: Bool = SPTweakClient.aacDecodeEnabled() {
-        didSet { SPTweakClient.setAACDecodeEnabled(aacDecode) } }
-    @Published var aacSink: Bool = SPTweakClient.aacSinkEnabled() {
-        didSet {
-            SPTweakClient.setAACsinkEnabled(aacSink)
-            // An AAC endpoint needs the helper's AAC decoder; without it the helper refuses the stream (silence).
-            if aacSink && !aacDecode { aacDecode = true }
-        }
-    }
     @Published private(set) var notificationsRefused = false
 
     private let client = SPTweakClient()
@@ -122,6 +114,7 @@ final class SpeakaModel: ObservableObject {
     private var outputChangeDate: Date? = nil
 
     init() {
+        SPTweakClient.removeLegacyCodecSettings()   // v9.9.11: the AAC experiment's switches
         refresh()
     }
 
@@ -160,7 +153,21 @@ final class SpeakaModel: ObservableObject {
     var headerSubtitle: String { "iOS \(UIDevice.current.systemVersion)" }
 
     /// Second line under the name: "by Parv", or whatever needs attention, in the warning colour.
-    var headerDetail: String { headerWarning ?? "by Parv" }
+    /// The header's line under the iOS version: a warning, else the SBC notice (v9.9.11), else the credit.
+    var headerDetail: String { headerWarning ?? codecWarning ?? "by Parv" }
+    /// v9.9.11: true when the detail line is a warning - either kind is drawn in the warning color.
+    var headerDetailIsWarning: Bool { headerWarning != nil || codecWarning != nil }
+    /// A second warning line, directly under the first: the SBC notice when another warning (the volume at 0%)
+    /// holds the first line.
+    var headerSecondWarning: String? { headerWarning != nil ? codecWarning : nil }
+
+    /// v9.9.11: shown while Speaka plays a stream the PC negotiated as SBC - the codec the helper is decoding, not what
+    /// was offered. Gone when playback stops, the PC disconnects, or the codec is unknown.
+    var codecWarning: String? {
+        guard request == nil, !uninstalling, snapshot.session == .on, snapshot.playing,
+              snapshot.activeCodec == "SBC" else { return nil }
+        return "Using SBC audio instead of AAC."
+    }
 
     var headerWarning: String? {
         // v9.8: removing the tweak is the point of an uninstall, so it doesn't warn that the tweak is missing (or
@@ -289,6 +296,7 @@ final class SpeakaModel: ObservableObject {
         next.playingOn = status.playingOn
         next.waitingReason = status.waitingReason
         next.volumeZero = status.volumeZero
+        next.activeCodec = status.activeCodec
         next.detail = status.detail
         next.connected = status.connected
         next.routeName = status.routeName

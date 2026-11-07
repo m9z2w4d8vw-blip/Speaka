@@ -20,8 +20,11 @@
 #define SPEAKA_KEY_SEVEN_SLOTS_ONCE "SpeakaV81SevenOnce" /* OFF by default, consumed before use */
 #define SPEAKA_KEY_CONFIG_OBSERVER "SpeakaV80ConfigLookupObserver" /* OFF: pass-through getter timing observer */
 #define SPEAKA_KEY_EXPERIMENTS  "SpeakaExperiments"   /* boolean, flipped by the switch in the Settings pane */
-#define SPEAKA_KEY_AAC          "SpeakaAAC"           /* boolean, OFF by default: offer AAC-LC alongside SBC (experimental) */
-#define SPEAKA_KEY_AAC_SINK     "SpeakaAACSink"       /* boolean, OFF by default: advertise SEID 7 as AAC-LC instead of SBC (experimental; requires a Bluetooth restart to take effect) */
+#define SPEAKA_KEY_AAC          "SpeakaAAC"           /* legacy (experiment): ignored - AAC decoding is standard since v9.9.11 */
+#define SPEAKA_KEY_AAC_SINK     "SpeakaAACSink"       /* legacy (v9.8.8x-9.8.99 experiment): ignored, removed by the app */
+/* v9.9.11: the dual Sink layout's outcome - "pending" while one is being set up, "ok" once both endpoints registered.
+ * A "pending" left by a launch that never finished means the next Start uses the single AAC endpoint ("failed"). */
+#define SPEAKA_KEY_DUAL_SINK_STATE "SpeakaDualSinkState"
 
 #define SPEAKA_LOG_DIR      "/tmp/FTABHarvest"
 #define SPEAKA_LOG_FILE     "/tmp/FTABHarvest/Speaka.log"
@@ -69,7 +72,10 @@ static inline void speaka_state_unpack(uint64_t s, unsigned *loaded, unsigned *u
 }
 
 /* Opt-in AVRCP experiment; absent/off preserves current playback behavior. */
-#define SPEAKA_KEY_VOLUME_MODE "SpeakaAVRCPVolumeMode"
+#define SPEAKA_KEY_VOLUME_MODE "SpeakaAVRCPVolumeMode"   /* legacy (v9.8.9x experiment): removed at install */
+/* v9.9.11: AVRCP volume sync - a standard feature. Absent or "on": on. "off" / "observe": recovery and diagnostics
+ * (BTPSAudioHelper --volume-mode). A new key, so the experiment's old values (off by default) don't carry over. */
+#define SPEAKA_KEY_VOLUME_SYNC "SpeakaVolumeSync"
 #define SPEAKA_KEY_VOLUME_REQUEST "SpeakaAVRCPLocalVolumeRequest"
 /* The last verified Speaka PC (PeerIdentity.c): bound at startup so its AVRCP requests are answered even if they
  * arrive before its A2DP configuration. Written by the tweak. */

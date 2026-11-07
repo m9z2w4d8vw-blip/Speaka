@@ -197,7 +197,7 @@ int main(void) {
         self.assertIn("sp_volume_mailbox_set(mailbox,0,127);engaged=0;", reset)
         # Off mode installs nothing.
         install = adapter.split("void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {", 1)[1]
-        self.assertLess(install.index("if(!mode) return;"), install.index("MSHookFunction("))
+        self.assertLess(install.index("if(!mode) {SpeakaLogNow(\"AVRCP_VOLUME off (SpeakaVolumeSync=off)\");return;}"), install.index("MSHookFunction("))
         # Early requests don't wait for the helper; the gain waits in the mailbox for it.
         receive = adapter.split("static uint32_t receive(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("if(mode==2)\n                consumed=sp_volume_command(", receive)
@@ -294,7 +294,7 @@ int main(void) {
         self.assertIn("dispatch_async_f(queue,NULL,persist_level);", apply)                 # off the receive thread
         receive = adapter.split("static uint32_t receive(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("if(consumed && p[3]==0x31 && state.subscribed && !engaged && mailbox) {", receive)
-        self.assertIn("sp_volume_mailbox_set(mailbox,1,state.value);engaged=1;", receive)
+        self.assertIn("sp_volume_mailbox_set_from(mailbox,1,0,state.value);engaged=1;", receive)   # v9.9.11: Speaka's, not Windows'
 
 
 
@@ -380,7 +380,7 @@ int main(void) {
         self.assertIn('NSClassFromString(@"AVSystemController")', setter)
         self.assertIn("if([c respondsToSelector:set]) controller=c;", setter)          # missing: the gain domain
         self.assertIn('((BOOL (*)(id,SEL,float))objc_msgSend)(c,NSSelectorFromString(@"setActiveCategoryVolumeTo:"),(float)level/127.0f)', helper)
-        loop = helper.split("int windows=sp_volume_mailbox_enabled(o->volume)?(int)gain:-1;", 1)[1].split("if(o->queue && !o->paused && now-level_reported>=2000u) {", 1)[0]
+        loop = helper.split("int windows=sp_volume_mailbox_from_windows(o->volume)?(int)gain:-1;", 1)[1].split("if(o->queue && !o->paused && now-level_reported>=2000u) {", 1)[0]
         self.assertIn("if(change==1) report_local_volume(ios);", loop)                 # the user's change only
         self.assertIn("__atomic_store_n(&o->ios_domain,0u,__ATOMIC_RELAXED);", loop)    # ineffective: back to gain
         self.assertIn("else if(windows<0) report_local_volume(ios);", loop)            # initial: the phone's level
@@ -400,3 +400,95 @@ int main(void) {
                     self.assertTrue(("if(" + name) in context or ("if(!" + name) in context,
                                     "unguarded call at line %d: %s" % (i + 1, line.strip()))
         self.assertIn('SpeakaLogNow("AVRCP_VOLUME FAILED CLOSED: %s has no original; degraded, not called",which);', adapter)
+
+
+class VolumeStandard(unittest.TestCase):
+    """v9.9.11: volume sync is a standard feature (live-verified both ways on iOS 17.0 + Windows 11, v9.8.99): on without
+    any setting, the experiment's key migrated away, `--volume-mode off|observe` for recovery and diagnostics. And the
+    v9.8.99 log's one jump - the phone at 127 set to a saved 51 when Windows registered - is gone: only a level Windows
+    chose (SetAbsoluteVolume) moves iOS's volume."""
+
+    def read(self, path):
+        return (ROOT / path).read_text()
+
+    def test_on_by_default_and_migrated(self):
+        adapter = self.read("tweak/VolumeControl.m")
+        install = adapter.split("void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {", 1)[1]
+        self.assertLess(install.index("mode=2;"), install.index("CFSTR(SPEAKA_KEY_VOLUME_SYNC)"))   # absent: on
+        self.assertIn('if(CFEqual(v,CFSTR("off"))) mode=0;', install)
+        self.assertIn('if(CFEqual(v,CFSTR("observe"))) mode=1;', install)
+        legacy = install.split("CFPropertyListRef legacy=", 1)[1].split("    mode=2;", 1)[0]
+        self.assertIn("CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),NULL,CFSTR(SPEAKA_PREFS_DOMAIN));", legacy)
+        self.assertNotIn('CFSTR("experimental")', install)          # the experiment's values never decide it
+        self.assertNotIn("STATIC EVIDENCE ONLY", adapter)
+        self.assertIn('#define SPEAKA_KEY_VOLUME_SYNC "SpeakaVolumeSync"', self.read("shared/SpeakaShared.h"))
+        helper = self.read("audiohelper/AudioHelper.m")
+        cli = helper.split('if(argc==3 && strcmp(argv[1],"--volume-mode")==0) {', 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn('strcmp(argv[2],"experimental")?argv[2]:"on"', cli)     # the old name still means on
+        self.assertIn("CFSTR(SPEAKA_KEY_VOLUME_SYNC),mode", cli)
+        local = helper.split('if(argc==3 && strcmp(argv[1],"--volume")==0) {', 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn('int enabled=!mode || (CFGetTypeID(mode)==CFStringGetTypeID() && CFEqual(mode,CFSTR("on")));', local)
+
+    def test_only_windows_choices_move_ios_volume(self):
+        harness = r"""
+#include <assert.h>
+#include "shared/VolumeMailbox.h"
+int main(void) {
+    SPVolumeMailbox m = {0};
+    sp_volume_mailbox_set_from(&m, 1, 1, 51);                 /* SetAbsoluteVolume from Windows */
+    assert(sp_volume_mailbox_enabled(&m) && sp_volume_mailbox_from_windows(&m) && sp_volume_mailbox_gain(&m) == 51);
+    sp_volume_mailbox_set_from(&m, 1, 0, 51);                 /* Speaka's INTERIM at registration, or the phone's own */
+    assert(sp_volume_mailbox_enabled(&m) && !sp_volume_mailbox_from_windows(&m) && sp_volume_mailbox_gain(&m) == 51);
+    sp_volume_mailbox_set(&m, 1, 90);                         /* the older call: never Windows' choice */
+    assert(!sp_volume_mailbox_from_windows(&m) && sp_volume_mailbox_gain(&m) == 90);
+    sp_volume_mailbox_set_from(&m, 0, 1, 40);                 /* disabled: nothing, unity */
+    assert(!sp_volume_mailbox_enabled(&m) && !sp_volume_mailbox_from_windows(&m) && sp_volume_mailbox_gain(&m) == 127);
+    sp_volume_mailbox_set_from(&m, 1, 1, 0);                  /* mute is a level */
+    assert(sp_volume_mailbox_from_windows(&m) && sp_volume_mailbox_gain(&m) == 0);
+    return 0;
+}
+"""
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "provenance.c"; exe = Path(td) / "provenance"; src.write_text(harness)
+            build = subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), str(src),
+                                    str(ROOT / "shared/VolumeMailbox.c"), "-o", str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            self.assertEqual(subprocess.run([str(exe)], timeout=30).returncode, 0)
+        adapter = self.read("tweak/VolumeControl.m")
+        self.assertIn("sp_volume_mailbox_set_from(mailbox,1,!applying_local,value);", adapter)
+        tick = adapter.split("        applying_local=1;\n", 1)[1].split("\n", 2)
+        self.assertEqual(tick[0].strip(), "int ok=sp_volume_local(&state,&io,(unsigned)value);")
+        self.assertEqual(tick[1].strip(), "applying_local=0;")
+        helper = self.read("audiohelper/AudioHelper.m")
+        self.assertIn("int windows=sp_volume_mailbox_from_windows(o->volume)?(int)gain:-1;", helper)
+        # At connection, with no level Windows chose: the phone's own level is reported, never changed.
+        self.assertIn("else if(windows<0) report_local_volume(ios);", helper)
+
+    def test_mute_unmute_and_the_users_press_after(self):
+        harness = r"""
+#include <assert.h>
+#include "shared/VolumeControl.h"
+int main(void) {
+    SPVolumeDomain d; sp_domain_init(&d, 1);
+    assert(sp_domain_observed(&d, 70, 1000) == 2);
+    int l = sp_domain_remote(&d, 0, 70, 2000); assert(l == 0); sp_domain_set(&d, 0, 2000);      /* Windows mutes */
+    assert(sp_domain_observed(&d, 0, 2200) == 0);                                                /* its echo */
+    assert(sp_domain_verify(&d, 0, 2400) == 0 && d.ios);
+    l = sp_domain_remote(&d, 64, 0, 4000); assert(l == 64); sp_domain_set(&d, 64, 4000);        /* and unmutes */
+    assert(sp_domain_observed(&d, 64, 4200) == 0 && sp_domain_verify(&d, 64, 4400) == 0);
+    assert(sp_domain_observed(&d, 72, 6500) == 1);                                               /* the user's press */
+    /* A reconnection: a new domain, the phone's level first. */
+    SPVolumeDomain r; sp_domain_init(&r, 1);
+    assert(sp_domain_observed(&r, 72, 100) == 2);
+    return 0;
+}
+"""
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "mute.c"; exe = Path(td) / "mute"; src.write_text(harness)
+            build = subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), str(src),
+                                    str(ROOT / "shared/VolumeControl.c"), "-o", str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            self.assertEqual(subprocess.run([str(exe)], timeout=30).returncode, 0)
+

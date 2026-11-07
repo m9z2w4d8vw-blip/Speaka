@@ -5,6 +5,28 @@ number (9.8.74 is a push of 9.8), so the versions below are the ones where somet
 notes, with its device-test steps, are in the git history (`docs/history/`, before v9.8's cleanup). How each part of
 `bluetoothd` was found is in [BLUETOOTHD.md](BLUETOOTHD.md).
 
+## v9.9
+
+Volume sync and AAC are standard.
+
+- **Volume sync is on by default.** Windows' slider sets the iPhone's own output volume, the iPhone's buttons and
+  Control Center reach Windows, and Speaka's PCM gain stays at unity (live-verified on iOS 17.0 with Windows 11 in
+  9.8.99: 188 iOS sets read back correctly, no fallback). Nothing to enable: install, Start, connect. The experiment's
+  `SpeakaAVRCPVolumeMode` key is removed at install; `BTPSAudioHelper --volume-mode off` (then Stop/Start) remains
+  the recovery, `--volume-mode observe` the diagnostic.
+- **No volume jump at connection.** 9.8.99 set a phone at 127 down to a saved 51 when Windows registered: Speaka's
+  own INTERIM value looked like Windows' choice. The mailbox now records who chose a level; only SetAbsoluteVolume from
+  Windows moves iOS's volume, and at connection the phone keeps its level and reports it.
+- **AAC-LC preferred, SBC as the fallback - no switches.** Two Sink endpoints: SEID 7 with AAC-LC (first) and one
+  with SBC, A2DP's mandatory codec. The PC configures the one it prefers and supports; each stream's codec comes from
+  its SET_CONFIGURATION. If a dual-endpoint launch ever doesn't complete, the next Start uses the single AAC endpoint
+  that played in 9.8.9x; if only the SBC registration fails, AAC on SEID 7 keeps working. A reconnection that
+  negotiates the other codec gets a new decoder - never one built for the other codec. AAC decoding is standard (the
+  decoder still refuses what it can't decode: silence, logged, never SBC). The app's Experimental AAC switches and
+  their saved values are gone.
+- **The app warns "Using SBC audio instead of AAC."** while the stream playing now was negotiated as SBC - from the
+  codec the helper is decoding - in the header's warning line, under the volume warning when both apply.
+
 ## Unreleased - experimental AAC-LC (behind the SpeakaAAC switch, off by default)
 
 Groundwork for receiving AAC-LC as well as SBC. SBC is unchanged and remains the only codec used until the native

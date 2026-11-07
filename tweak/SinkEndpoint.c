@@ -108,13 +108,15 @@ int sink_analyze_allocation(const uint8_t config[3], const uint8_t context_count
 
 /* ---- the seven-slot config copy ---- */
 int sink_prepare_config_shadow(const uint8_t *source, size_t source_size,
-                            uint8_t out[SINK_CONFIG_COPY_BYTES], int trial_seven)
+                            uint8_t out[SINK_CONFIG_COPY_BYTES], int extra_slots)
 {
+    /* v9.9.11: one extra endpoint slot (the single AAC Sink) or two (AAC + SBC). Only byte 0 - the endpoint count the
+     * initializer at +0xCE3F8 multiplies by the 40-byte slot stride and stores at +0x60 - changes. */
     if (!source || !out || source == out || source_size < SINK_CONFIG_COPY_BYTES ||
-        (trial_seven != 0 && trial_seven != 1)) return -1;
+        extra_slots < 0 || extra_slots > 2) return -1;
     if (source[0] != 6u || source[1] != 3u || source[2] != 3u) return -2;
     memcpy(out, source, SINK_CONFIG_COPY_BYTES);
-    if (trial_seven) out[0] = 7u;
+    out[0] = (uint8_t)(6 + extra_slots);
     return 0;
 }
 

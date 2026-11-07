@@ -38,7 +38,12 @@
 
 /* v8.9 output selection; only the stream thread reads or writes these. */
 static int g_output_mode=OUTPUT_MODE_SPEAKER;
-static int g_aac_enabled=0;   /* SpeakaAAC: offer AAC-LC alongside SBC (experimental, SBC is the default) */
+/* v9.9.11: AAC-LC decoding is standard - the decoder's own validation refuses what it can't decode (silence, logged),
+ * never decoding it as SBC. The experiment's SpeakaAAC switch is ignored. */
+static const int g_aac_enabled=1;
+/* v9.9.11: the codec actually being decoded for the active stream, for the app ("AAC", "SBC", or "" when no stream
+ * is active or it can't be decoded) - published with every status. */
+static const char *g_active_codec="";
 static NSArray<NSDictionary *> *g_never_outputs;
 static int g_output_notify=-1;
 static void publish_status(NSString *state,NSString *reason,BOOL force);
@@ -198,6 +203,7 @@ static void stop_output(Output *o,AudioRing *s,const char *reason,int release) {
         [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:NULL];
         note_session(0,reason);
     }
+    g_active_codec="";
     if(had_queue || had_session) publish_status(@"idle",[NSString stringWithUTF8String:reason]?:@"",NO);
 }
 static int speaker_selected(AVAudioSession *session) {
@@ -224,7 +230,6 @@ static void load_output_settings(void) {
     (void)CFPreferencesAppSynchronize(domain);
     id mode=CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_OUTPUT_MODE),domain));
     g_output_mode=output_mode_from_string([mode isKindOfClass:[NSString class]]?[(NSString *)mode UTF8String]:NULL);
-    g_aac_enabled=CFPreferencesGetAppBooleanValue(CFSTR(SPEAKA_KEY_AAC),domain,NULL)?1:0;
     id never=CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_NEVER_OUTPUTS),domain));
     NSMutableArray<NSDictionary *> *list=[NSMutableArray array];
     if([never isKindOfClass:[NSArray class]])
@@ -300,7 +305,7 @@ static void publish_status(NSString *state,NSString *reason,BOOL force) {
     NSDictionary *status=@{@"version":@1,@"state":state,@"reason":reason,
         @"mode":@(output_mode_name(g_output_mode)),@"outputs":outputs,@"volume":@(session.outputVolume),
         @"time":@([[NSDate date] timeIntervalSince1970]),@"pid":@(getpid()),@"pc":pc?:@{},
-        @"mixing":@(g_mix.mixing)};
+        @"mixing":@(g_mix.mixing),@"codec":@(g_active_codec)};
     if(!g_status_queue) g_status_queue=dispatch_queue_create("com.parv.speaka.helper.status",DISPATCH_QUEUE_SERIAL);
     dispatch_async(g_status_queue,^{
         CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_HELPER_STATUS),(__bridge CFPropertyListRef)status,CFSTR(SPEAKA_PREFS_DOMAIN));
@@ -745,6 +750,11 @@ static void stream(int fd) {
     /* v9.3 experimental: the codec comes from the ring header, set by the tweak at CONFIGURE; SBC is the default
      * and the fallback. The PCM scratch fits the larger of an SBC burst and an AAC-LC frame (1024 stereo). */
     CodecDecoder decoder;codec_decoder_begin(&decoder,s,g_aac_enabled,hlog_line);
+    /* v9.9.11: what this decoder was built for. With two Sink endpoints a reconnection can negotiate the other codec
+     * within one helper session; the decoder is rebuilt for it, never reused across codecs. */
+    uint32_t decoder_codec=__atomic_load_n(&s->codec,__ATOMIC_ACQUIRE);
+    uint8_t decoder_config[sizeof s->codec_config];memcpy(decoder_config,s->codec_config,sizeof decoder_config);
+    g_active_codec="";
     /* Room for the larger of an SBC burst and a packet of several AAC frames (CodecDecoder.h). */
     #define CODEC_PCM_SAMPLES (SBC_DECODER_PCM_SAMPLES>CODEC_DECODER_PCM_SAMPLES?SBC_DECODER_PCM_SAMPLES:CODEC_DECODER_PCM_SAMPLES)
     AudioPacket packet;int16_t pcm[CODEC_PCM_SAMPLES];
@@ -824,7 +834,10 @@ static void stream(int fd) {
                 __atomic_store_n(&o->volume->heartbeat_ms,sp_volume_now_ms(),__ATOMIC_RELEASE);
                 /* v9.9.8: the gain the render callback now applies to every decoded buffer (AAC and SBC alike). */
                 unsigned gain=sp_volume_mailbox_gain(o->volume);
-                int windows=sp_volume_mailbox_enabled(o->volume)?(int)gain:-1;   /* Windows' level, once engaged */
+                /* v9.9.11: a level Windows chose (SetAbsoluteVolume). A level Speaka only reported to it when it
+                 * registered is not one: at connection that let a stale saved level override the phone's own
+                 * (v9.8.99, 10:13:56: the phone at 127 was set to the saved 51). */
+                int windows=sp_volume_mailbox_from_windows(o->volume)?(int)gain:-1;
                 if(gain!=volume_seen) {
                     hlog(stdout,"V106_VOLUME gain=%u/127 (%u%%) output=%s domain=%s\n",gain,(gain*100u+63u)/127u,
                          o->queue&&!o->paused?"playing":"idle",domain.ios?"ios":"speaka");
@@ -938,7 +951,17 @@ static void stream(int fd) {
                 /* A running output is KEPT (v9.1, OutputPolicy.h): stopping it here re-routes iOS, which makes
                  * bluetoothd START or SUSPEND the PC's stream. Only stale PCM is dropped. */
                 if(own.running) keep_output(o,current);
-                codec_decoder_reset(&decoder);generation=current;
+                uint32_t ring_codec=__atomic_load_n(&s->codec,__ATOMIC_ACQUIRE);
+                if(ring_codec!=decoder_codec || memcmp(decoder_config,s->codec_config,sizeof decoder_config)) {
+                    hlog(stdout,"V108_CODEC renegotiated: codec %u -> %u; decoder rebuilt\n",decoder_codec,ring_codec);
+                    codec_decoder_end(&decoder);
+                    codec_decoder_begin(&decoder,s,g_aac_enabled,hlog_line);
+                    decoder_codec=ring_codec;memcpy(decoder_config,s->codec_config,sizeof decoder_config);
+                    rate_hint=codec_decoder_rate_hint(&decoder);
+                } else codec_decoder_reset(&decoder);
+                generation=current;
+                /* The codec of the stream now active - from the decoder, not from what was advertised. */
+                g_active_codec=(current&1u)?(decoder.codec==A2DP_CODEC_AAC?"AAC":decoder.codec==A2DP_CODEC_SBC?"SBC":""):"";
                 /* v9.9.2: a new stream (or a pause) is measured afresh; a pause is not starvation. */
                 if(input.starved) hlog(stdout,"V100_INPUT healthy reason=stream_change\n");
                 input_rate_reset(&input,now,(int)(current&1u));__atomic_store_n(&o->input_starved,0,__ATOMIC_RELAXED);
@@ -1141,10 +1164,13 @@ static int stream_service_main(void) {
 int main(int argc, const char **argv) {
     @autoreleasepool {
         if(argc==3 && strcmp(argv[1],"--volume-mode")==0) {
-            if(strcmp(argv[2],"off") && strcmp(argv[2],"observe") && strcmp(argv[2],"experimental")) return 2;
-            CFStringRef mode=CFStringCreateWithCString(NULL,argv[2],kCFStringEncodingUTF8);
+            /* v9.9.11: volume sync is standard; this is recovery (off) and diagnostics (observe). "experimental",
+             * the old name, means on. */
+            if(strcmp(argv[2],"on") && strcmp(argv[2],"off") && strcmp(argv[2],"observe") && strcmp(argv[2],"experimental")) return 2;
+            CFStringRef mode=CFStringCreateWithCString(NULL,strcmp(argv[2],"experimental")?argv[2]:"on",kCFStringEncodingUTF8);
             if(!mode) return 1;
-            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),mode,CFSTR(SPEAKA_PREFS_DOMAIN));
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_SYNC),mode,CFSTR(SPEAKA_PREFS_DOMAIN));
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),NULL,CFSTR(SPEAKA_PREFS_DOMAIN));
             CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_REQUEST),NULL,CFSTR(SPEAKA_PREFS_DOMAIN));
             CFRelease(mode);
             if(!CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN))) return 1;
@@ -1165,9 +1191,9 @@ int main(int argc, const char **argv) {
         if(argc==3 && strcmp(argv[1],"--volume")==0) {
             char *end=NULL;long value=strtol(argv[2],&end,10);
             if(!argv[2][0] || !end || *end || value<0 || value>127) return 2;
-            CFPropertyListRef mode=CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),CFSTR(SPEAKA_PREFS_DOMAIN));
-            int enabled=mode && CFGetTypeID(mode)==CFStringGetTypeID() && CFEqual(mode,CFSTR("experimental"));if(mode) CFRelease(mode);
-            if(!enabled) {hlog(stderr,"AVRCP volume experiment is not enabled for this user\n");return 2;}
+            CFPropertyListRef mode=CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_VOLUME_SYNC),CFSTR(SPEAKA_PREFS_DOMAIN));
+            int enabled=!mode || (CFGetTypeID(mode)==CFStringGetTypeID() && CFEqual(mode,CFSTR("on")));if(mode) CFRelease(mode);
+            if(!enabled) {hlog(stderr,"AVRCP volume sync is turned off (--volume-mode on to restore)\n");return 2;}
             NSDictionary *request=@{@"value":@(value),@"time":@(CFAbsoluteTimeGetCurrent())};
             CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_REQUEST),(__bridge CFPropertyListRef)request,CFSTR(SPEAKA_PREFS_DOMAIN));
             if(!CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN))) return 1;
@@ -1179,7 +1205,7 @@ int main(int argc, const char **argv) {
          * It touches nothing else - no ring, no preferences, no audio output. */
         if (argc >= 2 && strcmp(argv[1], "--aac-selftest") == 0) return aac_selftest_main(argc, argv);
         hlog(stderr, "usage: BTPSAudioHelper --stream-service (launchd starts it: com.parv.speaka.audio)\n"
-                     "       BTPSAudioHelper --volume-mode off|observe|experimental (run as mobile; restart Speaka)\n"
+                     "       BTPSAudioHelper --volume-mode on|off|observe (volume sync; on by default; restart Speaka)\n"
                      "       BTPSAudioHelper --volume 0..127 (a local level for Windows; tests the CHANGED path)\n"
                      "       BTPSAudioHelper --volume-domain ios|speaka (ios: Windows sets iOS output volume)\n"
                      "       BTPSAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=NAME|all]\n");   /* timestamped, as every line is */

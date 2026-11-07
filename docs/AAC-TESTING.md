@@ -1,5 +1,7 @@
 # Testing experimental AAC-LC on a device
 
+> **9.9:** AAC-LC is standard - no SpeakaAAC / SpeakaAACSink switches. This page describes testing the 9.8.8x experiment; for 9.9's codec layout see [BLUETOOTHD.md](BLUETOOTHD.md#the-dual-sink-layout-99).
+
 AAC is **off by default** and gated behind the `SpeakaAAC` preference. SBC is unchanged; follow this only to exercise
 the AAC groundwork. Read the AAC blockers in [CHANGELOG.md](CHANGELOG.md) first: until a second, AAC endpoint is
 registered in `bluetoothd` (the native blocker), **Windows will negotiate SBC, not AAC**, so the codec line below is

@@ -233,10 +233,18 @@ PASSTHROUGH_OBSERVER(hook_publish,       HOOK_PUBLISH)
 static volatile unsigned g_native_source_success = 0;
 /* Trial requires BOTH separate one-shot preferences. Never retry automatically. */
 static int g_sink_armed = 0;
-/* v9.3 AAC experiment: when on, SEID 7 advertises AAC-LC capabilities instead of SBC.
- * Does NOT register a second endpoint; just swaps the codec bytes in the one existing Sink SEP.
- * Fallback: if AAC negotiation fails (or Windows keeps sending SBC), set SpeakaAACSink=NO and restart BT. */
-static int g_aac_sink_mode = 0;
+/* v9.9.11: AAC-LC preferred, SBC as the fallback - no switches. The dual layout registers two Sink SEPs: SEID 7 with
+ * AAC-LC (first, so a source that takes the first compatible endpoint gets AAC) and a second with SBC, A2DP's
+ * mandatory codec. The source chooses: AAC when it supports it and prefers it, SBC otherwise. The negotiated codec of
+ * each stream comes from its SET_CONFIGURATION (note_pc_configuration), never from the layout.
+ * The single layout - SEID 7 AAC-LC only, the v9.8.9x one that played on the device - is the fallback when a dual
+ * attempt didn't complete (SPEAKA_KEY_DUAL_SINK_STATE), or the SBC registration fails. */
+static int g_dual_sink = 0;
+static volatile unsigned g_sbc_seid = 0;   /* the SBC Sink's assigned SEID once registered (dual layout), else 0 */
+#define SINK_AAC_SEID 7u
+static int sink_seid(unsigned seid) { return seid==SINK_AAC_SEID || (seid && seid==__atomic_load_n(&g_sbc_seid,__ATOMIC_ACQUIRE)); }
+static unsigned sink_seid_codec(unsigned seid) { return seid==SINK_AAC_SEID?A2DP_CODEC_AAC:A2DP_CODEC_SBC; }
+
 /* The Sink's codec bytes live in a tail after its three 16-byte capability records: 4 for SBC, 6 for AAC-LC.
  * v9.8.84 sized the tail for SBC only (4 bytes), so AAC mode wrote 2 bytes past the allocation; this fixes it. */
 #define SINK_CODEC_TAIL_BYTES 8u
@@ -245,6 +253,7 @@ typedef char sink_codec_tail_fits_sbc[(4u <= SINK_CODEC_TAIL_BYTES) ? 1 : -1];
 static volatile unsigned g_sink_attempted = 0;
 static SinkCapabilities g_sink_caps;
 static volatile unsigned g_sink_caps_ready = 0;
+static SinkCapabilities g_sink_caps_sbc;   /* v9.9.11: the SBC Sink's records (dual layout), never rewritten */
 static volatile unsigned g_sink_accepted = 0;
 static volatile uint32_t g_sink_sdp_handle = 0;
 static volatile unsigned g_sink_sdp_registered = 0;
@@ -291,32 +300,37 @@ static uint64_t g_media_callbacks[27];
 static StreamControl g_stream_control;
 static pthread_mutex_t g_stream_control_lock = PTHREAD_MUTEX_INITIALIZER;
 /* The codec the PC chose in its SET_CONFIGURATION for our Sink (note_pc_configuration), read by SetConfigInd. */
-static struct { unsigned valid, codec; uint8_t info[16]; size_t info_len; } g_pc_config;
+static struct { unsigned valid, codec, seid; uint8_t info[16]; size_t info_len; } g_pc_config;
 static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,
     uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7)
 {
-    if (g_relay_ready && g_sink_armed && a3 == 7u && a2 > 0u && a2 <= 255u && a4 > 0u && a4 < 63u) {
+    if (g_relay_ready && g_sink_armed && sink_seid((unsigned)a3) && a2 > 0u && a2 <= 255u && a4 > 0u && a4 < 63u) {
         pthread_mutex_lock(&g_stream_control_lock);
         AudioRelaySetActive(0);
         __atomic_store_n(&g_sink_owner,a0,__ATOMIC_RELEASE);
         __atomic_store_n(&g_sink_stream_handle,(unsigned)a2,__ATOMIC_RELEASE);
         memset(&g_stream_control,0,sizeof g_stream_control);
-        g_stream_control.local_seid=7;g_stream_control.remote_seid=(unsigned)a4;
-        /* Tell the helper the codec the PC chose, read from its SET_CONFIGURATION (note_pc_configuration). An AAC
-         * configuration goes with its 6 Codec Specific bytes; any other non-SBC codec is published as it is, so the
-         * helper refuses it rather than decoding it as SBC. If the PDU wasn't seen: SBC, the only codec SEID 7 offers. */
-        unsigned codec=g_pc_config.valid?g_pc_config.codec:A2DP_CODEC_SBC;
-        if(codec==A2DP_CODEC_AAC && g_pc_config.info_len==AAC_CSI_BYTES)
+        g_stream_control.local_seid=(unsigned)a3;g_stream_control.remote_seid=(unsigned)a4;
+        /* Tell the helper the codec the PC chose, read from its SET_CONFIGURATION for THIS endpoint
+         * (note_pc_configuration). An AAC configuration goes with its 6 Codec Specific bytes; any other non-SBC
+         * codec is published as it is, so the helper refuses it rather than decoding it as SBC. v9.9.11: if the PDU
+         * wasn't seen, the endpoint's only codec - and AAC without its Codec Specific bytes is published without
+         * them, which the helper refuses (silent), never as SBC. */
+        int pdu_matches=g_pc_config.valid && g_pc_config.seid==(unsigned)a3;
+        unsigned codec=pdu_matches?g_pc_config.codec:sink_seid_codec((unsigned)a3);
+        if(codec==A2DP_CODEC_AAC && pdu_matches && g_pc_config.info_len==AAC_CSI_BYTES)
             AudioRelaySetCodec(A2DP_CODEC_AAC,g_pc_config.info,AAC_CSI_BYTES);
+        else if(codec==A2DP_CODEC_AAC && !pdu_matches)
+            AudioRelaySetCodec(A2DP_CODEC_AAC,NULL,0);
         else if(codec!=A2DP_CODEC_SBC)
             AudioRelaySetCodec(codec,g_pc_config.info,g_pc_config.info_len);
         else
             AudioRelaySetCodec(A2DP_CODEC_SBC,NULL,0);
-        unsigned seen=g_pc_config.valid;
+        unsigned seen=(unsigned)pdu_matches;
         /* v9.9: the stream is configured: the helper is connected now and owns the output before the PC's START. */
         AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);
         pthread_mutex_unlock(&g_stream_control_lock);
-        SpeakaLogNow("V88_CONFIG handle=%u local_seid=7 remote_seid=%u codec=%s%s",(unsigned)a2,(unsigned)a4,
+        SpeakaLogNow("V88_CONFIG handle=%u local_seid=%u remote_seid=%u codec=%s%s",(unsigned)a2,(unsigned)a3,(unsigned)a4,
                      avdtp_codec_name((uint8_t)codec),seen?"":" (assumed: SET_CONFIGURATION not seen)");
         /* v9.6: the PC's side of the speaker's stream, for the app's connection line (diag.v95.peer). */
         SpeakaSetStatus("diag.v95.peer","configured: the PC set up the speaker's stream");
@@ -677,15 +691,27 @@ static uint64_t try_seven_slots(uint64_t original, unsigned hit)
         safe_peek((uint64_t)(g_image_base + 0x984a60u), &table_original, sizeof table_original) &&
         table_original == original &&
         safe_peek(original, source, sizeof source) &&
-        sink_prepare_config_shadow(source, sizeof source, g_config_shadow, 1) == 0;
+        sink_prepare_config_shadow(source, sizeof source, g_config_shadow, g_dual_sink ? 2 : 1) == 0;
     if (!good) {
         SpeakaSetStatus("diag.v81_seven_slots", "REFUSED: config pointer/signature/count not exact");
         SpeakaLogNow("V81_CFG REFUSED index=3: preflight mismatch; ORIGINAL pointer returned");
         return original;
     }
+    if (g_dual_sink) {
+        /* Persisted BEFORE the larger allocation exists: if this launch never registers both endpoints, the next
+         * Start uses the single layout (install_config_hook). */
+        CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_DUAL_SINK_STATE), CFSTR("pending"), CFSTR(SPEAKA_PREFS_DOMAIN));
+        if (!CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN))) {
+            g_dual_sink = 0;
+            g_config_shadow[0] = 7u;
+            SpeakaLogNow("V93 CODEC_LAYOUT single: the dual attempt could not be recorded first");
+        }
+    }
     g_config_shadow_returned = 1u;
-    SpeakaSetStatus("diag.v81_seven_slots", "OVERRIDE APPLIED once: config shadow=(7,3,3); verify live slots");
-    SpeakaLogNow("V81_CFG SHADOW index=3 original=(6,3,3) returned=(7,3,3) pointer=STATIC; awaiting live audit");
+    SpeakaSetStatus("diag.v81_seven_slots", "OVERRIDE APPLIED once: config shadow=(%u,3,3); verify live slots",
+        (unsigned)g_config_shadow[0]);
+    SpeakaLogNow("V81_CFG SHADOW index=3 original=(6,3,3) returned=(%u,3,3) pointer=STATIC; awaiting live audit",
+        (unsigned)g_config_shadow[0]);
     return (uint64_t)(uintptr_t)g_config_shadow;
 }
 
@@ -731,13 +757,20 @@ static void install_config_hook(uintptr_t base, int uuid_ok)
     g_seven_armed = consume_seven_slots_arm();
     int decisive_requested = consume_sink_arm();
     g_sink_armed = decisive_requested && g_seven_armed && !SpeakaExperimentsEnabled();
-    /* AAC sink experiment: read once and log; never changes within a session. */
-    {
-        CFPropertyListRef aac_pref = CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_AAC_SINK), CFSTR(SPEAKA_PREFS_DOMAIN));
-        g_aac_sink_mode = (aac_pref && CFGetTypeID(aac_pref) == CFBooleanGetTypeID() &&
-                           CFBooleanGetValue((CFBooleanRef)aac_pref)) ? 1 : 0;
-        if (aac_pref) CFRelease(aac_pref);
-        SpeakaLogNow("V93 CODEC_MODE %s", g_aac_sink_mode ? "AAC-sink (SEID 7 will advertise AAC-LC)" : "SBC-sink (default)");
+    /* v9.9.11: the endpoint layout, decided once per launch. Dual unless a dual attempt was left unfinished. */
+    if (g_sink_armed) {
+        CFPropertyListRef state = CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_DUAL_SINK_STATE), CFSTR(SPEAKA_PREFS_DOMAIN));
+        int pending = state && CFGetTypeID(state) == CFStringGetTypeID() && CFEqual(state, CFSTR("pending"));
+        int failed = state && CFGetTypeID(state) == CFStringGetTypeID() && CFEqual(state, CFSTR("failed"));
+        if (state) CFRelease(state);
+        if (pending) {
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_DUAL_SINK_STATE), CFSTR("failed"), CFSTR(SPEAKA_PREFS_DOMAIN));
+            (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
+        }
+        g_dual_sink = !(pending || failed);
+        SpeakaLogNow("V93 CODEC_LAYOUT %s", g_dual_sink ?
+            "dual: SEID 7 AAC-LC (preferred) + an SBC Sink (fallback); the PC chooses" :
+            "single: SEID 7 AAC-LC only - a previous dual attempt did not complete");
     }
     SpeakaSetStatus("diag.v82.trial", g_sink_armed ?
         "ARMED: one-shot seven slots + one Sink SEP + local SDP candidate + signaling RX" :
@@ -794,6 +827,7 @@ static void note_pc_configuration(const uint8_t *p,size_t length)
     if(ok && media==0u) {                                   /* media type 0: audio */
         g_pc_config.valid=1;
         g_pc_config.codec=codec;
+        g_pc_config.seid=seid;
         memcpy(g_pc_config.info,info,info_len);
         g_pc_config.info_len=info_len;
     }
@@ -815,7 +849,7 @@ static uint64_t hook_receive_signal(uint64_t cid, uint64_t ptr, uint64_t length,
     uint8_t control[1024];
     if(length>=2u && length<=sizeof control && safe_peek(ptr,control,(size_t)length)) {
         if(length>=4u && (control[0]&3u)==0u && ((control[0]>>2)&3u)==0u &&
-           (control[1]&63u)==3u && (control[2]>>2)==7u) {
+           (control[1]&63u)==3u && sink_seid(control[2]>>2)) {
             __atomic_store_n(&g_pc_signal_cid,cid,__ATOMIC_RELEASE);
             note_pc_configuration(control,(size_t)length);
         }
@@ -830,7 +864,7 @@ static uint64_t hook_receive_signal(uint64_t cid, uint64_t ptr, uint64_t length,
              * This is read-only bookkeeping on the existing RX observer. */
             if (g_sink_armed && msg == 0u && id == 7u && length == 3u) {
                 uint8_t seid_byte = 0;
-                if (safe_peek(ptr + 2u, &seid_byte, 1u) && seid_byte == 0x1cu) {
+                if (safe_peek(ptr + 2u, &seid_byte, 1u) && sink_seid(seid_byte >> 2)) {
                     g_start_signal_cid = cid;
                     g_start_label = tx;
                     g_start_pending = 1u;
@@ -1109,11 +1143,11 @@ static void register_sink_after_sources(uint64_t audio_context)
      * become AAC-LC as well, so they agree with the audio-table entry below. v9.8.84 changed only that entry, so the
      * PC would still have been offered SBC. Refused here, before anything native is touched, if the records are not
      * the captured SBC ones. */
-    if (g_aac_sink_mode) {
+    {   /* v9.9.11: SEID 7 is AAC-LC in both layouts (the dual layout's SBC Sink keeps g_sink_caps_sbc) */
         int rc = sink_caps_use_aac(&g_sink_caps);
         if (rc != 0) {
-            SpeakaSetStatus("diag.v83.audio_table", "REFUSED: AAC mode could not rewrite the Sink's AVDTP capabilities (rc=%d)", rc);
-            SpeakaLogNow("V93 REFUSED: AAC mode, the captured Sink capability records were not the expected SBC ones (rc=%d)", rc);
+            SpeakaSetStatus("diag.v83.audio_table", "REFUSED: could not make the Sink's AVDTP capabilities AAC-LC (rc=%d)", rc);
+            SpeakaLogNow("V93 REFUSED: the captured Sink capability records were not the expected SBC ones (rc=%d)", rc);
             return;
         }
         SpeakaLogHexdump("V93 SEP AVDTP caps", g_sink_caps.caps_words, sizeof g_sink_caps.caps_words);
@@ -1121,11 +1155,13 @@ static void register_sink_after_sources(uint64_t audio_context)
     }
     uint64_t avdtp_context = 0;
     uint8_t avdtp_slots = 0;
+    const unsigned slots = g_config_shadow[0];   /* v9.9.11: 7 (single) or 8 (dual), as the shadow returned */
     if (!safe_peek((uint64_t)(g_image_base + 0x9768b0u), &avdtp_context, sizeof avdtp_context) ||
         !avdtp_context || !safe_peek(avdtp_context + 0x60u, &avdtp_slots, 1) ||
-        avdtp_slots != 7u) {
-        SpeakaSetStatus("diag.v83.audio_table", "REFUSED: low-level AVDTP allocation is not 7 slots");
-        SpeakaLogNow("V83 REFUSED: low-level AVDTP allocation is not 7 slots"); return;
+        (slots != 7u && slots != 8u) || avdtp_slots != slots || (slots == 8u) != (g_dual_sink != 0)) {
+        SpeakaSetStatus("diag.v83.audio_table", "REFUSED: low-level AVDTP allocation is %u slots, expected %u",
+            (unsigned)avdtp_slots, slots);
+        SpeakaLogNow("V83 REFUSED: low-level AVDTP allocation is %u slots, expected %u", (unsigned)avdtp_slots, slots); return;
     }
     if (!install_media_callback(avdtp_context)) {
         SpeakaSetStatus("diag.v83.audio_table", "REFUSED: the audio callback was not installed");
@@ -1152,13 +1188,15 @@ static void register_sink_after_sources(uint64_t audio_context)
     /* malloc_type_calloc(6,32,...) constructs the original table; the
        allocator guarantees zero-initialized entries. calloc/free use the
        same libSystem allocator family. The daemon's destructor calls free. */
-    uint8_t *new_table = (uint8_t *)calloc(7u, 32u);
+    uint8_t *new_table = (uint8_t *)calloc(slots, 32u);
     uint8_t *new_caps = (uint8_t *)calloc(1u, 3u * 16u + SINK_CODEC_TAIL_BYTES);
-    if (!new_table || !new_caps) {
+    uint8_t *sbc_caps = slots == 8u ? (uint8_t *)calloc(1u, 3u * 16u + SINK_CODEC_TAIL_BYTES) : NULL;
+    if (!new_table || !new_caps || (slots == 8u && !sbc_caps)) {
         SpeakaSetStatus("diag.v83.audio_table", "REFUSED: calloc failed");
-        SpeakaLogNow("V83 REFUSED: calloc failed"); free(new_caps); free(new_table); return;
+        SpeakaLogNow("V83 REFUSED: calloc failed"); free(sbc_caps); free(new_caps); free(new_table); return;
     }
     uint8_t *e7 = new_table + 6u * 32u;
+    uint8_t *e8 = slots == 8u ? new_table + 7u * 32u : NULL;
     uint64_t source_caps = 0;
     uint64_t cap_context = 0;
     uint32_t source_seid = 0;
@@ -1180,7 +1218,7 @@ static void register_sink_after_sources(uint64_t audio_context)
      *   length fields in the capability record so bluetoothd advertises AAC. The tail is SINK_CODEC_TAIL_BYTES,
      *   which the typedefs above prove holds either codec's bytes.
      * Either way: only our private new_caps buffer is written; Apple's native tables are never modified. */
-    if (g_aac_sink_mode) {
+    {
         uint8_t kSinkAAC[AAC_CSI_BYTES];
         aac_build_sink_capability(kSinkAAC);
         memcpy(new_caps + 3u * 16u, kSinkAAC, sizeof kSinkAAC);
@@ -1189,13 +1227,24 @@ static void register_sink_after_sources(uint64_t audio_context)
         /* codec-type byte: 0x02 = AAC; codec data length: 6 (was 4 for SBC). */
         new_caps[18] = A2DP_CODEC_AAC;
         new_caps[19] = 6u;
-        SpeakaLogNow("V93 SEP CAPS: AAC-LC mode (codec_type=0x02 len=6): %02x %02x %02x %02x %02x %02x",
+        SpeakaLogNow("V93 SEP CAPS: SEID 7 AAC-LC (codec_type=0x02 len=6): %02x %02x %02x %02x %02x %02x",
             kSinkAAC[0], kSinkAAC[1], kSinkAAC[2], kSinkAAC[3], kSinkAAC[4], kSinkAAC[5]);
-    } else {
+    }
+    if (sbc_caps) {
+        /* v9.9.11: the SBC Sink's audio entry - the same three native records, A2DP's SBC Sink capability. */
         static const uint8_t kSinkSBC[4] = {0x31u, 0x15u, 0x02u, 0xfau};
-        memcpy(new_caps + 3u * 16u, kSinkSBC, sizeof kSinkSBC);
-        uint64_t sink_codec_ptr = (uint64_t)(uintptr_t)(new_caps + 3u * 16u);
-        memcpy(new_caps + 0x18u, &sink_codec_ptr, sizeof sink_codec_ptr);
+        memcpy(sbc_caps, new_caps, 3u * 16u);
+        memcpy(sbc_caps + 3u * 16u, kSinkSBC, sizeof kSinkSBC);
+        uint64_t sink_codec_ptr = (uint64_t)(uintptr_t)(sbc_caps + 3u * 16u);
+        memcpy(sbc_caps + 0x18u, &sink_codec_ptr, sizeof sink_codec_ptr);
+        sbc_caps[18] = A2DP_CODEC_SBC;
+        sbc_caps[19] = 4u;
+        uint32_t seid = 8u, ncap = 3u;
+        uint64_t pcap = (uint64_t)(uintptr_t)sbc_caps;
+        memcpy(e8 + 0x04u, &seid, sizeof seid);
+        memcpy(e8 + 0x10u, &pcap, sizeof pcap);
+        e8[0x18u] = 1u;
+        memcpy(e8 + 0x1cu, &ncap, sizeof ncap);
     }
     {
         uint32_t seid = 7u, ncap = 3u;
@@ -1209,15 +1258,16 @@ static void register_sink_after_sources(uint64_t audio_context)
        after native Source registration completed, never before its loop. */
     memcpy((void *)(uintptr_t)(audio_context + 0x78u), &new_table, sizeof new_table);
     {
-        uint32_t seven = 7u;
-        memcpy((void *)(uintptr_t)(audio_context + 0x68u), &seven, sizeof seven);
-        memcpy((void *)(uintptr_t)(audio_context + 0x6cu), &seven, sizeof seven);
+        uint32_t count = slots;
+        memcpy((void *)(uintptr_t)(audio_context + 0x68u), &count, sizeof count);
+        memcpy((void *)(uintptr_t)(audio_context + 0x6cu), &count, sizeof count);
     }
     g_leaked_original_table = (void *)(uintptr_t)meta.table;
     g_audio_table_extended = 1u;
-    SpeakaSetStatus("diag.v83.audio_table", "REPLACED post native Source: entries=7, native=6, new_SEID=7; original parent block intentionally retained");
-    SpeakaLogNow("V83 AUDIO_TABLE SWAPPED after native registration: count 6->7, old=%#llx retained, new=%p entry7_caps=%p",
-        (unsigned long long)meta.table, new_table, new_caps);
+    SpeakaSetStatus("diag.v83.audio_table", "REPLACED post native Source: entries=%u, native=6, Sink SEID 7%s; original parent block intentionally retained",
+        slots, slots == 8u ? " (AAC-LC) + SBC" : " (AAC-LC)");
+    SpeakaLogNow("V83 AUDIO_TABLE SWAPPED after native registration: count 6->%u, old=%#llx retained, new=%p entry7_caps=%p entry8_caps=%p",
+        slots, (unsigned long long)meta.table, new_table, new_caps, sbc_caps);
     /* Use the SEID storage of the new high-level entry itself, exactly as
        Apple's registration loop passes entry+4 as output. */
     {
@@ -1227,8 +1277,8 @@ static void register_sink_after_sources(uint64_t audio_context)
         uint32_t assigned_seid = 0;
         memcpy(&assigned_seid, e7 + 4u, sizeof assigned_seid);
         g_sink_caps.assigned_seid = (uint8_t)assigned_seid;
-        SpeakaLogNow("V83 SEP RESULT ret=%#llx seid=%u type=SNK(1) audio_table=7 codec_mode=%s; PEER validation required",
-            (unsigned long long)ret, assigned_seid, g_aac_sink_mode ? "AAC-LC" : "SBC");
+        SpeakaLogNow("V83 SEP RESULT ret=%#llx seid=%u type=SNK(1) audio_table=%u codec=AAC-LC",
+            (unsigned long long)ret, assigned_seid, slots);
         if (ret != 0) {
             /* The native routine did not register an endpoint. Restore the
                previous pointer/counts and release only our two new blocks.
@@ -1240,6 +1290,7 @@ static void register_sink_after_sources(uint64_t audio_context)
             memcpy((void *)(uintptr_t)(audio_context + 0x6cu), &six, sizeof six);
             g_audio_table_extended=0u;
             g_leaked_original_table=NULL;
+            free(sbc_caps);
             free(new_caps);
             free(new_table);
             SpeakaSetStatus("diag.v83.audio_table", "ROLLED BACK: Sink registration returned %#llx; 6 entries restored", (unsigned long long)ret);
@@ -1251,6 +1302,34 @@ static void register_sink_after_sources(uint64_t audio_context)
         }
         g_sink_accepted = 1u;
         SpeakaSetStatus("diag.v82.sep", "LOCAL register=0 SEID=%u role=SNK with high-level audio entry; remote validation required", assigned_seid);
+    }
+    if (e8) {
+        uint64_t ret = g_orig[HOOK_REGISTER](0, 1,
+            (uint64_t)(uintptr_t)&g_sink_caps_sbc.caps_words[0], 3, 1,
+            (uint64_t)(uintptr_t)(e8 + 4u), 0, 0);
+        uint32_t assigned = 0;
+        memcpy(&assigned, e8 + 4u, sizeof assigned);
+        SpeakaLogNow("V83 SEP RESULT ret=%#llx seid=%u type=SNK(1) audio_table=8 codec=SBC", (unsigned long long)ret, assigned);
+        if (ret == 0 && assigned > 7u && assigned < 63u) {
+            g_sink_caps_sbc.assigned_seid = (uint8_t)assigned;
+            __atomic_store_n(&g_sbc_seid, assigned, __ATOMIC_RELEASE);
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_DUAL_SINK_STATE), CFSTR("ok"), CFSTR(SPEAKA_PREFS_DOMAIN));
+            (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
+            SpeakaSetStatus("diag.v93.codecs", "AAC-LC on SEID 7 (preferred) + SBC on SEID %u", assigned);
+        } else if (ret != 0) {
+            /* Not registered: withdraw entry 8 only - native code sees seven entries again; AAC on SEID 7 stays. */
+            uint32_t seven = 7u;
+            memcpy((void *)(uintptr_t)(audio_context + 0x68u), &seven, sizeof seven);
+            memcpy((void *)(uintptr_t)(audio_context + 0x6cu), &seven, sizeof seven);
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_DUAL_SINK_STATE), CFSTR("failed"), CFSTR(SPEAKA_PREFS_DOMAIN));
+            (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
+            SpeakaSetStatus("diag.v93.codecs", "AAC-LC on SEID 7 only: the SBC Sink was not registered (%#llx)", (unsigned long long)ret);
+        } else {
+            /* Registered with an unexpected SEID: it may be referenced natively - kept, not used for audio. */
+            SpeakaSetStatus("diag.v93.codecs", "AAC-LC on SEID 7; the SBC Sink got SEID %u, not used", assigned);
+        }
+    } else {
+        SpeakaSetStatus("diag.v93.codecs", "AAC-LC on SEID 7 only (single layout)");
     }
     /* Source SDP was published inside the native loop before our post-hook.
        Add the new Sink SDP here explicitly rather than relying on the old
@@ -1270,6 +1349,7 @@ static void register_sink_after_sources(uint64_t audio_context)
 reject_before_swap:
     SpeakaLogNow("V83 REFUSED: native Source table/caps/SEID/context layout did not match expected image");
     SpeakaSetStatus("diag.v83.audio_table", "REFUSED: Source table or capability validation failed");
+    free(sbc_caps);
     free(new_caps);
     free(new_table);
 }
@@ -1371,7 +1451,8 @@ static uint64_t hook_register(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3
             raw[18] == 0 && raw[19] == 4) {
             memcpy(&ptr, raw + 24, sizeof ptr);
             if (safe_peek(ptr, codec, sizeof codec) &&
-                sink_prepare_caps(&g_sink_caps, raw, codec) == 0) {
+                sink_prepare_caps(&g_sink_caps, raw, codec) == 0 &&
+                sink_prepare_caps(&g_sink_caps_sbc, raw, codec) == 0) {   /* v9.9.11: each owns its codec bytes */
                 g_sink_caps_ready = 1;
                 SpeakaLogNow("V82 SEP caps: stable private copy of 3 native SBC capabilities ready");
             }

@@ -310,6 +310,11 @@ static NSString *SPOutputsDescription(id outputs)
     s.peerName = resolved ? ([NSString stringWithUTF8String:resolved] ?: @"") : @"";
     id volume = helper[@"volume"];
     s.volumeZero = s.playing && [volume isKindOfClass:[NSNumber class]] && [volume doubleValue] < 0.05;
+    // v9.9.11: the negotiated codec of the stream playing now, as the helper decodes it - never the advertised
+    // codecs or a setting. Empty unless a fresh status says it's playing (stale status is dropped above).
+    NSString *codec = SPString(helper[@"codec"]);
+    s.activeCodec = (s.session == SPSessionOn && s.playing &&
+                     ([codec isEqualToString:@"AAC"] || [codec isEqualToString:@"SBC"])) ? codec : @"";
 
     NSString *mode = SPString(SPCopyPref(@SPEAKA_KEY_OUTPUT_MODE));
     s.outputMode = [[[SPTweakClient outputModes] valueForKey:@"key"] containsObject:mode] ? mode : @"speaker";
@@ -415,30 +420,12 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
     return [[NSUserDefaults standardUserDefaults] boolForKey:SPUpdateNotificationsKey];
 }
 
-// Experimental AAC switches, in Bluetooth's preferences where the helper (SpeakaAAC) and the tweak (SpeakaAACSink)
-// read them. The tweak reads SpeakaAACSink when Bluetooth restarts, so a change applies at the next Start.
-+ (BOOL)aacDecodeEnabled
+// v9.9.11: the AAC experiment's switches are gone - AAC-LC and SBC are both offered, the PC chooses, and the
+// helper decodes whichever it negotiated. Their saved values are removed once (nothing reads them).
++ (void)removeLegacyCodecSettings
 {
-    SPSynchronize();
-    id value = SPCopyPref(@SPEAKA_KEY_AAC);
-    return [value isKindOfClass:[NSNumber class]] && [value boolValue];
-}
-
-+ (void)setAACDecodeEnabled:(BOOL)on
-{
-    SPWritePref(@SPEAKA_KEY_AAC, @(on));
-}
-
-+ (BOOL)aacSinkEnabled
-{
-    SPSynchronize();
-    id value = SPCopyPref(@SPEAKA_KEY_AAC_SINK);
-    return [value isKindOfClass:[NSNumber class]] && [value boolValue];
-}
-
-+ (void)setAACsinkEnabled:(BOOL)on
-{
-    SPWritePref(@SPEAKA_KEY_AAC_SINK, @(on));
+    if (SPCopyPref(@SPEAKA_KEY_AAC) != nil) SPWritePref(@SPEAKA_KEY_AAC, nil);
+    if (SPCopyPref(@SPEAKA_KEY_AAC_SINK) != nil) SPWritePref(@SPEAKA_KEY_AAC_SINK, nil);
 }
 
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled

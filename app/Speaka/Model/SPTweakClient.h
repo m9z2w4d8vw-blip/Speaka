@@ -36,6 +36,8 @@ typedef NS_ENUM(NSInteger, SPSession) {
 @property (nonatomic, copy) NSString *playingOn;     // e.g. "iPhone speaker", "Headphones (wired)"
 @property (nonatomic, copy) NSString *waitingReason; // e.g. "no wired headphones plugged in"
 @property (nonatomic) BOOL volumeZero;
+@property (nonatomic, copy) NSString *activeCodec;   // v9.9.11: "AAC" or "SBC" - the codec the helper is decoding for the
+                                                     // stream playing now; empty when nothing plays or the status is stale
 @property (nonatomic, copy) NSDictionary<NSString *, id> *diagnostics; // the tweak's whole status block, as published
 @property (nonatomic) BOOL connected;                // v9.6: a PC is connected: streaming, paused, or just set up
 @property (nonatomic, copy) NSString *routeName;     // v9.6: a Bluetooth output's name in the audio route, else empty
@@ -74,11 +76,9 @@ typedef NS_ENUM(NSInteger, SPRequestState) {
 /// The app's own settings (v9.7), in the app's own preferences, never com.apple.bluetooth's: whether Settings > Update
 /// notifications is on, and the last release a notification announced, so each is announced once.
 + (BOOL)updateNotificationsEnabled NS_SWIFT_NAME(updateNotificationsEnabled());
-+ (BOOL)aacDecodeEnabled NS_SWIFT_NAME(aacDecodeEnabled());
-+ (void)setAACDecodeEnabled:(BOOL)on NS_SWIFT_NAME(setAACDecodeEnabled(_:));
-+ (BOOL)aacSinkEnabled NS_SWIFT_NAME(aacSinkEnabled());
-+ (void)setAACsinkEnabled:(BOOL)on NS_SWIFT_NAME(setAACsinkEnabled(_:));
-// SPEAKA_KEY_AAC_SINK: written via setAACsinkEnabled(_:); the tweak reads it at every Bluetooth restart.
+// v9.9.11: AAC-LC (preferred) and SBC are both standard - no codec switches. Removes the AAC experiment's saved
+// switches (SpeakaAAC, SpeakaAACSink) once; nothing reads them any more.
++ (void)removeLegacyCodecSettings NS_SWIFT_NAME(removeLegacyCodecSettings());
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled NS_SWIFT_NAME(setUpdateNotificationsEnabled(_:));
 
 /// Uninstall (v9.8): every key Speaka keeps in com.apple.bluetooth (all start with "Speaka", shared/SpeakaShared.h) and the

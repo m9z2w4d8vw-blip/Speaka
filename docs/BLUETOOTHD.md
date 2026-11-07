@@ -552,3 +552,25 @@ instructions on each run.
 * The address is three pointers from x0 (manager -> node -> device -> +0x80): why v9.8.95's one-level search of x0
   never found it, whatever its range.
 
+## The dual Sink layout (9.9)
+
+AAC-LC and SBC are offered as two Sink SEPs, because one SEP carries one Media Codec capability. The evidence that
+an eighth endpoint slot works the way the seventh does is the initializer itself (section 8): it reads config index
+3's byte 0, allocates that many 40-byte endpoint slots, and stores the byte as the live count at `+0x60`;
+`AVDTP_RegisterMultipoint` (`+0xCECF0`) searches slots up to that count and assigns SEIDs from a cursor bounded at
+`0xfe`. Nothing in that path is specific to seven. The other two counts (streams, connections: `3, 3`) are unchanged.
+
+What Speaka does: the config shadow returns `(8,3,3)`; registration refuses unless the live count is exactly 8; the
+high-level audio table becomes eight 32-byte entries (entry 7: AAC-LC, entry 8: SBC `31 15 02 fa`, each with its own
+private capability copy); SEID 7 registers with the AAC-LC records, then the SBC Sink with its own records - prepared
+from the same captured native SBC set with `sink_prepare_caps`, so its codec pointer is its own. The configure,
+SET_CONFIGURATION and START paths accept exactly SEID 7 and the SBC Sink's assigned SEID.
+
+Fallback: `SpeakaDualSinkState` is set to `pending` before the 8-slot shadow is returned and `ok` once both endpoints
+registered. A `pending` found at the next launch means that launch never finished; that launch, and every later one,
+uses the single layout (7 slots, SEID 7 AAC-LC - the 9.8.9x layout that played on the device). If only the SBC
+registration fails, entry 8 is withdrawn (counts back to 7) and SEID 7 keeps working.
+
+**Not yet verified on the device:** the 8-slot allocation and the second registration at runtime, and which SEP
+Windows configures. The source chooses the codec; Speaka offers AAC-LC first and can't force it.
+

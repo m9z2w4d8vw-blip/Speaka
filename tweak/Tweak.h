@@ -204,7 +204,7 @@ extern "C" {
 /* Must only copy an exact 6,3,3 original, preserving all other bytes.
  * trial_seven=0 mirrors unchanged; =1 changes only byte zero to 7. */
 int sink_prepare_config_shadow(const uint8_t *source, size_t source_size,
-                            uint8_t out[SINK_CONFIG_COPY_BYTES], int trial_seven);
+                            uint8_t out[SINK_CONFIG_COPY_BYTES], int extra_slots);
 #ifdef __cplusplus
 }
 #endif

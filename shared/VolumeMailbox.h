@@ -18,6 +18,9 @@ void sp_volume_mailbox_close(SPVolumeMailbox *);
 uint64_t sp_volume_now_ms(void);
 int sp_volume_mailbox_ready(const SPVolumeMailbox *);
 void sp_volume_mailbox_set(SPVolumeMailbox *,int enabled,unsigned value);
+/* v9.9.11: as above, and whether Windows chose this level (SetAbsoluteVolume) - not a level Speaka reported to it. */
+void sp_volume_mailbox_set_from(SPVolumeMailbox *,int enabled,int from_windows,unsigned value);
+int sp_volume_mailbox_from_windows(const SPVolumeMailbox *);
 unsigned sp_volume_mailbox_gain(const SPVolumeMailbox *);
 /* v9.9.10: Windows has engaged (a level is set) - sp_volume_mailbox_gain() alone can't tell 127 from "none". */
 int sp_volume_mailbox_enabled(const SPVolumeMailbox *);

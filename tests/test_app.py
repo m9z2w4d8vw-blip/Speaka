@@ -247,8 +247,7 @@ class SpeakaApp(unittest.TestCase):
         self.assertEqual(pinned, {"outputModes", "readStatus", "setOutputMode", "sendAction", "pollRequest",
                                   "connectedComputerName", "pairedComputerName", "computerName", "isAudioDevice", "lookupSummary",
                                   "updateNotificationsEnabled", "setUpdateNotificationsEnabled", "notifiedVersion",
-                                  "setNotifiedVersion", "removeLeftoverPreferences",
-                                  "aacDecodeEnabled", "setAACDecodeEnabled", "aacSinkEnabled", "setAACsinkEnabled"})
+                                  "setNotifiedVersion", "removeLeftoverPreferences", "removeLegacyCodecSettings"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -1169,7 +1168,7 @@ int main(void) {
         self.assertIn("private func collapseSoon(after seconds: TimeInterval = 1.6) {\n"
                       "        DispatchQueue.main.asyncAfter(deadline: .now() + seconds)", model)
         self.assertIn('var headerSubtitle: String { "iOS \\(UIDevice.current.systemVersion)" }', model)
-        self.assertIn('var headerDetail: String { headerWarning ?? "by Parv" }', model)
+        self.assertIn('var headerDetail: String { headerWarning ?? codecWarning ?? "by Parv" }', model)
         self.assertIn(".background(Theme.window, in: RoundedRectangle(cornerRadius: 16, style: .continuous))", read(WINDOWS))
         # Speaka's own background, exactly as v9.1 drew it, and its teal: not Caz's yellow backdrop or gold.
         glows = re.findall(r"glow\(context, space, CGPoint\(x: w \* ([\d.]+), y: h \* ([\d.]+)\), m \* ([\d.]+), "
@@ -1681,9 +1680,10 @@ class SettingsWindow(unittest.TestCase):
     def test_smaller_and_without_descriptions(self):
         windows = read(SPEAKA_SOURCES / "Windows.swift")
         settings = block_until(windows, "struct SettingsWindow: View {")
-        self.assertEqual(settings.count(".frame(height: 44)"), 3)   # Kill BT, Update notifs, AAC decode
-        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 3)   # the two standard rows + the AAC group
-        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 4)   # +2 for the AAC section's labels
+        self.assertEqual(settings.count(".frame(height: 44)"), 2)   # Kill BT, Update notifs (v9.9.11: no AAC switches)
+        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 2)   # the two standard rows
+        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 2)
+        self.assertNotIn("Experimental AAC", settings)
         self.assertIn("VStack(spacing: 10)", settings)
         self.assertIn(".scaleEffect(0.85)\n                        .frame(width: 51 * 0.85, height: 31 * 0.85)", settings)
         for gone in ("Every 2 minutes", ".frame(height: 50)", "size: 17", "size: 13"):
@@ -1821,3 +1821,71 @@ class Uninstall(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodecWarning(unittest.TestCase):
+    """v9.9.11: the app warns "Using SBC audio instead of AAC." while the stream playing now was negotiated as SBC -
+    the codec the helper is decoding, never what was advertised or a setting - in the header's warning line, under the
+    volume warning when both apply, and gone the moment playback stops, the PC disconnects or the codec is unknown."""
+
+    def model(self):
+        return read(SPEAKA_SOURCES / "SpeakaModel.swift")
+
+    def test_the_route_from_the_decoder_to_the_app(self):
+        helper = read(ROOT / "audiohelper/AudioHelper.m")
+        # The helper publishes the decoder's codec for an active generation only, and clears it on stop and per session.
+        self.assertIn('@"codec":@(g_active_codec)', helper)
+        self.assertIn('g_active_codec=(current&1u)?(decoder.codec==A2DP_CODEC_AAC?"AAC":decoder.codec==A2DP_CODEC_SBC?"SBC":""):"";', helper)
+        stop = helper.split("static void stop_output(", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(stop.index('g_active_codec="";'), stop.index('publish_status(@"idle"'))
+        session = helper.split("CodecDecoder decoder;codec_decoder_begin(&decoder,s,g_aac_enabled,hlog_line);", 1)[1][:600]
+        self.assertIn('g_active_codec="";', session)                          # a new helper session starts unknown
+        client = read(CLIENT_M)
+        self.assertIn('NSString *codec = SPString(helper[@"codec"]);', client)
+        self.assertIn('s.activeCodec = (s.session == SPSessionOn && s.playing &&\n'
+                      '                     ([codec isEqualToString:@"AAC"] || [codec isEqualToString:@"SBC"])) ? codec : @"";', client)
+        # Stale helper status is dropped before any of this (20 s), so the codec can't outlive the stream.
+        self.assertLess(client.index("if (helper && [NSDate date].timeIntervalSince1970 - time > 20.0)"),
+                        client.index('NSString *codec = SPString(helper[@"codec"]);'))
+        self.assertIn("next.activeCodec = status.activeCodec", self.model())
+
+    def test_where_and_when_it_shows(self):
+        model = self.model()
+        warning = model.split("    var codecWarning: String? {", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn('guard request == nil, !uninstalling, snapshot.session == .on, snapshot.playing,\n'
+                      '              snapshot.activeCodec == "SBC" else { return nil }', warning)
+        self.assertIn('return "Using SBC audio instead of AAC."', warning)
+        self.assertIn('var headerDetail: String { headerWarning ?? codecWarning ?? "by Parv" }', model)
+        self.assertIn("var headerDetailIsWarning: Bool { headerWarning != nil || codecWarning != nil }", model)
+        self.assertIn("var headerSecondWarning: String? { headerWarning != nil ? codecWarning : nil }", model)
+        # The volume warning (and every error) keeps the first line; their order is unchanged.
+        header = model.split("    var headerWarning: String? {", 1)[1].split("\n    }\n", 1)[0]
+        self.assertLess(header.index("if let problem {"), header.index("The volume is at 0%. Turn it up while audio plays."))
+        self.assertNotIn("SBC", header)
+        # The scenarios, through the same expressions.
+        def show(session, playing, codec, volume_zero, error=None, request=False):
+            head = error if error else ("The volume is at 0%. Turn it up while audio plays."
+                                        if session == "on" and playing and volume_zero else None)
+            sbc = ("Using SBC audio instead of AAC." if (not request and session == "on" and playing and codec == "SBC")
+                   else None)
+            return (head or sbc or "by Parv", sbc if head else None)
+        sbc, zero = "Using SBC audio instead of AAC.", "The volume is at 0%. Turn it up while audio plays."
+        self.assertEqual(show("on", True, "AAC", False), ("by Parv", None))           # AAC: no warning
+        self.assertEqual(show("on", True, "SBC", False), (sbc, None))                 # SBC: in the warning line
+        self.assertEqual(show("on", True, "SBC", True), (zero, sbc))                  # both: volume first, SBC under it
+        self.assertEqual(show("on", False, "SBC", False), ("by Parv", None))          # paused / stopped: gone
+        self.assertEqual(show("on", True, "", False), ("by Parv", None))              # unknown codec: gone
+        self.assertEqual(show("off", False, "", False), ("by Parv", None))            # after Stop: gone
+        self.assertEqual(show("on", True, "SBC", False, request=True), ("by Parv", None))   # a Start/Stop in flight
+        self.assertEqual(show("failed", False, "", False, error="The speaker didn't start: x")[1], None)
+
+    def test_the_second_line_looks_like_the_first(self):
+        header = read(SPEAKA_SOURCES / "MainComponents.swift").split("struct HeaderView: View {", 1)[1].split("\n}\n", 1)[0]
+        first = header.split("            Text(detail)\n", 1)[1].split("            if let secondWarning {", 1)[0]
+        second = header.split("            if let secondWarning {\n", 1)[1].split("\n            }\n", 1)[0]
+        for style in (".font(.system(size: 14, weight: .regular))", ".lineLimit(2)", ".fixedSize(horizontal: false, vertical: true)"):
+            self.assertIn(style, first); self.assertIn(style, second)
+        self.assertIn(".foregroundStyle(Theme.failure)", second)                 # the screenshot's warning colour
+        self.assertIn("VStack(alignment: .leading, spacing: 2)", header)         # same column, same spacing
+        content = read(SPEAKA_SOURCES / "ContentView.swift")
+        self.assertIn("detailIsWarning: model.headerDetailIsWarning,\n                       secondWarning: model.headerSecondWarning)", content)

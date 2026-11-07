@@ -446,8 +446,15 @@ class SevenSlots(unittest.TestCase):
         for hdr in ((7,3,3),(6,4,3),(6,3,4),(0,3,3)):
             self.assertNotEqual(self.call(header=hdr)[0],0)
     def test_reject_invalid_size_or_mode(self):
-        for mode,length in ((2,32),(-1,32),(1,3),(1,31)):
+        for mode,length in ((3,32),(-1,32),(1,3),(1,31)):
             self.assertNotEqual(self.call(arm=mode,length=length)[0],0)
+    def test_eight_for_the_dual_layout_only_changes_first_byte(self):
+        # v9.9.11: AAC-LC + SBC Sinks: two extra endpoint slots. Byte 0 is the count the initializer allocates
+        # (x 40-byte slots) and stores at +0x60; the other two allocations' counts stay as they are.
+        rc,original,altered=self.call(arm=2)
+        self.assertEqual(rc,0)
+        self.assertEqual(altered[:3],b'\x08\x03\x03')
+        self.assertEqual(altered[3:],original[3:])
     def test_default_off_and_registration_requires_separate_one_shot_arm(self):
         # v9.8: only Start arms it (tweak/Session.c), so Settings has no switch for it.
         plist=plistlib.loads((ROOT/'settings/Resources/Root.plist').read_bytes())
@@ -476,7 +483,7 @@ class SevenSlots(unittest.TestCase):
         self.assertIn('table_original == original',SRC)
     def test_separate_static_shadow_not_live_mutation(self):
         self.assertIn('static uint8_t g_config_shadow[SINK_CONFIG_COPY_BYTES]',SRC)
-        self.assertIn('sink_prepare_config_shadow(source, sizeof source, g_config_shadow, 1)',SRC)
+        self.assertIn('sink_prepare_config_shadow(source, sizeof source, g_config_shadow, g_dual_sink ? 2 : 1)',SRC)
         self.assertIn('__sync_bool_compare_and_swap(&g_seven_applied, 0u, 1u)',SRC)
         self.assertNotIn('vm_write(',SRC)
         self.assertNotIn('vm_protect(',SRC)
@@ -627,7 +634,7 @@ class PostSourceTable(unittest.TestCase):
         for x in ['0xd503237fu','0xd10103ffu','0xa90157f6u','0xa9024ff4u']:
             self.assertIn(x,S)
     def test_memory_and_gate(self):
-        self.assertIn('calloc(7u, 32u)',S)
+        self.assertIn('calloc(slots, 32u)',S)   # v9.9.11: 7 (single) or 8 (dual) entries, checked against the allocation
         self.assertIn('calloc(1u, 3u * 16u + SINK_CODEC_TAIL_BYTES)',S)   # room for SBC (4) or AAC-LC (6)
         self.assertIn('0x31u, 0x15u, 0x02u, 0xfau',S)
         self.assertIn('memcpy(new_caps + 0x18u, &sink_codec_ptr',S)

@@ -162,7 +162,7 @@ int main(void) {
         note = tweak.split("static void note_signal(", 1)[1].split("/* v8.8.2: the verified native idle check", 1)[0]
         self.assertLess(note.index("if (sink_cid && cid!=sink_cid) return;"), note.index("stream_control_signal("))
         rx = tweak.split("static uint64_t hook_receive_signal(", 1)[1].split("static void install_signal_rx", 1)[0]
-        self.assertIn("(control[1]&63u)==3u && (control[2]>>2)==7u", rx)
+        self.assertIn("(control[1]&63u)==3u && sink_seid(control[2]>>2)", rx)   # v9.9.11: either registered Sink
         self.assertLess(rx.index("__atomic_store_n(&g_pc_signal_cid,cid,__ATOMIC_RELEASE)"),
                         rx.index("note_signal(0,cid,control,(size_t)length)"))
         self.compile_run(r'''

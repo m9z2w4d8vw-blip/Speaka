@@ -1,6 +1,7 @@
 /* VolumeControl.m - AVRCP absolute volume for Speaka's sink, for ONE bluetoothd build (UUID-pinned).
- * OFF by default. observe: logs Windows' volume requests and the advertised Target features, changes nothing.
- * experimental: answers them for the verified Speaka peer and sets Speaka's PCM gain.
+ * ON by default since v9.9.11 (live-verified both ways, iOS 17.0 + Windows 11, v9.8.99). SpeakaVolumeSync=off turns
+ * it off, =observe logs only. On: answers Windows' volume commands for the verified Speaka peer; the helper makes
+ * the level iOS's output volume (or Speaka's PCM gain if the setter is missing or ineffective).
  *
  * Evidence: docs/AVRCP-VOLUME.md (static analysis of this bluetoothd), plus the v9.9.8 checks:
  *  - +0xe0ff4 (the Target vendor dispatcher) is (peer *, label, frame *): its first act on a vendor command is +0xdc8c8
@@ -88,6 +89,9 @@ static int have_last_peer,configured;
 #define SP_VOLUME_FIRST_DEFAULT 64u
 static unsigned last_level=SP_VOLUME_FIRST_DEFAULT;
 static int engaged;
+/* v9.9.11: a level applied for a local change (the iPhone's own) is not Windows' choice; the helper only sets iOS's
+ * volume for levels Windows chose. Set around sp_volume_local(), under `lock`. */
+static int applying_local;
 static unsigned observed;
 static dispatch_queue_t queue;
 static dispatch_source_t timer;
@@ -105,7 +109,7 @@ static void persist_level(void *unused);
 static int apply(void *unused,uint8_t value) {
     (void)unused;
     if(!mailbox) return 0;
-    sp_volume_mailbox_set(mailbox,1,value);
+    sp_volume_mailbox_set_from(mailbox,1,!applying_local,value);
     engaged=1;
     if(value!=last_level) {last_level=value;if(queue) dispatch_async_f(queue,NULL,persist_level);}
     SpeakaLogNow("AVRCP_VOLUME set value=%u (%u%%) helper_live=%d",value,(value*100u+63u)/127u,
@@ -177,7 +181,7 @@ static uint32_t receive(const uint8_t *address,uint8_t label,const NativeFrame *
                                             native_events,sizeof native_events);
             /* Windows registered for volume: from now on it expects the sink to apply the level it was told. */
             if(consumed && p[3]==0x31 && state.subscribed && !engaged && mailbox) {
-                sp_volume_mailbox_set(mailbox,1,state.value);engaged=1;
+                sp_volume_mailbox_set_from(mailbox,1,0,state.value);engaged=1;   /* reported by Speaka, not Windows' */
                 SpeakaLogNow("AVRCP_VOLUME engaged value=%u reported_as_current",state.value);
             }
             if(observed++<64) {
@@ -282,7 +286,9 @@ static void tick(void *unused) {
     stack_lock();pthread_mutex_lock(&lock);
     double age=CFAbsoluteTimeGetCurrent()-when;
     if(state.bound && value>=0 && value<=127 && age>=0 && age<2) {
+        applying_local=1;
         int ok=sp_volume_local(&state,&io,(unsigned)value);
+        applying_local=0;
         SpeakaLogNow("AVRCP_VOLUME local value=%d accepted=%d subscribed=%u",value,ok,state.subscribed);
     }
     (void)sp_volume_flush(&state,&io);
@@ -297,13 +303,23 @@ static int load_last_peer(uint8_t out[6]) {
     return ok;
 }
 void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {
-    CFPropertyListRef v=CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),CFSTR(SPEAKA_PREFS_DOMAIN));
+    /* v9.9.11: on unless explicitly turned off (live-verified on iOS 17.0 with Windows 11). The experiment's old key
+     * is removed so its values - off by default - never decide this. */
+    CFPropertyListRef legacy=CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),CFSTR(SPEAKA_PREFS_DOMAIN));
+    if(legacy) {
+        CFRelease(legacy);
+        CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),NULL,CFSTR(SPEAKA_PREFS_DOMAIN));
+        (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
+        SpeakaLogNow("AVRCP_VOLUME migrated: the experiment's mode key removed; volume sync is standard");
+    }
+    mode=2;
+    CFPropertyListRef v=CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_VOLUME_SYNC),CFSTR(SPEAKA_PREFS_DOMAIN));
     if(v && CFGetTypeID(v)==CFStringGetTypeID()) {
         if(CFEqual(v,CFSTR("observe"))) mode=1;
-        if(CFEqual(v,CFSTR("experimental"))) mode=2;
+        if(CFEqual(v,CFSTR("off"))) mode=0;
     }
     if(v) CFRelease(v);
-    if(!mode) return;
+    if(!mode) {SpeakaLogNow("AVRCP_VOLUME off (SpeakaVolumeSync=off)");return;}
     /* UUID alone is insufficient; require code AND native capability/table bytes. */
     static const struct {uintptr_t offset;uint32_t words[4];} checks[]={
         {0xe0ff4,{0xd503237f,0xa9ba6ffc,0xa90167fa,0xa9025ff8}},
@@ -368,6 +384,6 @@ void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {
         } else SpeakaLogNow("AVRCP_VOLUME no timer: local changes disabled");
     }
     char a[18];peer_address_text(last_peer,a);
-    SpeakaLogNow("AVRCP_VOLUME installed mode=%s last_peer=%s last_level=%u STATIC EVIDENCE ONLY; live validation pending",
-                 mode==2?"experimental":"observe",have_last_peer?a:"none",last_level);
+    SpeakaLogNow("AVRCP_VOLUME installed mode=%s last_peer=%s last_level=%u",
+                 mode==2?"on":"observe",have_last_peer?a:"none",last_level);
 }

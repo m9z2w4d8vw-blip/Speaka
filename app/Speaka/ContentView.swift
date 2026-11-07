@@ -85,7 +85,8 @@ struct ContentView: View {
         return VStack(spacing: 0) {
             HeaderView(subtitle: model.headerSubtitle,
                        detail: model.headerDetail,
-                       detailIsWarning: model.headerWarning != nil)
+                       detailIsWarning: model.headerDetailIsWarning,
+                       secondWarning: model.headerSecondWarning)
                 .offset(y: expanded ? -25 : 0)
             Spacer(minLength: 12)
             ActionMenu(items: menuItems,

@@ -800,33 +800,34 @@ class ConfiguredCodec(unittest.TestCase):
     def test_the_hooks_publish_the_configured_codec(self):
         hooks = (ROOT / "tweak/Hooks.xm").read_text()
         rx = hooks.split("static uint64_t hook_receive_signal(", 1)[1].split("static void install_signal_rx", 1)[0]
-        # The RX hook parses the very SET_CONFIGURATION for SEID 7 it already recognises, before bluetoothd's own
-        # handler runs (and so before SetConfigInd).
-        self.assertLess(rx.index("(control[1]&63u)==3u && (control[2]>>2)==7u"),
+        # The RX hook parses the very SET_CONFIGURATION for a Sink SEID it already recognises (v9.9.11: SEID 7's AAC
+        # or the registered SBC Sink), before bluetoothd's own handler runs (and so before SetConfigInd).
+        self.assertLess(rx.index("(control[1]&63u)==3u && sink_seid(control[2]>>2)"),
                         rx.index("note_pc_configuration(control,(size_t)length)"))
         setconfig = hooks.split("static uint64_t hook_setconfigind(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("AudioRelaySetCodec(A2DP_CODEC_AAC,g_pc_config.info,AAC_CSI_BYTES)", setconfig)
         self.assertIn("AudioRelaySetCodec(codec,g_pc_config.info,g_pc_config.info_len)", setconfig)
-        self.assertIn("unsigned codec=g_pc_config.valid?g_pc_config.codec:A2DP_CODEC_SBC;", setconfig)
+        # v9.9.11: the configuration seen must be for THIS endpoint; unseen, the endpoint's only codec - and AAC without
+        # its Codec Specific bytes is published without them (the helper refuses it), never as SBC.
+        self.assertIn("int pdu_matches=g_pc_config.valid && g_pc_config.seid==(unsigned)a3;", setconfig)
+        self.assertIn("unsigned codec=pdu_matches?g_pc_config.codec:sink_seid_codec((unsigned)a3);", setconfig)
+        self.assertIn("else if(codec==A2DP_CODEC_AAC && !pdu_matches)\n            AudioRelaySetCodec(A2DP_CODEC_AAC,NULL,0);", setconfig)
+        self.assertIn("static unsigned sink_seid_codec(unsigned seid) { return seid==SINK_AAC_SEID?A2DP_CODEC_AAC:A2DP_CODEC_SBC; }", hooks)
         # The parsed codec is written and read under the stream lock.
         note = hooks.split("static void note_pc_configuration(", 1)[1].split("\n}\n", 1)[0]
         self.assertLess(note.index("pthread_mutex_lock(&g_stream_control_lock)"), note.index("g_pc_config.valid=1"))
 
 
-class AACsinkMode(unittest.TestCase):
-    """The AAC-only endpoint experiment: SEID 7 advertises AAC-LC capabilities instead of SBC."""
+class CodecLayout(unittest.TestCase):
+    """v9.9.11: AAC-LC preferred, SBC the fallback, no switches. Two Sink SEPs - SEID 7 AAC-LC, then SBC - and the PC
+    configures the one it prefers. The single layout (SEID 7 AAC-LC only, the one that played on the device) is the
+    fallback when a dual attempt didn't complete."""
 
-    def test_preference_key_name(self):
-        # SpeakaShared.h must define the macro (checked by the test below via the value inside it).
-        shared = (ROOT / "shared/SpeakaShared.h").read_text()
-        self.assertIn('"SpeakaAACSink"', shared)                       # the macro's string value
-        # SPTweakClient.m must use the macro, not the bare string (enforced by test_app_speaks_the_tweaks_protocol).
-        tweakc = (ROOT / "app/Speaka/Model/SPTweakClient.m").read_text()
-        self.assertIn("SPEAKA_KEY_AAC_SINK", tweakc)                   # the macro name
-        self.assertNotIn('"SpeakaAACSink"', tweakc)                    # not the bare string
+    def hooks(self):
+        return (ROOT / "tweak/Hooks.xm").read_text()
 
     def test_aac_sink_capability_bytes(self):
-        """In AAC mode the caps record gets codec_type=0x02, codec_data_len=6, then the AAC-LC CSI."""
+        """Entry 7's record gets codec_type=0x02, codec_data_len=6, then the AAC-LC CSI - in every layout."""
         with tempfile.TemporaryDirectory() as tmp:
             lib = build_lib(tmp, "shared/AACConfig.c")
             cap = (ctypes.c_uint8 * 6)()
@@ -834,54 +835,42 @@ class AACsinkMode(unittest.TestCase):
             lib.aac_build_sink_capability.restype = ctypes.c_size_t
             self.assertEqual(lib.aac_build_sink_capability(cap), 6)
             self.assertEqual(cap[0] & 0xC0, 0xC0)  # MPEG-2 LC | MPEG-4 LC object types
-        hooks = (ROOT / "tweak/Hooks.xm").read_text()
-        aac_block = hooks.split("if (g_aac_sink_mode) {", 1)[1].split("} else {", 1)[0]
+        body = self.hooks().split("static void register_sink_after_sources(uint64_t audio_context)", 1)[1].split("\n}\n", 1)[0]
+        aac_block = body.split("        uint8_t kSinkAAC[AAC_CSI_BYTES];", 1)[1].split("    if (sbc_caps) {", 1)[0]
         self.assertIn("new_caps[18] = A2DP_CODEC_AAC;", aac_block)
         self.assertIn("new_caps[19] = 6u;", aac_block)
         self.assertIn("aac_build_sink_capability(kSinkAAC);", aac_block)
+        self.assertNotIn("g_aac_sink_mode", self.hooks())                       # no switch decides it
 
-    def test_sbc_path_unchanged_when_aac_mode_off(self):
-        hooks = (ROOT / "tweak/Hooks.xm").read_text()
-        marker = "} else {\n        static const uint8_t kSinkSBC"
-        sbc_block = hooks.split(marker, 1)[1].split("    }", 1)[0]
-        self.assertIn("{0x31u, 0x15u, 0x02u, 0xfau}", sbc_block)
-        self.assertNotIn("new_caps[18]", sbc_block)
-        self.assertNotIn("new_caps[19]", sbc_block)
-
-    def test_startup_reads_aac_sink_preference_and_logs(self):
-        hooks = (ROOT / "tweak/Hooks.xm").read_text()
-        self.assertIn("SPEAKA_KEY_AAC_SINK", hooks)
-        self.assertIn("V93 CODEC_MODE", hooks)
-        self.assertIn("V93 SEP CAPS: AAC-LC mode", hooks)
-        self.assertIn("codec_mode=%s", hooks)
+    def test_the_sbc_sink_entry_is_a2dps_sbc_capability(self):
+        body = self.hooks().split("static void register_sink_after_sources(uint64_t audio_context)", 1)[1].split("\n}\n", 1)[0]
+        sbc = body.split("    if (sbc_caps) {", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("static const uint8_t kSinkSBC[4] = {0x31u, 0x15u, 0x02u, 0xfau};", sbc)
+        self.assertIn("sbc_caps[18] = A2DP_CODEC_SBC;", sbc)
+        self.assertIn("sbc_caps[19] = 4u;", sbc)
+        self.assertIn("uint64_t pcap = (uint64_t)(uintptr_t)sbc_caps;", sbc)       # its own copy, never entry 7's
+        self.assertIn("memcpy(e8 + 0x10u, &pcap, sizeof pcap);", sbc)
+        self.assertNotIn("new_caps[1", sbc)                                       # entry 7 is never touched here
 
     def test_codec_tail_holds_either_codec(self):
         """v9.8.84 sized the codec tail for SBC (4 bytes) and copied AAC's 6 into it: 2 bytes past the allocation,
-        inside bluetoothd. The tail is now a named size, and compile-time checks refuse to build if it shrinks."""
-        hooks = (ROOT / "tweak/Hooks.xm").read_text()
+        inside bluetoothd. The tail is a named size, and compile-time checks refuse to build if it shrinks."""
+        hooks = self.hooks()
         aac = (ROOT / "shared/AACConfig.h").read_text()
         tail = int(re.search(r"#define SINK_CODEC_TAIL_BYTES (\d+)u", hooks).group(1))
         csi = int(re.search(r"#define AAC_CSI_BYTES (\d+)u", aac).group(1))
         self.assertGreaterEqual(tail, csi)
         self.assertGreaterEqual(tail, 4)                              # kSinkSBC
-        self.assertIn("calloc(1u, 3u * 16u + SINK_CODEC_TAIL_BYTES)", hooks)
+        self.assertEqual(hooks.count("calloc(1u, 3u * 16u + SINK_CODEC_TAIL_BYTES)"), 2)   # entry 7 and entry 8
         self.assertNotIn("calloc(1u, 3u * 16u + 4u)", hooks)
         self.assertIn("uint8_t kSinkAAC[AAC_CSI_BYTES];", hooks)
         self.assertIn("[(AAC_CSI_BYTES <= SINK_CODEC_TAIL_BYTES) ? 1 : -1]", hooks)
-        # Every codec array copied into the tail is one of the two checked ones.
-        copied = re.findall(r"memcpy\(new_caps \+ 3u \* 16u, (\w+), sizeof \1\)", hooks)
-        self.assertEqual(sorted(copied), ["kSinkAAC", "kSinkSBC"])
-
-    def test_the_aac_endpoint_switch_turns_on_aac_decoding(self):
-        # Without SpeakaAAC the helper refuses an AAC stream (silence, never SBC), so the endpoint switch implies it.
-        model = (ROOT / "app/Speaka/SpeakaModel.swift").read_text()
-        sink = model.split("@Published var aacSink: Bool", 1)[1].split("\n    }\n", 1)[0]
-        self.assertIn("SPTweakClient.setAACsinkEnabled(aacSink)", sink)
-        self.assertIn("if aacSink && !aacDecode { aacDecode = true }", sink)
+        copied = re.findall(r"memcpy\((new_caps|sbc_caps) \+ 3u \* 16u, (\w+), sizeof \2\)", hooks)
+        self.assertEqual(sorted(copied), [("new_caps", "kSinkAAC"), ("sbc_caps", "kSinkSBC")])
 
     def test_avdtp_registration_records_become_aac(self):
-        """The records AVDTP registers for SEID 7 - what the PC reads with GET_CAPABILITIES - must say AAC-LC in AAC
-        mode. v9.8.84 changed only the audio-table entry, so the PC would still have been offered SBC."""
+        """The records AVDTP registers for SEID 7 - what the PC reads with GET_CAPABILITIES - say AAC-LC; the SBC
+        Sink's records, prepared from the same captured bytes, stay SBC and own their codec bytes."""
         class SinkCaps(ctypes.Structure):
             _fields_ = [("caps_words", ctypes.c_uint64 * 6), ("codec_bytes", ctypes.c_uint8 * 8),
                         ("assigned_seid", ctypes.c_uint8)]
@@ -896,32 +885,86 @@ class AACsinkMode(unittest.TestCase):
             for k in range(48):
                 if k not in (0, 16, 17, 18, 19, 32) and not 24 <= k < 32:   # 17: media type, must stay 0 (audio)
                     raw[k] = (k * 7) & 0xff                                    # bytes that must survive untouched
-            caps = SinkCaps()
-            self.assertEqual(prepare(ctypes.byref(caps), raw, (ctypes.c_uint8 * 4)(0x3f, 0x15, 0x02, 0x35)), 0)
+            sbc_bytes = (ctypes.c_uint8 * 4)(0x3f, 0x15, 0x02, 0x35)
+            caps, sbc = SinkCaps(), SinkCaps()
+            self.assertEqual(prepare(ctypes.byref(caps), raw, sbc_bytes), 0)
+            self.assertEqual(prepare(ctypes.byref(sbc), raw, sbc_bytes), 0)    # the dual layout's SBC Sink
             before = ctypes.string_at(ctypes.addressof(caps.caps_words), 48)
             self.assertEqual(use_aac(ctypes.byref(caps)), 0)
             after = ctypes.string_at(ctypes.addressof(caps.caps_words), 48)
             self.assertEqual((after[16], after[18], after[19]), (0x07, 0x02, 6))   # Media Codec record: AAC, 6 bytes
-            pointer = int.from_bytes(after[24:32], "little")
-            self.assertEqual(pointer, ctypes.addressof(caps.codec_bytes))
+            self.assertEqual(int.from_bytes(after[24:32], "little"), ctypes.addressof(caps.codec_bytes))
             want = (ctypes.c_uint8 * 6)()
             lib.aac_build_sink_capability(want)
             self.assertEqual(bytes(caps.codec_bytes)[:6], bytes(want))
             changed = {k for k in range(48) if before[k] != after[k]}
             self.assertLessEqual(changed, {18, 19} | set(range(24, 32)))  # nothing else in the records moves
+            # The SBC Sink's records: still SBC, pointing at their OWN codec bytes (a struct copy would not).
+            s = ctypes.string_at(ctypes.addressof(sbc.caps_words), 48)
+            self.assertEqual((s[16], s[18], s[19]), (0x07, 0x00, 4))
+            self.assertEqual(int.from_bytes(s[24:32], "little"), ctypes.addressof(sbc.codec_bytes))
+            self.assertEqual(bytes(sbc.codec_bytes)[:4], bytes(sbc_bytes))
             # Not the captured SBC records any more: refused, and nothing changes.
             self.assertEqual(use_aac(ctypes.byref(caps)), -2)
             self.assertEqual(ctypes.string_at(ctypes.addressof(caps.caps_words), 48), after)
+        hooks = self.hooks()
+        self.assertIn("sink_prepare_caps(&g_sink_caps, raw, codec) == 0 &&\n"
+                      "                sink_prepare_caps(&g_sink_caps_sbc, raw, codec) == 0)", hooks)
 
     def test_aac_records_are_rewritten_before_anything_native_changes(self):
-        hooks = (ROOT / "tweak/Hooks.xm").read_text()
-        body = hooks.split("static void register_sink_after_sources(uint64_t audio_context)", 1)[1].split("\n}\n", 1)[0]
+        body = self.hooks().split("static void register_sink_after_sources(uint64_t audio_context)", 1)[1].split("\n}\n", 1)[0]
         claim = body.index("__sync_bool_compare_and_swap(&g_sink_attempted, 0, 1)")
         rewrite = body.index("sink_caps_use_aac(&g_sink_caps)")
-        first_native = min(body.index("install_media_callback(avdtp_context)"), body.index("calloc(7u, 32u)"))
+        first_native = min(body.index("install_media_callback(avdtp_context)"), body.index("calloc(slots, 32u)"))
         self.assertLess(claim, rewrite)
         self.assertLess(rewrite, first_native)
-        self.assertIn("(uint64_t)(uintptr_t)&g_sink_caps.caps_words[0], 3, 1,", body)   # these records are registered
+        self.assertIn("(uint64_t)(uintptr_t)&g_sink_caps.caps_words[0], 3, 1,", body)       # SEID 7: AAC-LC
+        self.assertIn("(uint64_t)(uintptr_t)&g_sink_caps_sbc.caps_words[0], 3, 1,", body)   # the SBC Sink
+        self.assertLess(body.index("&g_sink_caps.caps_words[0]"), body.index("&g_sink_caps_sbc.caps_words[0]"))
+
+    def test_the_allocation_must_match_the_layout(self):
+        body = self.hooks().split("static void register_sink_after_sources(uint64_t audio_context)", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("const unsigned slots = g_config_shadow[0];", body)
+        self.assertIn("(slots != 7u && slots != 8u) || avdtp_slots != slots || (slots == 8u) != (g_dual_sink != 0)", body)
+        self.assertIn("uint8_t *new_table = (uint8_t *)calloc(slots, 32u);", body)
+        self.assertIn("uint8_t *e8 = slots == 8u ? new_table + 7u * 32u : NULL;", body)
+        # Every refusal before the swap frees all three private buffers (nothing native references them yet).
+        reject = self.hooks().split("reject_before_swap:", 1)[1].split("\n}\n", 1)[0]
+        for buf in ("free(sbc_caps);", "free(new_caps);", "free(new_table);"):
+            self.assertIn(buf, reject)
+
+    def test_a_failed_sbc_registration_keeps_aac(self):
+        body = self.hooks().split("static void register_sink_after_sources(uint64_t audio_context)", 1)[1].split("\n}\n", 1)[0]
+        e8 = body.split("    if (e8) {", 1)[1].split("\n    } else {\n        SpeakaSetStatus(\"diag.v93.codecs\"", 1)[0]
+        failed = e8.split("} else if (ret != 0) {", 1)[1].split("} else {", 1)[0]
+        self.assertIn("uint32_t seven = 7u;", failed)                         # native code sees seven entries again
+        self.assertIn('CFSTR("failed")', failed)
+        self.assertNotIn("g_sink_accepted = 0", failed)                       # SEID 7 stays accepted
+        self.assertNotIn("free(", failed)                                     # nothing native may still reference
+        self.assertIn("__atomic_store_n(&g_sbc_seid, assigned, __ATOMIC_RELEASE);", e8)   # used only once registered
+        self.assertLess(body.index("g_sink_accepted = 1u;"), body.index("    if (e8) {"))
+
+    def test_an_unfinished_dual_attempt_falls_back_to_the_proven_layout(self):
+        hooks = self.hooks()
+        decide = hooks.split("static void install_config_hook(", 1)[1].split("\n}\n\n", 1)[0]
+        self.assertIn('CFEqual(state, CFSTR("pending"))', decide)
+        self.assertIn('CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_DUAL_SINK_STATE), CFSTR("failed"), CFSTR(SPEAKA_PREFS_DOMAIN));', decide)
+        self.assertIn("g_dual_sink = !(pending || failed);", decide)
+        self.assertNotIn("SPEAKA_KEY_AAC_SINK", hooks)                        # the experiment's switch is not read
+        shadow = hooks.split("static uint64_t try_seven_slots(uint64_t original, unsigned hit)", 1)[1].split("\n}\n", 1)[0]
+        # "pending" is persisted before the larger allocation can exist; if it can't be, the single layout is used.
+        self.assertLess(shadow.index('CFSTR("pending")'), shadow.index("return (uint64_t)(uintptr_t)g_config_shadow;"))
+        self.assertIn("g_dual_sink = 0;\n            g_config_shadow[0] = 7u;", shadow)
+        self.assertIn("g_dual_sink ? 2 : 1", shadow)
+
+    def test_only_registered_sink_endpoints_are_ours(self):
+        hooks = self.hooks()
+        self.assertIn("static int sink_seid(unsigned seid) { return seid==SINK_AAC_SEID || (seid && seid==__atomic_load_n(&g_sbc_seid,__ATOMIC_ACQUIRE)); }", hooks)
+        setconfig = hooks.split("static uint64_t hook_setconfigind(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("sink_seid((unsigned)a3)", setconfig)
+        self.assertIn("g_stream_control.local_seid=(unsigned)a3;", setconfig)
+        self.assertIn("sink_seid(seid_byte >> 2)", hooks)                     # START correlation
+        self.assertNotIn("seid_byte == 0x1cu", hooks)
 
     def test_sink_capability_advertises_a_320_kbps_maximum(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -932,12 +975,30 @@ class AACsinkMode(unittest.TestCase):
             self.assertEqual(cap[3] & 0x80, 0x80)                                       # VBR
             self.assertEqual(((cap[3] & 0x7f) << 16) | (cap[4] << 8) | cap[5], 320000)
 
-    def test_rollback_path_is_complete(self):
-        """g_aac_sink_mode is re-read from preferences at every Bluetooth restart."""
-        hooks = (ROOT / "tweak/Hooks.xm").read_text()
-        config_hook_body = hooks.split("static void install_config_hook(", 1)[1].split("\n}\n\n", 1)[0]
-        self.assertIn("g_aac_sink_mode", config_hook_body,
-                      "g_aac_sink_mode must be set inside install_config_hook (re-read on every BT restart)")
+    def test_aac_decoding_is_standard_and_the_switches_are_gone(self):
+        helper = (ROOT / "audiohelper/AudioHelper.m").read_text()
+        self.assertIn("static const int g_aac_enabled=1;", helper)
+        self.assertNotIn("CFSTR(SPEAKA_KEY_AAC)", helper)
+        client = (ROOT / "app/Speaka/Model/SPTweakClient.m").read_text()
+        migrate = client.split("+ (void)removeLegacyCodecSettings", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("SPWritePref(@SPEAKA_KEY_AAC, nil)", migrate)          # macros, not bare strings
+        self.assertIn("SPWritePref(@SPEAKA_KEY_AAC_SINK, nil)", migrate)
+        self.assertNotIn('"SpeakaAACSink"', client)
+        model = (ROOT / "app/Speaka/SpeakaModel.swift").read_text()
+        self.assertIn("SPTweakClient.removeLegacyCodecSettings()", model.split("    init() {", 1)[1][:200])
+        for f in ("app/Speaka/SpeakaModel.swift", "app/Speaka/Windows.swift"):
+            text = (ROOT / f).read_text()
+            self.assertNotIn("aacSink", text); self.assertNotIn("aacDecode", text); self.assertNotIn("Experimental AAC", text)
+
+    def test_a_renegotiated_codec_gets_a_new_decoder(self):
+        # Two endpoints: one helper session can see AAC, then SBC (or back). The decoder is rebuilt for the ring's
+        # codec and configuration, never reused across codecs.
+        helper = (ROOT / "audiohelper/AudioHelper.m").read_text()
+        change = helper.split("            if(current!=generation) {", 1)[1].split("            int32_t audio_error", 1)[0]
+        self.assertIn("if(ring_codec!=decoder_codec || memcmp(decoder_config,s->codec_config,sizeof decoder_config)) {", change)
+        self.assertLess(change.index("codec_decoder_end(&decoder);"), change.index("codec_decoder_begin(&decoder,s,g_aac_enabled,hlog_line);"))
+        self.assertIn("} else codec_decoder_reset(&decoder);", change)
+
 
 
 def read_aus(name):

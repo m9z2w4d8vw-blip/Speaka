@@ -3,7 +3,8 @@
  * codec_config), set by the tweak at CONFIGURE. SBC is the default and needs no config; AAC builds an AudioConverter
  * from the 6-byte Codec Specific Information.
  *
- * Only the SBC path is validated on a device today. If AAC setup fails, or AAC is disabled, the helper falls back to
+ * Both paths are validated on a device (AAC-LC since v9.8.9x). If AAC setup fails, or the configuration is invalid,
+ * the stream is refused - silent and logged - and NEVER decoded as SBC (CODEC_DISABLED); formerly:
  * SBC, so a session is never left without a decoder. */
 #pragma once
 #include "../shared/AudioRing.h"
@@ -18,7 +19,7 @@
 #define CODEC_AAC_LOG_TOTAL 64u
 
 typedef struct {
-    uint32_t codec;            /* A2DP_CODEC_SBC or A2DP_CODEC_AAC, after any fallback */
+    uint32_t codec;            /* A2DP_CODEC_SBC, A2DP_CODEC_AAC, or disabled - what is actually decoded */
     SBCDecoder sbc;            /* always present; the fallback and the default */
     AACDecoder *aac;           /* non-NULL only when codec==AAC and setup succeeded */
     void (*log)(const char *fmt, ...);
@@ -27,7 +28,7 @@ typedef struct {
 } CodecDecoder;
 
 /* Set up for a session from the ring header. Reads header->codec and header->codec_config. On AAC, builds the AAC
- * decoder; if that fails (unsupported config, converter error, AAC disabled) it logs why and falls back to SBC.
+ * decoder; if that fails (unsupported config, converter error) it logs why and refuses the stream (silent).
  * `aac_enabled` is the SpeakaAAC experiment switch. Returns the codec actually in use. */
 uint32_t codec_decoder_begin(CodecDecoder *, const AudioRing *header, int aac_enabled,
                              void (*log)(const char *fmt, ...));

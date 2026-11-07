@@ -39,6 +39,13 @@ int sp_volume_mailbox_ready(const SPVolumeMailbox *m) {
 void sp_volume_mailbox_set(SPVolumeMailbox *m,int enabled,unsigned value) {
     if(m) __atomic_store_n(&m->control,enabled?(0x100u|(value>127?127:value)):0,__ATOMIC_RELEASE);
 }
+void sp_volume_mailbox_set_from(SPVolumeMailbox *m,int enabled,int from_windows,unsigned value) {
+    if(m) __atomic_store_n(&m->control,enabled?(0x100u|(from_windows?0x200u:0u)|(value>127?127:value)):0,__ATOMIC_RELEASE);
+}
+int sp_volume_mailbox_from_windows(const SPVolumeMailbox *m) {
+    uint32_t v=m?__atomic_load_n(&m->control,__ATOMIC_ACQUIRE):0;
+    return (v&0x300u)==0x300u;
+}
 int sp_volume_mailbox_enabled(const SPVolumeMailbox *m) {
     return m && (__atomic_load_n(&m->control,__ATOMIC_ACQUIRE)&0x100u)!=0;
 }

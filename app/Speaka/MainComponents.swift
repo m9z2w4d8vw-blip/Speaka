@@ -17,6 +17,8 @@ struct HeaderView: View {
     let subtitle: String
     let detail: String
     var detailIsWarning = false
+    /// v9.9.11: a second warning under the first (the SBC notice under the volume warning), in the same style.
+    var secondWarning: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -28,6 +30,15 @@ struct HeaderView: View {
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(detailIsWarning ? Theme.failure : Theme.secondary)
                 .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let secondWarning {
+                Text(secondWarning)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(Theme.failure)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 5)

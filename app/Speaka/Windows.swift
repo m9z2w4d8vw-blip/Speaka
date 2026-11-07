@@ -263,43 +263,6 @@ struct SettingsWindow: View {
                 .padding(.horizontal, 14)
                 .frame(height: 44)
                 .background(Theme.menu, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                // AAC-LC experimental section: both toggles in one grouped block.
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Experimental AAC")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.secondary)
-                        .padding(.horizontal, 4).padding(.bottom, 6)
-                    VStack(spacing: 0) {
-                        HStack {
-                            Text("AAC decode")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(.white)
-                            Spacer(minLength: 8)
-                            Toggle("AAC decode", isOn: $model.aacDecode)
-                                .labelsHidden().tint(Theme.accent).scaleEffect(0.85)
-                                .frame(width: 51 * 0.85, height: 31 * 0.85)
-                        }
-                        .padding(.horizontal, 14).frame(height: 44)
-                        Divider().overlay(Theme.separator)
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("AAC-only endpoint")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(.white)
-                                Text("SEID 7 advertises AAC-LC instead of SBC. Requires a Bluetooth restart.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Theme.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 8)
-                            Toggle("AAC endpoint", isOn: $model.aacSink)
-                                .labelsHidden().tint(Theme.accent).scaleEffect(0.85)
-                                .frame(width: 51 * 0.85, height: 31 * 0.85)
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                    }
-                    .background(Theme.menu, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
                 if model.notificationsRefused {
                     Text("Allow notifications for Speaka in Settings > Notifications, then try again.")
                         .font(.system(size: 12))

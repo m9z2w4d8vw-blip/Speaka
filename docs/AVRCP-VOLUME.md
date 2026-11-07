@@ -181,7 +181,7 @@ PDU/ctype/label/count, along with the A2DP configuration and helper heartbeat.
 For the experimental native adapter, repeat with:
 
 ```sh
-/var/jb/usr/bin/BTPSAudioHelper --volume-mode experimental
+/var/jb/usr/bin/BTPSAudioHelper --volume-mode on   # 9.9: the default; only needed after --volume-mode off
 ```
 
 After Stop/Start and reconnection, verify native installation gates pass, then test Windows slider values,
@@ -344,4 +344,25 @@ receive and connect return the native "no handler" status, the observers drop th
 
 Still unverified on the device: that `setActiveCategoryVolumeTo:` works from the helper daemon (the read-back decides,
 and falls back if not), the CHANGED path, and Windows' reaction to CHANGED (moving its slider, re-registering).
+
+## 9.9: standard
+
+**Device evidence (9.8.99).** Windows -> iPhone: 188 `V107_IOS_SET` from 10:13:56, every read-back matching (for
+example `ios=83/127` after a set to 83), `pcm_gain=127/127` throughout - one attenuation - and no
+`domain=speaka` or `FAILED CLOSED`. iPhone -> Windows worked too, but **not through Speaka's CHANGED**: the log has
+no `source=user` and no `0x0d` response. Windows' SetAbsoluteVolume commands followed the phone's own changes, which
+fits iOS's AVRCP *controller* sending the phone's level to the PC (bluetoothd's controller volume path) and Windows
+echoing it back; the echo window then correctly kept Speaka's CHANGED quiet. Inferred from the log's sequence, not
+traced. Both paths are kept: Speaka's CHANGED covers a PC whose own reaction differs.
+
+**What changed.** Volume sync needs no setting (`SpeakaVolumeSync` absent = on; the experiment's key is removed).
+Initial level: at 10:13:56 the phone (127) was set to 51 - Speaka's saved level, sent as INTERIM when Windows
+registered and then mistaken for Windows' choice. The mailbox carries the level's provenance now
+(`sp_volume_mailbox_set_from`): only SetAbsoluteVolume is Windows' choice; INTERIM and the iPhone's own changes are not.
+At connection the phone keeps its level and reports it, so Windows' slider adopts it - no loudness change. The saved
+level is the last one applied, Windows' or the phone's, so the INTERIM usually already matches.
+
+**Limits.** Windows' volume on *another* output before the connection (the laptop's speakers) isn't carried over
+Bluetooth: AVRCP carries Windows' level for this endpoint only, and Windows answered Speaka's INTERIM rather than
+pushing a level of its own. Matching the laptop's previous level would need software on Windows.
 
