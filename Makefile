@@ -28,6 +28,9 @@ include $(THEOS)/makefiles/tweak.mk
 
 # The audio helper plays what bluetoothd hands it, so it's always built (folder audiohelper/).
 SUBPROJECTS += audiohelper
+# v9.9.3: Settings > Update notifications from launchd every 15 minutes (folder updatecheck/): its own binary, so the
+# audio helper's signature is unchanged.
+SUBPROJECTS += updatecheck
 # The Settings > Speaka page with the status and debug log (folder settings/).
 # If it ever fails to build, set this to 0 (or run: make package BTPS_WITH_PREFS=0) and the tweak still builds.
 BTPS_WITH_PREFS ?= 1

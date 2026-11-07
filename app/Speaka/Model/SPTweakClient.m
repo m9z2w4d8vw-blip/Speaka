@@ -442,6 +442,10 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled
 {
     [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:SPUpdateNotificationsKey];
+    // v9.9.3: mirrored where SpeakaUpdateCheck (launchd, every 15 minutes) reads it.
+    id mirrored = SPCopyPref(@SPEAKA_KEY_UPDATE_NOTIFY);
+    if (![mirrored isKindOfClass:[NSNumber class]] || [mirrored boolValue] != enabled)
+        SPWritePref(@SPEAKA_KEY_UPDATE_NOTIFY, @(enabled));
 }
 
 + (void)removeLeftoverPreferences
@@ -461,15 +465,36 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
     if (app.length) [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:app];
 }
 
+// v9.9.3: the release last announced, shared with SpeakaUpdateCheck so each release is announced once, whichever
+// finds it first. A record kept by an older Speaka (in the app's own defaults) is carried over once.
 + (NSString *)notifiedVersion
 {
-    id version = [[NSUserDefaults standardUserDefaults] objectForKey:SPNotifiedVersionKey];
-    return [version isKindOfClass:[NSString class]] ? version : nil;
+    id version = SPCopyPref(@SPEAKA_KEY_UPDATE_ANNOUNCED);
+    if ([version isKindOfClass:[NSString class]]) return version;
+    id older = [[NSUserDefaults standardUserDefaults] objectForKey:SPNotifiedVersionKey];
+    if ([older isKindOfClass:[NSString class]]) {
+        SPWritePref(@SPEAKA_KEY_UPDATE_ANNOUNCED, older);
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:SPNotifiedVersionKey];
+        return older;
+    }
+    return nil;
 }
 
 + (void)setNotifiedVersion:(NSString *)version
 {
-    [[NSUserDefaults standardUserDefaults] setObject:version forKey:SPNotifiedVersionKey];
+    SPWritePref(@SPEAKA_KEY_UPDATE_ANNOUNCED, version);
+}
+
+// v9.9.3: when Speaka (the app or SpeakaUpdateCheck) last got an answer from GitHub.
++ (NSDate *)lastUpdateCheck
+{
+    id when = SPCopyPref(@SPEAKA_KEY_UPDATE_CHECKED);
+    return [when isKindOfClass:[NSNumber class]] ? [NSDate dateWithTimeIntervalSinceReferenceDate:[when doubleValue]] : nil;
+}
+
++ (void)setLastUpdateCheck:(NSDate *)date
+{
+    SPWritePref(@SPEAKA_KEY_UPDATE_CHECKED, @(date.timeIntervalSinceReferenceDate));
 }
 
 @end

@@ -248,7 +248,7 @@ class SpeakaApp(unittest.TestCase):
                                   "connectedComputerName", "pairedComputerName", "computerName", "isAudioDevice", "lookupSummary",
                                   "updateNotificationsEnabled", "setUpdateNotificationsEnabled", "notifiedVersion",
                                   "setNotifiedVersion", "removeLeftoverPreferences", "removeLegacyCodecSettings",
-                                  "roomVerdict"})
+                                  "roomVerdict", "lastUpdateCheck", "setLastUpdateCheck"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -891,7 +891,8 @@ int main(void) {
         self.assertLess(menu.index('MenuItem(id: "settings", title: "Settings", symbol: "gearshape",'),
                         menu.index('MenuItem(id: "output", title: "Audio Output"'))
         self.assertIn("case settings, output, credits, connect, update", content)   # v9.9.2: Connect to
-        self.assertIn("case .settings:\n            SettingsWindow(model: model) { self.window = .credits }", content)
+        self.assertIn("case .settings:\n            SettingsWindow(model: model, updater: updater,\n"
+                      "                           showCredits: { self.window = .credits },", content)
         windows = read(WINDOWS)
         settings = block(windows, "struct SettingsWindow: View {")
         self.assertIn('WindowCard(title: "Settings") {', settings)
@@ -934,13 +935,18 @@ int main(void) {
         self.assertIn("SPTweakClient.notifiedVersion() != newest.name", check)    # announced once
         self.assertLess(check.index("try await UNUserNotificationCenter.current().add(note)"),
                         check.index("SPTweakClient.setNotifiedVersion(newest.name)"))
+        # v9.9.3: only while iOS allows Speaka's notifications - otherwise not recorded, so it's announced later.
+        self.assertLess(check.index("guard UpdateNotifications.shows(settings.authorizationStatus) else { return }"),
+                        check.index("try await UNUserNotificationCenter.current().add(note)"))
+        self.assertIn("SpeakaUpdater.fetchReleases", check)                       # the one conditional fetch
         enable = block(notes, "static func setEnabled(_ on: Bool, completion: @escaping (Bool) -> Void) {")
         self.assertIn("requestAuthorization(options: [.alert, .sound])", enable)
         self.assertIn("SPTweakClient.setUpdateNotificationsEnabled(granted)", enable)
         self.assertIn("BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: UpdateNotifications.taskID)", enable)
         # While open: a timer on the updater (a timer made in a view's body would restart at every redraw).
         updater = read(UPDATER)
-        self.assertIn("func check(again: Bool = false) {\n        guard !checking, again || !checked else { return }", updater)
+        self.assertIn("func check(again: Bool = false, completion: ((CheckResult) -> Void)? = nil) {", updater)
+        self.assertIn("guard !checking else { return }\n        guard again || !checked else", updater)
         watch = block(updater, "func watch(_ on: Bool) {")
         self.assertIn("Timer.scheduledTimer(withTimeInterval: UpdateNotifications.interval, repeats: true)", watch)
         self.assertIn("self?.check(again: true)", watch)
@@ -952,7 +958,8 @@ int main(void) {
         # The switch, in Settings under Kill Bluetooth; the app's own settings, stored by the client.
         settings = block(read(WINDOWS), "struct SettingsWindow: View {")
         self.assertLess(settings.index("model.killBluetooth()"),
-                        settings.index('Toggle("Update notifications", isOn: Binding(get: { model.updateNotifications },'))
+                        settings.index('WindowToggleRow(title: "Update notifications",\n'
+                                       '                                isOn: Binding(get: { model.updateNotifications },'))
         self.assertIn("set: { model.setUpdateNotifications($0) }", settings)
         client = read(CLIENT_M)
         self.assertIn('static NSString *const SPUpdateNotificationsKey = @"updateNotifications";', client)
@@ -1569,6 +1576,10 @@ int main(void) {
             "UIImpactFeedbackGenerator", "UINotificationFeedbackGenerator", "CTFont", "CTFontDescriptor", "CFURL",
             "CTFontManagerRegisterFontsForURL", "CTFontManagerCreateFontDescriptorsFromURL",
             "CTFontDescriptorCopyAttribute", "AVRoutePickerView",
+            # v9.9.3: Foundation, Swift and UserNotifications, for update checks and notification taps
+            "NotificationCenter", "Notification", "NSObject", "NSLock", "URLError", "URLSessionConfiguration", "Result",
+            "DateFormatter", "Calendar", "UNAuthorizationStatus", "UNUserNotificationCenterDelegate", "UNNotification",
+            "UNNotificationResponse", "UNNotificationPresentationOptions",
         }
         code = "".join(strip_comments_and_strings(read(s)) for s in SWIFT)
         code = re.sub(r"^import \w+$", "", code, flags=re.M)
@@ -1683,20 +1694,22 @@ class SettingsWindow(unittest.TestCase):
     def test_smaller_and_without_descriptions(self):
         windows = read(SPEAKA_SOURCES / "Windows.swift")
         settings = block_until(windows, "struct SettingsWindow: View {")
-        # v9.9.2: Kill Bluetooth (and Credits) are Dopamine's Actions buttons (WindowActionButton); the switch row
-        # keeps Speaka's 44 pt, 12 pt continuous, 15 pt medium row.
-        self.assertEqual(settings.count(".frame(height: 44)"), 1)
-        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 1)
-        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 1)
+        # v9.9.3: every row is Dopamine's Actions frame (WindowActionButton, WindowToggleRow), 8 pt apart: none of
+        # Speaka's older 44 pt, 12 pt continuous, 15 pt medium rows is left.
+        self.assertEqual(settings.count(".frame(height: 44)"), 0)
+        self.assertEqual(settings.count("RoundedRectangle(cornerRadius: 12, style: .continuous)"), 0)
+        self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 0)
         self.assertNotIn("Experimental AAC", settings)
-        self.assertIn("VStack(spacing: 10)", settings)
-        self.assertIn(".scaleEffect(0.85)\n                        .frame(width: 51 * 0.85, height: 31 * 0.85)", settings)
+        self.assertIn("VStack(spacing: WindowActionButton.spacing)", settings)
+        toggle = block_until(windows, "struct WindowToggleRow: View {")
+        self.assertIn(".scaleEffect(0.85)\n                .frame(width: 51 * 0.85, height: 31 * 0.85)", toggle)
         for gone in ("Every 2 minutes", ".frame(height: 50)", "size: 17", "size: 13"):
             self.assertNotIn(gone, settings)
         # A line only when something failed, in the warning colour at Caz's 12 pt for footers.
-        self.assertIn("if let failure = model.killResult {", settings)
-        self.assertIn('if model.notificationsRefused {\n                    Text("Allow notifications', settings)
-        self.assertEqual(settings.count(".font(.system(size: 12))\n                        .foregroundStyle(Theme.failure)"), 2)
+        self.assertIn("if let failure = model.killResult {\n                    SettingsFootnote(text: failure, failed: true)", settings)
+        self.assertIn('if model.notificationsRefused {\n                    SettingsFootnote(text: "Allow notifications', settings)
+        footnote = block_until(windows, "struct SettingsFootnote: View {")
+        self.assertIn(".font(.system(size: 12))\n            .foregroundStyle(failed ? Theme.failure : Theme.secondary)", footnote)
         self.assertNotIn("Color.white.opacity(0.5)", settings)
 
 
@@ -2064,16 +2077,16 @@ class DopamineActions(unittest.TestCase):
     def test_settings_has_kill_bluetooth_and_credits(self):
         settings = block_until(self.windows(), "struct SettingsWindow: View {")
         self.assertIn("let showCredits: () -> Void", settings)
-        group = settings.split("VStack(spacing: WindowActionButton.spacing) {", 1)[1].split(".padding(.horizontal, WindowActionButton.inset)", 1)[0]
+        column = settings.split("VStack(spacing: WindowActionButton.spacing) {", 1)[1].split(".padding(.horizontal, WindowActionButton.inset)", 1)[0]
         self.assertIn('WindowActionButton(title: model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth",\n'
-                      '                                       symbol: "arrow.triangle.2.circlepath") {\n'
-                      '                        model.killBluetooth()', group)
-        self.assertIn(".disabled(busy)\n                    .opacity(busy ? 0.5 : 1)", group)        # not during a Start or Stop
-        self.assertIn('WindowActionButton(title: "Credits", symbol: "info.circle", action: showCredits)', group)
-        self.assertLess(group.index('"Kill Bluetooth"'), group.index('title: "Credits"'))
-        # The kill failure and the switch row follow, as before.
-        self.assertLess(settings.index(".padding(.horizontal, WindowActionButton.inset)"), settings.index("if let failure = model.killResult {"))
-        self.assertLess(settings.index("if let failure = model.killResult {"), settings.index('Text("Update notifications")'))
+                      '                                   symbol: "arrow.triangle.2.circlepath") {\n'
+                      '                    model.killBluetooth()', column)
+        self.assertIn(".disabled(busy)\n                .opacity(busy ? 0.5 : 1)", column)            # not during a Start or Stop
+        self.assertIn('WindowActionButton(title: "Credits", symbol: "info.circle", action: showCredits)', column)
+        self.assertLess(column.index('"Kill Bluetooth"'), column.index('title: "Credits"'))
+        # The kill failure follows Kill Bluetooth.
+        self.assertLess(column.index("model.killBluetooth()"), column.index("if let failure = model.killResult {"))
+        self.assertLess(column.index("if let failure = model.killResult {"), column.index('title: "Credits"'))
 
     def test_credits_opens_from_settings_and_goes_back(self):
         content = read(SPEAKA_SOURCES / "ContentView.swift")
@@ -2094,3 +2107,189 @@ class DopamineActions(unittest.TestCase):
         window = block_until(self.windows(), "struct ConnectWindow: View {")
         self.assertIn('WindowCard(title: "Connect to") {', window)
 
+
+
+class UpdateChecks(unittest.TestCase):
+    """v9.9.3: Update notifications, fixed and dependable, and Settings > Check for Updates.
+
+    Before: the app's background check runs only when iOS chooses (often hours apart, never after a swipe-away), the
+    Update Available a notification promised didn't appear until a 2-minute timer fired, a release could be recorded
+    as announced while iOS silently dropped the notification (Speaka's notifications off), the switch stayed on when
+    iOS refused, and failures were silent. Now SpeakaUpdateCheck (launchd, every 15 minutes) posts as Speaka - signed
+    the way mediaremoted and bluetoothd are, com.apple.private.usernotifications.bundle-identifiers naming the one
+    bundle - and the app checks on coming to the front, records a release only once iOS accepted it, follows iOS's
+    permission, asks conditionally and says why a check failed."""
+
+    def test_the_announce_policy(self):
+        harness = r"""
+#include <assert.h>
+#include <stdio.h>
+#include "shared/UpdatePolicy.h"
+int main(void) {
+    assert(sp_version_compare("v9.9.101", "9.9.100") > 0);
+    assert(sp_version_compare("9.10", "9.9.200") > 0);       /* numeric parts, not text */
+    assert(sp_version_compare("9.9", "9.9.0") == 0);
+    assert(sp_version_compare("v9.9.102", "9.9.102") == 0);
+    assert(sp_version_compare("9.9.99", "9.9.100") < 0);
+    assert(sp_version_compare("", "9.9") < 0 && sp_version_compare(NULL, NULL) == 0);
+    assert(sp_version_compare("9.9.9999999999999", "9.9.1") > 0);        /* clamped, no overflow */
+    /* newer, not announced: announce */
+    assert(sp_update_should_announce("9.9.101", "v9.9.102", "9.9.102", NULL) == 1);
+    assert(sp_update_should_announce("9.9.101", "v9.9.102", "9.9.102", "9.9.101") == 1);
+    /* the same, older, or announced already: no */
+    assert(sp_update_should_announce("9.9.102", "v9.9.102", "9.9.102", NULL) == 0);
+    assert(sp_update_should_announce("9.9.103", "v9.9.102", "9.9.102", NULL) == 0);
+    assert(sp_update_should_announce("9.9.101", "v9.9.102", "9.9.102", "9.9.102") == 0);
+    /* nothing to compare with: no */
+    assert(sp_update_should_announce(NULL, "v9.9.102", "9.9.102", NULL) == 0);
+    assert(sp_update_should_announce("", "v9.9.102", "9.9.102", NULL) == 0);
+    assert(sp_update_should_announce("9.9.101", "nightly", "nightly", NULL) == 0);
+    puts("announce policy: newer and unannounced only");
+    return 0;
+}
+"""
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = pathlib.Path(td) / "policy.c"; exe = pathlib.Path(td) / "policy"; src.write_text(harness)
+            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("BTPS_SANITIZE") else []
+            build = subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), *extra, str(src),
+                                    str(ROOT / "shared/UpdatePolicy.c"), "-o", str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+
+    def test_the_daemon_checks_and_posts_as_speaka(self):
+        daemon = read(ROOT / "updatecheck/UpdateCheck.m")
+        main = daemon.split("int main(int argc, char *argv[]) {", 1)[1]
+        # The switch decides before anything goes to the network (--now and --test aside).
+        self.assertLess(main.index("CFSTR(SPEAKA_KEY_UPDATE_NOTIFY)"), main.index("dataTaskWithRequest:request"))
+        # Conditional: the ETag only with the answer it belongs to; a 304 reuses it; a 200 replaces both.
+        self.assertIn("NSString *etag = cached ? string_pref(CFSTR(SPEAKA_KEY_UPDATE_ETAG)) : nil;", main)
+        self.assertIn('[request setValue:etag forHTTPHeaderField:@"If-None-Match"];', main)
+        self.assertIn("if (response.statusCode == 304 && cached) {", main)
+        self.assertIn("set_pref(CFSTR(SPEAKA_KEY_UPDATE_ETAG), answerTag.length ? answerTag : nil);", main)
+        # The shared rule, and the record only once iOS accepted the notification.
+        self.assertIn("sp_update_should_announce(installed.UTF8String, tag.UTF8String, title.UTF8String, announced.UTF8String)", main)
+        self.assertIn("if (posted > 0) set_pref(CFSTR(SPEAKA_KEY_UPDATE_ANNOUNCED), title);", main)
+        self.assertLess(main.index("post_as_speaka("), main.index("if (posted > 0) set_pref(CFSTR(SPEAKA_KEY_UPDATE_ANNOUNCED)"))
+        post = daemon.split("static int post_as_speaka(", 1)[1].split("\nint main(", 1)[0]
+        self.assertIn("instancesRespondToSelector:@selector(initWithBundleIdentifier:)", post)       # guarded
+        self.assertIn("[[UNUserNotificationCenter alloc] initWithBundleIdentifier:@SPEAKA_APP_BUNDLE_ID]", post)
+        self.assertLess(post.index("getNotificationSettingsWithCompletionHandler"), post.index("addNotificationRequest:request"))
+        self.assertIn("return 0;", post.split("POST skipped: Speaka's notifications aren't allowed", 1)[1][:80])
+        # The same notification as the app's: identifier, wording, and release choice.
+        self.assertIn('[@"update-" stringByAppendingString:title]', main)
+        self.assertIn('@"Tap to update."', main)
+        self.assertIn('[NSString stringWithFormat:@"Speaka %@ is ready", title]', main)
+        notes = read(APP / "Speaka/UpdateNotifications.swift")
+        self.assertIn('identifier: "update-\\(newest.name)"', notes)
+        self.assertIn('content.body = "Tap to update."', notes)
+        self.assertIn('content.title = "Speaka \\(newest.name) is ready"', notes)
+        newest = daemon.split("static BOOL newest_release(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('[release[@"draft"] boolValue] || [release[@"prerelease"] boolValue]', newest)
+        self.assertIn('[file hasSuffix:@".tipa"] || [file hasSuffix:@".ipa"]', newest)
+        self.assertIn("heading.length ? heading : name", newest)                    # the title, as the app's .name
+        # "Installed" means what the app's packageVersion(in:package:) means.
+        installed = daemon.split("static NSString *installed_version(void) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('installed = [line hasSuffix:@" installed"];', installed)
+        self.assertIn("return installed ? version : nil;", installed)
+        self.assertIn('static const char *const kLogPath = "/tmp/FTABHarvest/SpeakaUpdateCheck.log";', daemon)
+        self.assertIn('strcmp(argv[1], "--test") == 0', daemon)
+        self.assertIn('#define SPEAKA_APP_BUNDLE_ID          "com.parv.speaka"', read(ROOT / "shared/SpeakaShared.h"))
+
+    def test_the_package_runs_it_without_touching_audio(self):
+        entitlements = plistlib.loads((ROOT / "updatecheck/entitlements.plist").read_bytes())
+        bundle = re.search(r"PRODUCT_BUNDLE_IDENTIFIER: (\S+)", read(APP / "project.yml")).group(1)
+        self.assertEqual(entitlements, {"com.apple.private.usernotifications.bundle-identifiers": [bundle]})
+        make = read(ROOT / "updatecheck/Makefile")
+        self.assertIn("SpeakaUpdateCheck_CODESIGN_FLAGS = -Sentitlements.plist", make)
+        self.assertIn("SpeakaUpdateCheck_FILES = UpdateCheck.m ../shared/UpdatePolicy.c", make)
+        self.assertIn("SpeakaUpdateCheck_FRAMEWORKS = Foundation UserNotifications", make)
+        self.assertIn("SUBPROJECTS += updatecheck", read(ROOT / "Makefile"))
+        self.assertNotIn("CODESIGN_FLAGS", read(ROOT / "audiohelper/Makefile"))        # the audio helper: unchanged
+        job = plistlib.loads((ROOT / "layout/Library/LaunchDaemons/com.parv.speaka.updatecheck.plist").read_bytes())
+        self.assertEqual(job["Label"], "com.parv.speaka.updatecheck")
+        self.assertEqual(job["ProgramArguments"], ["/var/jb/usr/bin/SpeakaUpdateCheck"])
+        self.assertEqual((job["UserName"], job["GroupName"]), ("mobile", "mobile"))
+        self.assertEqual(job["StartInterval"], 900)
+        self.assertTrue(job["RunAtLoad"])
+        self.assertEqual(job["ProcessType"], "Background")
+        postinst = read(ROOT / "layout/DEBIAN/postinst")
+        block_ = postinst.split("updates=/var/jb/Library/LaunchDaemons/com.parv.speaka.updatecheck.plist", 1)[1].split("\n    fi\n", 1)[0]
+        self.assertIn('launchctl bootstrap system "$updates" >/dev/null 2>&1 || echo', block_)
+        self.assertNotIn("exit 1", block_)                                                # never fails the install
+        self.assertIn("launchctl bootout system/com.parv.speaka.updatecheck", read(ROOT / "layout/DEBIAN/prerm"))
+        for script in ("postinst", "prerm"):
+            self.assertEqual(subprocess.run(["sh", "-n", str(ROOT / "layout/DEBIAN" / script)]).returncode, 0)
+        workflow = read(ROOT / ".github/workflows/build.yml")
+        self.assertIn('checker="pkgroot/var/jb/usr/bin/SpeakaUpdateCheck"', workflow)
+        self.assertIn("ldid -e \"$checker\" | grep -q 'com.apple.private.usernotifications.bundle-identifiers'", workflow)
+        self.assertIn("the audio helper must keep its entitlement-free signature", workflow)
+
+    def test_the_apps_defects_are_fixed(self):
+        content, updater, model = read(CONTENT), read(UPDATER), read(MODEL)
+        notes, client = read(APP / "Speaka/UpdateNotifications.swift"), read(CLIENT_M)
+        # 1. Coming to the front checks at once, so the Update Available a notification promised is there.
+        active = content.split("if phase == .active {", 1)[1].split("}", 1)[0]
+        self.assertIn("updater.checkOnActivation()", active)
+        self.assertIn("model.syncNotificationPermission()", active)
+        activation = block(updater, "func checkOnActivation() {")
+        self.assertIn("Date().timeIntervalSince(lastFetch) < 20", activation)
+        self.assertIn("check(again: true)", activation)
+        # 2. Recorded as announced only once iOS accepted it - and only while it allows Speaka's notifications.
+        check = block(notes, "static func check() async {")
+        self.assertLess(check.index("UpdateNotifications.shows(settings.authorizationStatus)"), check.index(".add(note)"))
+        self.assertLess(check.index(".add(note)"), check.index("SPTweakClient.setNotifiedVersion(newest.name)"))
+        # 3. The switch follows iOS: turned off (with the line) when Speaka's notifications aren't allowed.
+        sync = block(model, "func syncNotificationPermission() {")
+        self.assertIn("SPTweakClient.setUpdateNotificationsEnabled(false)", sync)
+        self.assertIn("self.notificationsRefused = true", sync)
+        # 4. Conditional requests and reasons, one path for every check; no disk cache.
+        fetch = block(updater, "static func fetchReleases(completion: @escaping (Result<[SpeakaRelease], FetchFailure>) -> Void) {")
+        self.assertIn('request.setValue(previous.etag, forHTTPHeaderField: "If-None-Match")', fetch)
+        self.assertIn("case 304 where previous != nil:", fetch)
+        self.assertIn("SPTweakClient.setLastUpdateCheck(Date())", fetch)
+        self.assertIn("configuration.requestCachePolicy = .reloadIgnoringLocalCacheData", updater)
+        self.assertIn('return "GitHub\'s hourly limit is used up until \\(time)"', updater)
+        self.assertIn('return "you\'re offline"', updater)
+        # Shared with SpeakaUpdateCheck: the switch, and the record (an older Speaka's carried over once).
+        self.assertIn("SPWritePref(@SPEAKA_KEY_UPDATE_NOTIFY, @(enabled));", client)
+        self.assertIn("SPWritePref(@SPEAKA_KEY_UPDATE_ANNOUNCED, older);", client)
+        self.assertIn("SPTweakClient.setUpdateNotificationsEnabled(updateNotifications)", block(model, "    init() {"))
+        # A tap opens the update: the delegate is installed at launch, and the main screen takes the tap.
+        self.assertIn("UNUserNotificationCenter.current().delegate = SpeakaNotificationDelegate.shared",
+                      block(read(APP / "Speaka/SpeakaApp.swift"), "    init() {"))
+        received = notes.split("didReceive response: UNNotificationResponse,", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn('response.notification.request.identifier.hasPrefix("update-")', received)
+        self.assertIn(".onReceive(NotificationCenter.default.publisher(for: SpeakaNotificationDelegate.openUpdate)) { _ in", content)
+        self.assertIn("if SpeakaNotificationDelegate.openRequested { openUpdateWhenReady() }", content)
+        opening = block(content, "private func openUpdateWhenReady() {")
+        self.assertIn("if case .available = result, !updater.isBusy, !model.uninstalling {\n                window = .update", opening)
+        self.assertIn("static let backgroundInterval: TimeInterval = 15 * 60", notes)
+
+    def test_settings_is_one_column_with_check_for_updates(self):
+        windows = read(WINDOWS)
+        settings = block_until(windows, "struct SettingsWindow: View {")
+        column = settings.split("VStack(spacing: WindowActionButton.spacing) {", 1)[1].split(".padding(.horizontal, WindowActionButton.inset)", 1)[0]
+        order = [column.index(x) for x in ('"Kill Bluetooth"', 'title: "Credits"', 'WindowToggleRow(title: "Update notifications"',
+                                           '"Check for Updates"')]
+        self.assertEqual(order, sorted(order))                                     # under the switch, as asked
+        self.assertIn('title: checking ? "Checking for Updates..." : "Check for Updates"', column)
+        self.assertIn("updater.checkNow { result in\n                        if case .available = result { showUpdate() }", column)
+        self.assertIn(".disabled(checking || updater.isBusy)", column)
+        line = block(settings, "private var checkLine: (text: String, failed: Bool)? {")
+        self.assertIn('return ("Speaka \\(version) is up to date.", false)', line)
+        self.assertIn('return ("Couldn\'t check for updates: \\(reason).", true)', line)
+        self.assertIn('"Last checked at \\(time)."', line)
+        # The switch row is the buttons' frame: the same height, border and corners as WindowActionButton.
+        button = block_until(windows, "struct WindowActionButton: View {")
+        toggle = block_until(windows, "struct WindowToggleRow: View {")
+        for part in (".frame(maxWidth: .infinity)", ".overlay(RoundedRectangle(cornerRadius: 10, style: .circular)",
+                     ".strokeBorder(Color.white.opacity(0.15), lineWidth: 1))", '.font(.system(size: 17, weight: .regular))'):
+            self.assertIn(part, button)
+            self.assertIn(part, toggle)
+        self.assertIn(".frame(height: WindowActionButton.height)", toggle)
+        self.assertNotIn(".background(", toggle)
+        self.assertIn(".padding(.trailing, 5)", toggle)               # the switch 5 pt in, as from top and bottom
+        content = read(CONTENT)
+        self.assertIn("showUpdate: { self.window = .update })", content)

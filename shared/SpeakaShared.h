@@ -25,6 +25,15 @@
 /* v9.9.11: the dual Sink layout's outcome - "pending" while one is being set up, "ok" once both endpoints registered.
  * A "pending" left by a launch that never finished means the next Start uses the single AAC endpoint ("failed"). */
 #define SPEAKA_KEY_DUAL_SINK_STATE "SpeakaDualSinkState"
+/* v9.9.3: update notifications. The app mirrors its switch here so SpeakaUpdateCheck (a launchd job, every 15 min)
+ * knows whether to check; both record the release they announced and when they last checked, so each release is
+ * announced once whichever finds it first. */
+#define SPEAKA_APP_BUNDLE_ID          "com.parv.speaka"            /* Speaka.app: whose notifications these are */
+#define SPEAKA_KEY_UPDATE_NOTIFY      "SpeakaUpdateNotifications"  /* boolean, the app's Settings switch */
+#define SPEAKA_KEY_UPDATE_ANNOUNCED   "SpeakaUpdateAnnounced"      /* string: the release last announced ("9.9.102") */
+#define SPEAKA_KEY_UPDATE_CHECKED     "SpeakaUpdateLastChecked"    /* number: CFAbsoluteTime of the last answer */
+#define SPEAKA_KEY_UPDATE_ETAG        "SpeakaUpdateETag"           /* string: GitHub's ETag for the release list */
+#define SPEAKA_KEY_UPDATE_NEWEST      "SpeakaUpdateNewest"         /* string: the newest release with the app, then */
 
 #define SPEAKA_LOG_DIR      "/tmp/FTABHarvest"
 #define SPEAKA_LOG_FILE     "/tmp/FTABHarvest/Speaka.log"

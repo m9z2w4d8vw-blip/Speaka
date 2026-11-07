@@ -252,64 +252,116 @@ struct RoutePickerAnchor: UIViewRepresentable {
 /// Settings: Kill Bluetooth (the README's `killall -9 bluetoothd`, through the root helper) and Update notifications.
 struct SettingsWindow: View {
     @ObservedObject var model: SpeakaModel
+    @ObservedObject var updater: SpeakaUpdater
     /// v9.9.2: Credits lives here now (the menu's fourth row is Connect to).
     let showCredits: () -> Void
+    /// v9.9.3: Check for Updates found one - the update window, as Update Available opens it.
+    let showUpdate: () -> Void
 
     private var busy: Bool { model.killingBluetooth || model.request != nil }
+    private var checking: Bool { updater.manual == .checking }
 
     var body: some View {
-        // v9.8: a size smaller: rows 44 pt (were 50) with 12 pt corners, text at Caz's 15 pt for Settings rows, the
-        // switch at 85%. Neither row has a description; a line shows only when something failed, at Caz's 12 pt.
-        // v9.9.2: the buttons are Dopamine's Actions buttons (WindowActionButton); the switch row is unchanged.
+        // v9.9.3: one column of Dopamine's Actions buttons, 266 x 36 pt and 8 pt apart - Kill Bluetooth, Credits, the
+        // Update notifications switch in the same frame, and Check for Updates. A line shows under one only when it
+        // has something to say, at Caz's 12 pt for footers.
         WindowCard(title: "Settings") {
-            VStack(spacing: 10) {
-                // v9.9.2: Dopamine's Actions buttons - Kill Bluetooth and Credits, 266 x 36 pt, 8 pt apart.
-                VStack(spacing: WindowActionButton.spacing) {
-                    WindowActionButton(title: model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth",
-                                       symbol: "arrow.triangle.2.circlepath") {
-                        model.killBluetooth()
-                    }
-                    .disabled(busy)
-                    .opacity(busy ? 0.5 : 1)
-                    WindowActionButton(title: "Credits", symbol: "info.circle", action: showCredits)
+            VStack(spacing: WindowActionButton.spacing) {
+                WindowActionButton(title: model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth",
+                                   symbol: "arrow.triangle.2.circlepath") {
+                    model.killBluetooth()
                 }
-                .padding(.horizontal, WindowActionButton.inset)
+                .disabled(busy)
+                .opacity(busy ? 0.5 : 1)
                 if let failure = model.killResult {
-                    Text(failure)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.failure)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    SettingsFootnote(text: failure, failed: true)
                 }
-                HStack {
-                    Text("Update notifications")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white)
-                    Spacer(minLength: 8)
-                    // A switch is 51 x 31 pt whatever it's asked; scaled, then framed to its new size so it sits
-                    // flush with the row's edge.
-                    Toggle("Update notifications", isOn: Binding(get: { model.updateNotifications },
-                                                                  set: { model.setUpdateNotifications($0) }))
-                        .labelsHidden()
-                        .tint(Theme.accent)
-                        .scaleEffect(0.85)
-                        .frame(width: 51 * 0.85, height: 31 * 0.85)
-                }
-                .padding(.horizontal, 14)
-                .frame(height: 44)
-                .background(Theme.menu, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                WindowActionButton(title: "Credits", symbol: "info.circle", action: showCredits)
+                WindowToggleRow(title: "Update notifications",
+                                isOn: Binding(get: { model.updateNotifications },
+                                              set: { model.setUpdateNotifications($0) }))
                 if model.notificationsRefused {
-                    Text("Allow notifications for Speaka in Settings > Notifications, then try again.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.failure)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    SettingsFootnote(text: "Allow notifications for Speaka in Settings > Notifications, then try again.",
+                                     failed: true)
+                }
+                WindowActionButton(title: checking ? "Checking for Updates..." : "Check for Updates",
+                                   symbol: "arrow.down.circle") {
+                    updater.checkNow { result in
+                        if case .available = result { showUpdate() }
+                    }
+                }
+                .disabled(checking || updater.isBusy)
+                .opacity(checking ? 0.5 : 1)
+                if let line = checkLine {
+                    SettingsFootnote(text: line.text, failed: line.failed)
                 }
                 Spacer(minLength: 0)
             }
+            .padding(.horizontal, WindowActionButton.inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(16)
         }
+        .onAppear { updater.refreshLastChecked() }
+    }
+
+    /// Under Check for Updates: what the last tap found, or else when Speaka (or SpeakaUpdateCheck) last checked.
+    private var checkLine: (text: String, failed: Bool)? {
+        switch updater.manual {
+        case .upToDate(let version):
+            return ("Speaka \(version) is up to date.", false)
+        case .failed(let reason):
+            return ("Couldn't check for updates: \(reason).", true)
+        case .idle, .checking:
+            guard let when = updater.lastChecked else { return nil }
+            let today = Calendar.current.isDateInToday(when)
+            let time = DateFormatter.localizedString(from: when, dateStyle: today ? .none : .short, timeStyle: .short)
+            return (today ? "Last checked at \(time)." : "Last checked \(time).", false)
+        }
+    }
+}
+
+/// v9.9.3: a switch in WindowActionButton's frame - 266 x 36 pt, the 1 pt border at 15% white, 10 pt circular corners,
+/// the title at 17 pt Regular - so it sits with the buttons. The switch at 85% (43 x 26 pt) is 5 pt in from the right,
+/// as it is from the top and bottom.
+struct WindowToggleRow: View {
+    let title: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 17, weight: .regular))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+            Spacer(minLength: 8)
+            // A switch is 51 x 31 pt whatever it's asked; scaled, then framed to its new size.
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .tint(Theme.accent)
+                .scaleEffect(0.85)
+                .frame(width: 51 * 0.85, height: 31 * 0.85)
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 5)
+        .frame(maxWidth: .infinity)
+        .frame(height: WindowActionButton.height)
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .circular)
+            .strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+    }
+}
+
+/// A line under a Settings button: Caz's 12 pt footer, in the warning colour when something failed.
+struct SettingsFootnote: View {
+    let text: String
+    let failed: Bool
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12))
+            .foregroundStyle(failed ? Theme.failure : Theme.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

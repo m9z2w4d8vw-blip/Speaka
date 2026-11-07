@@ -119,6 +119,8 @@ final class SpeakaModel: ObservableObject {
 
     init() {
         SPTweakClient.removeLegacyCodecSettings()   // v9.9.11: the AAC experiment's switches
+        // v9.9.3: the switch, mirrored where SpeakaUpdateCheck reads it (a switch turned on before 9.9.3 included).
+        SPTweakClient.setUpdateNotificationsEnabled(updateNotifications)
         refresh()
     }
 
@@ -578,6 +580,18 @@ final class SpeakaModel: ObservableObject {
         UpdateNotifications.setEnabled(on) { [weak self] enabled in
             self?.updateNotifications = enabled
             self?.notificationsRefused = on && !enabled
+        }
+    }
+
+    /// v9.9.3: the switch follows what iOS allows. Notifications turned off for Speaka in iOS Settings turn it off
+    /// here too, with the line saying where to allow them - rather than a switch that's on while nothing can show.
+    func syncNotificationPermission() {
+        guard updateNotifications else { return }
+        UpdateNotifications.allowed { [weak self] allowed in
+            guard let self = self, !allowed, self.updateNotifications else { return }
+            SPTweakClient.setUpdateNotificationsEnabled(false)
+            self.updateNotifications = false
+            self.notificationsRefused = true
         }
     }
 

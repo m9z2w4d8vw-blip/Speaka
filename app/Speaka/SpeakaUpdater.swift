@@ -42,6 +42,16 @@ final class SpeakaUpdater: ObservableObject {
     /// The newest release whose .deb is newer than the installed tweak, if any.
     @Published private(set) var deb: SpeakaRelease? = nil
     @Published var stage: Stage = .changelog
+    /// v9.9.3: Settings > Check for Updates, and the line under it.
+    enum ManualCheck: Equatable {
+        case idle
+        case checking
+        case upToDate(String)   // the version that's installed
+        case failed(String)     // why: "you're offline", GitHub's limit, ...
+    }
+    @Published private(set) var manual: ManualCheck = .idle
+    /// When the app or SpeakaUpdateCheck last got an answer from GitHub.
+    @Published private(set) var lastChecked: Date? = SPTweakClient.lastUpdateCheck()
     /// What the circle shows. It eases toward the real progress like Caz's (25% of the gap per frame).
     @Published private(set) var progress: Double = 0
 
@@ -130,23 +140,152 @@ final class SpeakaUpdater: ObservableObject {
 
     // MARK: - Checking
 
-    /// Fetches the releases once per launch. Drafts and pre-releases are ignored, as in Caz and Dopamine.
-    func check(again: Bool = false) {
-        guard !checking, again || !checked else { return }
+    /// What a check ends in: an update to show, nothing newer, or why it couldn't.
+    enum CheckResult {
+        case available
+        case upToDate
+        case failed(String)
+    }
+    private var waiting: [(CheckResult) -> Void] = []
+    private var lastFetch: Date? = nil
+
+    /// Fetches the releases once per launch, or `again`. Drafts and pre-releases are ignored, as in Caz and Dopamine.
+    /// v9.9.3: through `fetchReleases` (conditional, with reasons), and every caller of a check in flight gets its answer.
+    func check(again: Bool = false, completion: ((CheckResult) -> Void)? = nil) {
+        if let completion { waiting.append(completion) }
+        guard !checking else { return }
+        guard again || !checked else { finishCheck(isAvailable ? .available : .upToDate); return }
         checking = true
-        var request = URLRequest(url: Self.apiURL, timeoutInterval: 20)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
-            let releases = data.flatMap { Self.parse($0) }
+        Self.fetchReleases { [weak self] outcome in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.checking = false
-                guard let releases = releases else { return }   // offline or rate limited: try next launch
-                self.checked = true
-                let package = Self.installedPackageVersion().map { Self.versionParts($0) }
-                self.choose(from: releases, app: Self.versionParts(Bundle.main.shortVersion), package: package)
+                self.lastFetch = Date()
+                switch outcome {
+                case .failure(let failure):
+                    self.finishCheck(.failed(failure.reason))  // offline or rate limited: the next check tries again
+                case .success(let releases):
+                    self.checked = true
+                    self.lastChecked = SPTweakClient.lastUpdateCheck()
+                    let package = Self.installedPackageVersion().map { Self.versionParts($0) }
+                    self.choose(from: releases, app: Self.versionParts(Bundle.main.shortVersion), package: package)
+                    self.finishCheck(self.isAvailable ? .available : .upToDate)
+                }
             }
+        }
+    }
+
+    /// When Speaka comes to the front: a fresh check, so the Update Available a notification promised is there at once,
+    /// unless one answered in the last 20 s (switching apps back and forth).
+    func checkOnActivation() {
+        refreshLastChecked()
+        if let lastFetch, Date().timeIntervalSince(lastFetch) < 20 { return }
+        check(again: true)
+    }
+
+    /// Settings > Check for Updates: always a fresh check; its outcome is the line under the button.
+    func checkNow(completion: ((CheckResult) -> Void)? = nil) {
+        guard manual != .checking else {
+            if let completion { waiting.append(completion) }
+            return
+        }
+        manual = .checking
+        check(again: true) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .available: self.manual = .idle
+            case .upToDate: self.manual = .upToDate(Bundle.main.shortVersion)
+            case .failed(let reason): self.manual = .failed(reason)
+            }
+            completion?(result)
+        }
+    }
+
+    func refreshLastChecked() {
+        let when = SPTweakClient.lastUpdateCheck()
+        if when != lastChecked { lastChecked = when }
+    }
+
+    private func finishCheck(_ result: CheckResult) {
+        let callers = waiting
+        waiting = []
+        callers.forEach { $0(result) }
+    }
+
+    // MARK: - The release list, from GitHub
+
+    /// v9.9.3: every check goes through here - the app's, its background one and Settings > Check for Updates. It asks
+    /// with the last answer's ETag: an unchanged list comes back as 304, which doesn't count against GitHub's 60
+    /// unauthenticated requests an hour, and the answer kept in memory is used. No disk cache (nothing written in the
+    /// app's data folder, as for downloads). A failure says why, for the line under Check for Updates.
+    private static let api: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
+    private static let answerLock = NSLock()
+    private static var lastAnswer: (etag: String, body: Data)? = nil
+
+    static func fetchReleases(completion: @escaping (Result<[SpeakaRelease], FetchFailure>) -> Void) {
+        var request = URLRequest(url: apiURL, timeoutInterval: 20)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        answerLock.lock(); let previous = lastAnswer; answerLock.unlock()
+        if let previous { request.setValue(previous.etag, forHTTPHeaderField: "If-None-Match") }
+        api.dataTask(with: request) { data, response, error in
+            if let error = error as? URLError {
+                completion(.failure(FetchFailure(Self.describe(error)))); return
+            }
+            guard let http = response as? HTTPURLResponse else {
+                completion(.failure(FetchFailure(error?.localizedDescription ?? "GitHub didn't answer"))); return
+            }
+            var body = data
+            switch http.statusCode {
+            case 200:
+                if let data, let etag = http.value(forHTTPHeaderField: "ETag") {
+                    answerLock.lock(); lastAnswer = (etag, data); answerLock.unlock()
+                }
+            case 304 where previous != nil:
+                body = previous?.body
+            default:
+                completion(.failure(FetchFailure(Self.describe(http)))); return
+            }
+            guard let body, let releases = parse(body) else {
+                completion(.failure(FetchFailure("GitHub's answer couldn't be read"))); return
+            }
+            SPTweakClient.setLastUpdateCheck(Date())
+            completion(.success(releases))
         }.resume()
+    }
+
+    struct FetchFailure: Error {
+        let reason: String
+        init(_ reason: String) { self.reason = reason }
+    }
+
+    static func describe(_ error: URLError) -> String {
+        switch error.code {
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+            return "you're offline"
+        case .timedOut:
+            return "GitHub didn't answer"
+        case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+            return "GitHub couldn't be reached"
+        default:
+            return error.localizedDescription
+        }
+    }
+
+    static func describe(_ response: HTTPURLResponse) -> String {
+        if response.statusCode == 403 || response.statusCode == 429,
+           response.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0" {
+            if let reset = response.value(forHTTPHeaderField: "X-RateLimit-Reset").flatMap(Double.init) {
+                let time = DateFormatter.localizedString(from: Date(timeIntervalSince1970: reset), dateStyle: .none,
+                                                         timeStyle: .short)
+                return "GitHub's hourly limit is used up until \(time)"
+            }
+            return "GitHub's hourly limit is used up"
+        }
+        return "GitHub answered \(response.statusCode)"
     }
 
     /// Each part comes from the newest release that has it, if that's newer than what's installed. A tweak that isn't

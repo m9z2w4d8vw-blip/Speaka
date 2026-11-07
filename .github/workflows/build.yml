@@ -148,6 +148,17 @@ jobs:
           esac
           echo "Audio helper bundled: $helper"
 
+          # v9.9.3: the update checker, its launchd job, and the entitlement that lets it post as Speaka.
+          checker="pkgroot/var/jb/usr/bin/SpeakaUpdateCheck"
+          [ -f "$checker" ] || { echo "::error::SpeakaUpdateCheck missing from the .deb"; exit 1; }
+          [ -f pkgroot/var/jb/Library/LaunchDaemons/com.parv.speaka.updatecheck.plist ] || {
+            echo "::error::the update check's launchd job is missing from the .deb"; exit 1; }
+          ldid -e "$checker" | grep -q 'com.apple.private.usernotifications.bundle-identifiers' || {
+            echo "::error::SpeakaUpdateCheck is not signed with its notification entitlement"; exit 1; }
+          ldid -e "$(find pkgroot -type f -name 'BTPSAudioHelper' | sed -n '1p')" | grep -q usernotifications && {
+            echo "::error::the audio helper must keep its entitlement-free signature"; exit 1; } || true
+          echo "Update checker bundled: $checker"
+
           # 1. rootless layout: everything lives under /var/jb
           case "$dylib" in
             pkgroot/var/jb/Library/MobileSubstrate/DynamicLibraries/*) ;;

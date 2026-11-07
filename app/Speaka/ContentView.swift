@@ -8,6 +8,7 @@
 //  Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).
 //
 
+import Combine
 import SwiftUI
 import UIKit
 
@@ -54,6 +55,9 @@ struct ContentView: View {
             model.setActive(phase == .active)
             if phase == .active {
                 updater.refreshTweak()   // installed from Sileo meanwhile, say
+                // v9.9.3: at once, so the Update Available a notification promised is there when Speaka opens.
+                updater.checkOnActivation()
+                model.syncNotificationPermission()
             }
             // Update notifications: every 2 minutes while open; in the background, when iOS chooses.
             updater.watch(model.updateNotifications && phase == .active)
@@ -68,6 +72,24 @@ struct ContentView: View {
             model.setActive(true)
             updater.check()
             updater.watch(model.updateNotifications)
+            model.syncNotificationPermission()
+            if SpeakaNotificationDelegate.openRequested { openUpdateWhenReady() }   // the tap launched Speaka
+        }
+        // v9.9.3: a tap on an update notification opens the update window.
+        .onReceive(NotificationCenter.default.publisher(for: SpeakaNotificationDelegate.openUpdate)) { _ in
+            openUpdateWhenReady()
+        }
+    }
+
+    /// A fresh check, then the update window if there's an update (what the notification was about may be installed
+    /// by now, or not published with the app after all: then nothing opens).
+    private func openUpdateWhenReady() {
+        SpeakaNotificationDelegate.openRequested = false
+        guard !model.uninstalling else { return }
+        updater.check(again: true) { result in
+            if case .available = result, !updater.isBusy, !model.uninstalling {
+                window = .update
+            }
         }
     }
 
@@ -181,7 +203,9 @@ struct ContentView: View {
     private func windowView(_ window: SpeakaWindow, size: CGSize) -> some View {
         switch window {
         case .settings:
-            SettingsWindow(model: model) { self.window = .credits }   // v9.9.2: Credits moved here
+            SettingsWindow(model: model, updater: updater,
+                           showCredits: { self.window = .credits },   // v9.9.2: Credits moved here
+                           showUpdate: { self.window = .update })     // v9.9.3: Check for Updates found one
         case .output:
             OutputWindow(model: model)
         case .credits:

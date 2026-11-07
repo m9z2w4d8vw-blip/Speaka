@@ -94,7 +94,8 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
   volume is at zero, or that Bluetooth was turned off and on.
 - **Settings** has **Kill Bluetooth** (`killall -9 bluetoothd`, from the app: Bluetooth restarts at once, without the
   speaker), **Credits** (the app's and the tweak's versions, and the license of the interface, which Speaka shares
-  with Caz) and **Update notifications**. Its buttons are Dopamine's Actions buttons.
+  with Caz), **Update notifications** and **Check for Updates**, in one column of Dopamine's Actions buttons. Under
+  Check for Updates: whether Speaka is up to date, why a check failed, or when Speaka last checked.
 - **Audio Output** chooses where the sound plays; see [Where the audio plays](#where-the-audio-plays).
 - **Uninstall**, held for 4 seconds, removes the tweak, Speaka's logs, settings and downloads, and the app. A tap does
   nothing; while you hold, a gray fill sweeps across the row, and letting go early cancels. If the tweak can't be
@@ -105,9 +106,16 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
 
 When a newer release is out, **Update Available** appears above the button. Tapping it shows the changelog, and
 **Update** installs it: TrollStore installs the new app, then dpkg installs the tweak the new app carries, which
-restarts Bluetooth, so a running speaker stops. With **Update notifications** on, the app checks every 2 minutes while
-it's open, and asks iOS to check in the background as well (iOS decides how often, and never once Speaka has been
-swiped away).
+restarts Bluetooth, so a running speaker stops. **Check for Updates** in Settings checks at once and opens the update
+if there is one.
+
+With **Update notifications** on, a notification says when a release is ready, and tapping it opens the update.
+SpeakaUpdateCheck, a launchd job the tweak installs, checks every 15 minutes whether Speaka is running or not; the app
+also checks every 2 minutes while it's open, each time it comes to the front, and when iOS lets it in the background.
+Each release is announced once, and only while iOS allows Speaka's notifications (turned off in iOS Settings, the
+switch turns off too). Checks ask GitHub conditionally, so an unchanged list doesn't count against its hourly limit.
+To see that notifications reach you, run `/var/jb/usr/bin/SpeakaUpdateCheck --test` as `mobile` (each check is
+logged in `/tmp/FTABHarvest/SpeakaUpdateCheck.log`).
 
 ### When to tap Start again
 

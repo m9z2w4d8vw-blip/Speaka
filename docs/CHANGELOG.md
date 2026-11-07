@@ -9,6 +9,17 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **Update notifications work.** The app's background check runs only when iOS chooses (often hours apart, never
+  after Speaka is swiped away), so notifications rarely came. SpeakaUpdateCheck, a launchd job, now checks every 15
+  minutes and posts as Speaka - its own binary, signed with `com.apple.private.usernotifications.bundle-identifiers`
+  naming Speaka, as mediaremoted and bluetoothd are for theirs; the audio helper's signature is unchanged. Fixed in
+  the app: Update Available is there as soon as Speaka opens (it waited up to 2 minutes); a release is recorded as
+  announced only once iOS accepted the notification (one found while Speaka's notifications were off was lost); the
+  switch follows iOS's permission; checks are conditional (304s don't count against GitHub's limit) and say why they
+  failed; tapping the notification opens the update. Each release is announced once, by whichever finds it first.
+- **Settings > Check for Updates**, under the switch: checks at once, opens the update if there is one, and otherwise
+  says Speaka is up to date or why it couldn't check. The **Update notifications** switch is in the same frame as the
+  buttons above it now: 266 x 36 pt, the 1 pt border, 10 pt corners, a 17 pt title.
 - **The menu's fourth row is Connect to**, a window of its own for connecting to a computer (empty for now). **Credits
   moved into Settings**, with a back button to Settings. Settings' **Kill Bluetooth** and **Credits** are Dopamine's
   Actions buttons, measured from an iPhone 13 screenshot: 266 x 36 pt, 32 pt in from the window's sides, a 1 pt border

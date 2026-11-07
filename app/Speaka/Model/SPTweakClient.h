@@ -89,6 +89,9 @@ typedef NS_ENUM(NSInteger, SPRoomVerdict) {
 // what this launch's layout expected (8 dual, 7 single), and agrees with the layout - shared/SessionCheck.h.
 + (SPRoomVerdict)roomVerdict:(NSString *)result NS_SWIFT_NAME(roomVerdict(_:));
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled NS_SWIFT_NAME(setUpdateNotificationsEnabled(_:));
+// v9.9.3: when the app or SpeakaUpdateCheck last got an answer from GitHub (Settings shows it).
++ (nullable NSDate *)lastUpdateCheck NS_SWIFT_NAME(lastUpdateCheck());
++ (void)setLastUpdateCheck:(NSDate *)date NS_SWIFT_NAME(setLastUpdateCheck(_:));
 
 /// Uninstall (v9.8): every key Speaka keeps in com.apple.bluetooth (all start with "Speaka", shared/SpeakaShared.h) and the
 /// app's own settings. Run once the tweak is removed, so nothing writes them back.

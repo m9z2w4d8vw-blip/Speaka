@@ -13,6 +13,15 @@ if [ "$1" = configure ]; then
         echo 'Speaka: the audio helper could not start. If an older copy of this tweak is still installed under its previous package name, remove that package first (dpkg -l lists it), then reinstall Speaka.' >&2
         exit 1
     }
+    # v9.9.3: Settings > Update notifications, checked every 15 minutes (SpeakaUpdateCheck). Optional: if it can't
+    # start now it starts at the next boot, and it never fails the install.
+    updates=/var/jb/Library/LaunchDaemons/com.parv.speaka.updatecheck.plist
+    if [ -f "$updates" ]; then
+        chown root:wheel "$updates" || true
+        chmod 644 "$updates" || true
+        launchctl bootout system/com.parv.speaka.updatecheck >/dev/null 2>&1 || true
+        launchctl bootstrap system "$updates" >/dev/null 2>&1 || echo 'Speaka: update checks start at the next reboot.' >&2
+    fi
     # Load the newly installed tweak into bluetoothd now. Installing a package does not restart running daemons:
     # without this, bluetoothd keeps the previous build until its next restart while the Settings page (loaded
     # fresh) already shows the new features, so e.g. Start gets no answer. killall -9 is the same restart the
