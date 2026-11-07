@@ -9,6 +9,8 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **Update notifications is a button**, centred like the others: a bell when off; when on, the whole button is iOS's
+  system green with a checkmark. A tap toggles it, as the switch did (turning it on asks iOS for permission first).
 - **Update notifications work.** The app's background check runs only when iOS chooses (often hours apart, never
   after Speaka is swiped away), so notifications rarely came. SpeakaUpdateCheck, a launchd job, now checks every 15
   minutes and posts as Speaka - its own binary, signed with `com.apple.private.usernotifications.bundle-identifiers`

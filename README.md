@@ -94,7 +94,8 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
   volume is at zero, or that Bluetooth was turned off and on.
 - **Settings** has **Kill Bluetooth** (`killall -9 bluetoothd`, from the app: Bluetooth restarts at once, without the
   speaker), **Credits** (the app's and the tweak's versions, and the license of the interface, which Speaka shares
-  with Caz), **Update notifications** and **Check for Updates**, in one column of Dopamine's Actions buttons. Under
+  with Caz), **Update notifications** and **Check for Updates**, in one column of Dopamine's Actions buttons.
+  Update notifications is a button too: tap it to turn it on (it turns green, with a checkmark) or off. Under
   Check for Updates: whether Speaka is up to date, why a check failed, or when Speaka last checked.
 - **Audio Output** chooses where the sound plays; see [Where the audio plays](#where-the-audio-plays).
 - **Uninstall**, held for 4 seconds, removes the tweak, Speaka's logs, settings and downloads, and the app. A tap does

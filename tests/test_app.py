@@ -958,9 +958,8 @@ int main(void) {
         # The switch, in Settings under Kill Bluetooth; the app's own settings, stored by the client.
         settings = block(read(WINDOWS), "struct SettingsWindow: View {")
         self.assertLess(settings.index("model.killBluetooth()"),
-                        settings.index('WindowToggleRow(title: "Update notifications",\n'
-                                       '                                isOn: Binding(get: { model.updateNotifications },'))
-        self.assertIn("set: { model.setUpdateNotifications($0) }", settings)
+                        settings.index('WindowActionButton(title: "Update notifications",'))
+        self.assertIn("model.setUpdateNotifications(!model.updateNotifications)", settings)   # v9.9.4: a button
         client = read(CLIENT_M)
         self.assertIn('static NSString *const SPUpdateNotificationsKey = @"updateNotifications";', client)
         self.assertIn("[[NSUserDefaults standardUserDefaults] boolForKey:SPUpdateNotificationsKey]", client)
@@ -1701,8 +1700,7 @@ class SettingsWindow(unittest.TestCase):
         self.assertEqual(settings.count(".font(.system(size: 15, weight: .medium))"), 0)
         self.assertNotIn("Experimental AAC", settings)
         self.assertIn("VStack(spacing: WindowActionButton.spacing)", settings)
-        toggle = block_until(windows, "struct WindowToggleRow: View {")
-        self.assertIn(".scaleEffect(0.85)\n                .frame(width: 51 * 0.85, height: 31 * 0.85)", toggle)
+        self.assertNotIn("Toggle(", settings)                       # v9.9.4: no switch; the button turns green
         for gone in ("Every 2 minutes", ".frame(height: 50)", "size: 17", "size: 13"):
             self.assertNotIn(gone, settings)
         # A line only when something failed, in the warning colour at Caz's 12 pt for footers.
@@ -2063,8 +2061,9 @@ class DopamineActions(unittest.TestCase):
         self.assertIn(".foregroundStyle(.white)", button)
         self.assertIn(".frame(maxWidth: .infinity)\n            .frame(height: Self.height)", button)
         self.assertIn(".overlay(RoundedRectangle(cornerRadius: 10, style: .circular)\n"
-                      "                .strokeBorder(Color.white.opacity(0.15), lineWidth: 1))", button)   # inside the edge
-        self.assertNotIn(".background(", button)                                            # no fill
+                      "                .strokeBorder(fill ?? Color.white.opacity(0.15), lineWidth: 1))", button)   # inside the edge
+        self.assertIn("var fill: Color? = nil", button)                                     # no fill unless asked
+        self.assertIn(".fill(fill ?? .clear)", button)
         self.assertNotIn(".continuous", button)                                             # UIKit's circular corners
         self.assertIn(".buttonStyle(MenuButtonStyle())", button)                            # dims while pressed
         # 266 pt on an iPhone 13: 390 - 2 x 30 (the window) - 2 x 16 (its content padding) - 2 x 16 (the inset).
@@ -2271,7 +2270,7 @@ int main(void) {
         windows = read(WINDOWS)
         settings = block_until(windows, "struct SettingsWindow: View {")
         column = settings.split("VStack(spacing: WindowActionButton.spacing) {", 1)[1].split(".padding(.horizontal, WindowActionButton.inset)", 1)[0]
-        order = [column.index(x) for x in ('"Kill Bluetooth"', 'title: "Credits"', 'WindowToggleRow(title: "Update notifications"',
+        order = [column.index(x) for x in ('"Kill Bluetooth"', 'title: "Credits"', 'WindowActionButton(title: "Update notifications"',
                                            '"Check for Updates"')]
         self.assertEqual(order, sorted(order))                                     # under the switch, as asked
         self.assertIn('title: checking ? "Checking for Updates..." : "Check for Updates"', column)
@@ -2281,15 +2280,36 @@ int main(void) {
         self.assertIn('return ("Speaka \\(version) is up to date.", false)', line)
         self.assertIn('return ("Couldn\'t check for updates: \\(reason).", true)', line)
         self.assertIn('"Last checked at \\(time)."', line)
-        # The switch row is the buttons' frame: the same height, border and corners as WindowActionButton.
-        button = block_until(windows, "struct WindowActionButton: View {")
-        toggle = block_until(windows, "struct WindowToggleRow: View {")
-        for part in (".frame(maxWidth: .infinity)", ".overlay(RoundedRectangle(cornerRadius: 10, style: .circular)",
-                     ".strokeBorder(Color.white.opacity(0.15), lineWidth: 1))", '.font(.system(size: 17, weight: .regular))'):
-            self.assertIn(part, button)
-            self.assertIn(part, toggle)
-        self.assertIn(".frame(height: WindowActionButton.height)", toggle)
-        self.assertNotIn(".background(", toggle)
-        self.assertIn(".padding(.trailing, 5)", toggle)               # the switch 5 pt in, as from top and bottom
         content = read(CONTENT)
         self.assertIn("showUpdate: { self.window = .update })", content)
+
+
+class NotificationsButton(unittest.TestCase):
+    """v9.9.4: Settings > Update notifications is a button like the others, its title centred - a bell when off, and
+    when on the whole button iOS's system green (#30D158 in Speaka's dark appearance) with a checkmark: the render
+    chosen from the mockups (#2's colour with #6's checkmark). A tap toggles it, as the switch did."""
+
+    def test_the_button(self):
+        windows = read(WINDOWS)
+        settings = block_until(windows, "struct SettingsWindow: View {")
+        self.assertIn('WindowActionButton(title: "Update notifications",\n'
+                      '                                   symbol: model.updateNotifications ? "checkmark" : "bell",\n'
+                      '                                   fill: model.updateNotifications ? Theme.enabled : nil) {\n'
+                      '                    model.setUpdateNotifications(!model.updateNotifications)', settings)
+        self.assertIn('.accessibilityValue(model.updateNotifications ? "On" : "Off")', settings)
+        self.assertIn(".animation(.easeOut(duration: 0.2), value: model.updateNotifications)", settings)
+        self.assertNotIn("Toggle(", windows)
+        self.assertNotIn("WindowToggleRow", windows)
+        self.assertIn("static let enabled = Color(uiColor: .systemGreen)", read(SPEAKA_SOURCES / "Theme.swift"))
+        # The fill and its edge are one colour; the outline otherwise, exactly as before.
+        button = block_until(windows, "struct WindowActionButton: View {")
+        self.assertIn(".background(RoundedRectangle(cornerRadius: 10, style: .circular).fill(fill ?? .clear))", button)
+        self.assertIn(".strokeBorder(fill ?? Color.white.opacity(0.15), lineWidth: 1))", button)
+        self.assertIn(".foregroundStyle(.white)", button)                       # white title and symbol on the green
+        # `fill` comes before `action`, so every `WindowActionButton(...) { ... }` still hands its closure to action.
+        self.assertLess(button.index("var fill: Color? = nil"), button.index("let action: () -> Void"))
+        # It sits where the switch did: under Credits, above Check for Updates.
+        column = settings.split("VStack(spacing: WindowActionButton.spacing) {", 1)[1]
+        self.assertLess(column.index('title: "Credits"'), column.index('title: "Update notifications"'))
+        self.assertLess(column.index('title: "Update notifications"'), column.index('"Check for Updates"'))
+

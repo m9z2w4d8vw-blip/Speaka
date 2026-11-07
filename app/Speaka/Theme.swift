@@ -28,6 +28,9 @@ enum Theme {
     static let foreground = Color.white.opacity(0.75)
     static let secondary = Color.white.opacity(0.8)
     static let failure = Color(red: 1.0, green: 0.62, blue: 0.56)
+    /// v9.9.4: a setting that's on (Settings > Update notifications): iOS's system green, #30D158 in Speaka's dark
+    /// appearance.
+    static let enabled = Color(uiColor: .systemGreen)
 }
 
 enum Metrics {

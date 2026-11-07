@@ -73,6 +73,8 @@ struct WindowActionButton: View {
 
     let title: String
     let symbol: String
+    /// v9.9.4: filled, with its edge in the same colour (Update notifications when on); none is Dopamine's outline.
+    var fill: Color? = nil
     let action: () -> Void
 
     var body: some View {
@@ -89,8 +91,9 @@ struct WindowActionButton: View {
             .padding(.horizontal, 4)
             .frame(maxWidth: .infinity)
             .frame(height: Self.height)
+            .background(RoundedRectangle(cornerRadius: 10, style: .circular).fill(fill ?? .clear))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .circular)
-                .strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                .strokeBorder(fill ?? Color.white.opacity(0.15), lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .circular))
         }
         .buttonStyle(MenuButtonStyle())
@@ -262,9 +265,9 @@ struct SettingsWindow: View {
     private var checking: Bool { updater.manual == .checking }
 
     var body: some View {
-        // v9.9.3: one column of Dopamine's Actions buttons, 266 x 36 pt and 8 pt apart - Kill Bluetooth, Credits, the
-        // Update notifications switch in the same frame, and Check for Updates. A line shows under one only when it
-        // has something to say, at Caz's 12 pt for footers.
+        // v9.9.3: one column of Dopamine's Actions buttons, 266 x 36 pt and 8 pt apart - Kill Bluetooth, Credits,
+        // Update notifications (v9.9.4: a button too, green when on) and Check for Updates. A line shows under one
+        // only when it has something to say, at Caz's 12 pt for footers.
         WindowCard(title: "Settings") {
             VStack(spacing: WindowActionButton.spacing) {
                 WindowActionButton(title: model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth",
@@ -277,9 +280,15 @@ struct SettingsWindow: View {
                     SettingsFootnote(text: failure, failed: true)
                 }
                 WindowActionButton(title: "Credits", symbol: "info.circle", action: showCredits)
-                WindowToggleRow(title: "Update notifications",
-                                isOn: Binding(get: { model.updateNotifications },
-                                              set: { model.setUpdateNotifications($0) }))
+                // v9.9.4: a button like the others, centred: a bell when off; iOS's green with a checkmark when on.
+                // A tap toggles it, as the switch did (turning it on asks iOS for permission first).
+                WindowActionButton(title: "Update notifications",
+                                   symbol: model.updateNotifications ? "checkmark" : "bell",
+                                   fill: model.updateNotifications ? Theme.enabled : nil) {
+                    model.setUpdateNotifications(!model.updateNotifications)
+                }
+                .accessibilityValue(model.updateNotifications ? "On" : "Off")
+                .animation(.easeOut(duration: 0.2), value: model.updateNotifications)
                 if model.notificationsRefused {
                     SettingsFootnote(text: "Allow notifications for Speaka in Settings > Notifications, then try again.",
                                      failed: true)
@@ -317,37 +326,6 @@ struct SettingsWindow: View {
             let time = DateFormatter.localizedString(from: when, dateStyle: today ? .none : .short, timeStyle: .short)
             return (today ? "Last checked at \(time)." : "Last checked \(time).", false)
         }
-    }
-}
-
-/// v9.9.3: a switch in WindowActionButton's frame - 266 x 36 pt, the 1 pt border at 15% white, 10 pt circular corners,
-/// the title at 17 pt Regular - so it sits with the buttons. The switch at 85% (43 x 26 pt) is 5 pt in from the right,
-/// as it is from the top and bottom.
-struct WindowToggleRow: View {
-    let title: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-            Spacer(minLength: 8)
-            // A switch is 51 x 31 pt whatever it's asked; scaled, then framed to its new size.
-            Toggle(title, isOn: $isOn)
-                .labelsHidden()
-                .tint(Theme.accent)
-                .scaleEffect(0.85)
-                .frame(width: 51 * 0.85, height: 31 * 0.85)
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 5)
-        .frame(maxWidth: .infinity)
-        .frame(height: WindowActionButton.height)
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .circular)
-            .strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
     }
 }
 
