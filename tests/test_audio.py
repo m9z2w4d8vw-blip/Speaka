@@ -1250,7 +1250,7 @@ int main(void) {
 
 class StartupTiming(unittest.TestCase):
     """Priority 1 (v9.9.5): the startup report separates elapsed launch time from everything else, for the next device
-    matrix. Run on the real Test-92 lines (tests/fixtures/startup_test92_*.log): Test A's PC-started stream at 16.8 s
+    matrix. Run on the real Test-92 lines (tests/fixtures/startup_test92_*.txt): Test A's PC-started stream at 16.8 s
     after launch was slow until ~42-45 s; Test B's at 94.7 s ran at full rate from its first window."""
 
     def report(self, name):
@@ -1262,7 +1262,7 @@ class StartupTiming(unittest.TestCase):
         return startup_report.report((ROOT / "tests/fixtures" / name).read_text().splitlines())
 
     def test_cold_start_is_slow_until_about_42_s_after_launch(self):
-        a = self.report("startup_test92_A.log")
+        a = self.report("startup_test92_A.txt")
         self.assertEqual(len(a), 1)
         self.assertEqual((a[0]["by"], a[0]["since_launch_ms"]), ("pc", 16832))
         self.assertTrue(a[0]["slow_start"])
@@ -1273,7 +1273,7 @@ class StartupTiming(unittest.TestCase):
         self.assertTrue(all(w["bytes_per_pkt"] > 500 for w in slow))   # real AAC frames, not silence
 
     def test_a_stream_started_long_after_launch_is_at_full_rate_at_once(self):
-        b = self.report("startup_test92_B.log")
+        b = self.report("startup_test92_B.txt")
         self.assertTrue(b and b[0]["since_launch_ms"] > 90000)
         self.assertFalse(b[0]["slow_start"])
         self.assertEqual(b[0]["full_at_s"], b[0]["windows"][0]["at_s"])

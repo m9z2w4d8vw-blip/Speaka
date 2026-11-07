@@ -77,6 +77,9 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **CI fix (run 114720996133):** the startup fixtures were named *.log, which .gitignore drops, so they were never
+  committed and CI's checkout failed two tests. They are .txt now, and a test fails if any file the build or tests
+  need would be ignored by git.
 - **Exclusive audible playback (v9.8.92 Test D):** v9.8.92's mixing session let TikTok be heard alongside Speaka,
   which isn't wanted - but it also proved the route and the PC's stream stay intact while another app plays (no
   interruption, no route change, no phone-initiated START or SUSPEND). v9.8.91's non-mixing session silenced TikTok

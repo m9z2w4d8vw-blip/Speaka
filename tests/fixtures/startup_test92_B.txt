@@ -1,0 +1,23 @@
+23:41:43.440 Speaka v8.8-continuous-sbc-ring loaded into bluetoothd pid 26947 (built Nov  6 2026 20:34:38)
+23:43:18.183 V882_CONTROL direction=TX CID=0x108 tx=4 msg=2 sig=7 active=1 by=pc since_launch_ms=94748
+23:43:20.217 V893_RX 2020ms forwarded=94 ok=94 inactive=0 other=0 bytes=63994 decoded=94 ok=94 partial=0 bad=0 frames=94 held_back=0
+23:43:22.223 V893_RX 2006ms forwarded=93 ok=93 inactive=0 other=0 bytes=33685 decoded=93 ok=93 partial=0 bad=0 frames=93 held_back=0
+23:43:24.246 V893_RX 2022ms forwarded=95 ok=95 inactive=0 other=0 bytes=1520 decoded=95 ok=95 partial=0 bad=0 frames=95 held_back=0
+23:43:26.254 V893_RX 2009ms forwarded=94 ok=94 inactive=0 other=0 bytes=1504 decoded=94 ok=94 partial=0 bad=0 frames=94 held_back=0
+23:43:28.270 V893_RX 2016ms forwarded=95 ok=95 inactive=0 other=0 bytes=1520 decoded=95 ok=95 partial=0 bad=0 frames=95 held_back=0
+23:43:30.283 V893_RX 2013ms forwarded=94 ok=94 inactive=0 other=0 bytes=1504 decoded=94 ok=94 partial=0 bad=0 frames=94 held_back=0
+23:43:31.551 V882_CONTROL direction=RX CID=0x108 tx=5 msg=0 sig=9 active=0 by=pc since_launch_ms=108116
+23:43:31.554 V893_RX 1271ms forwarded=59 ok=59 inactive=0 other=0 bytes=944 decoded=59 ok=59 partial=0 bad=0 frames=59 held_back=0
+23:43:31.562 V882_CONTROL direction=TX CID=0x108 tx=5 msg=2 sig=9 active=0 by=pc since_launch_ms=108127
+23:43:41.475 V882_CONTROL direction=TX CID=0x108 tx=6 msg=2 sig=7 active=1 by=pc since_launch_ms=118040
+23:43:43.521 V893_RX 2024ms forwarded=93 ok=93 inactive=0 other=0 bytes=46479 decoded=93 ok=93 partial=0 bad=0 frames=93 held_back=0
+23:43:45.542 V893_RX 2022ms forwarded=95 ok=95 inactive=0 other=0 bytes=65189 decoded=95 ok=95 partial=0 bad=0 frames=95 held_back=0
+23:43:47.552 V893_RX 2010ms forwarded=95 ok=95 inactive=0 other=0 bytes=65254 decoded=95 ok=95 partial=0 bad=0 frames=95 held_back=0
+23:43:49.571 V893_RX 2019ms forwarded=94 ok=94 inactive=0 other=0 bytes=64496 decoded=94 ok=94 partial=0 bad=0 frames=94 held_back=0
+23:43:51.578 V893_RX 2007ms forwarded=95 ok=95 inactive=0 other=0 bytes=65368 decoded=94 ok=94 partial=0 bad=0 frames=94 held_back=0
+23:43:53.581 V893_RX 2003ms forwarded=93 ok=93 inactive=0 other=0 bytes=63459 decoded=94 ok=94 partial=0 bad=0 frames=94 held_back=0
+23:43:55.598 V893_RX 2017ms forwarded=95 ok=95 inactive=0 other=0 bytes=65137 decoded=95 ok=95 partial=0 bad=0 frames=95 held_back=0
+23:43:57.617 V893_RX 2019ms forwarded=95 ok=95 inactive=0 other=0 bytes=65183 decoded=94 ok=94 partial=0 bad=0 frames=94 held_back=0
+23:43:59.638 V893_RX 2021ms forwarded=94 ok=94 inactive=0 other=0 bytes=64596 decoded=95 ok=95 partial=0 bad=0 frames=95 held_back=0
+23:44:01.644 V893_RX 2006ms forwarded=94 ok=94 inactive=0 other=0 bytes=64611 decoded=94 ok=94 partial=0 bad=0 frames=94 held_back=0
+23:44:03.659 V893_RX 2015ms forwarded=95 ok=95 inactive=0 other=0 bytes=65298 decoded=95 ok=95 partial=0 bad=0 frames=95 held_back=0

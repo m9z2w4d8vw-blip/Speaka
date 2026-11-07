@@ -165,6 +165,74 @@ class LibsbcBootstrap(unittest.TestCase):
         self.assertIn('6e505650145c9973d08a0bdd5e5f5e1914305e40', fetch)
         self.assertIn('git -C "$work/src" fetch', fetch)
 
+def gitignore_patterns(root):
+    """The repository's .gitignore as (pattern, negated) pairs, in order."""
+    out = []
+    for raw in (root / ".gitignore").read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        negated = line.startswith("!")
+        out.append((line[1:] if negated else line, negated))
+    return out
+
+
+def gitignored(rel, patterns):
+    """git's rules for the pattern forms .gitignore uses: a pattern without an inner '/' matches a name at any depth
+    ('*.log', '.DS_Store', '__pycache__/'); one with an inner '/' matches from the root ('audiohelper/vendor_sbc/*');
+    a trailing '/' matches a directory and everything in it; '!' re-includes; the last match wins."""
+    import fnmatch
+    parts = rel.split("/")
+    ignored = False
+    for pattern, negated in patterns:
+        directory = pattern.endswith("/")
+        body = pattern.rstrip("/")
+        if "/" in body:
+            anchored = body.lstrip("/")
+            hit = fnmatch.fnmatchcase(rel, anchored) or any(
+                fnmatch.fnmatchcase("/".join(parts[:i]), anchored) for i in range(1, len(parts)))
+        else:
+            names = parts[:-1] if directory else parts
+            hit = any(fnmatch.fnmatchcase(name, body) for name in names)
+        if hit:
+            ignored = not negated
+    return ignored
+
+
+class GitIgnore(unittest.TestCase):
+    """v9.9.5's startup fixtures were named *.log, which .gitignore drops ("Logs copied off the phone"): they were in
+    the hand-off zip but never committed, and CI's checkout failed two tests (run 114720996133). Every file in the
+    tree must survive git, except what is ignored by design (build output, caches, the libsbc fetched at build time)."""
+
+    BY_DESIGN = ("audiohelper/vendor_sbc/", "__pycache__/", ".theos/", "packages/", "obj/", "app/build/",
+                 "app/Speaka.xcodeproj/", "xcuserdata/")
+
+    def test_the_matcher_follows_gits_rules(self):
+        patterns = gitignore_patterns(ROOT)
+        self.assertTrue(gitignored("tests/fixtures/startup_test92_A.log", patterns))     # what broke CI
+        self.assertFalse(gitignored("tests/fixtures/startup_test92_A.txt", patterns))
+        self.assertTrue(gitignored("audiohelper/vendor_sbc/sbc.c", patterns))
+        self.assertFalse(gitignored("audiohelper/vendor_sbc/README.md", patterns))       # the '!' re-include
+        self.assertTrue(gitignored("tests/__pycache__/x.pyc", patterns))
+        self.assertTrue(gitignored("app/build/Speaka.app/Info.plist", patterns))
+        self.assertFalse(gitignored("app/Speaka/SpeakaModel.swift", patterns))
+
+    def test_nothing_the_build_or_tests_need_is_ignored(self):
+        patterns = gitignore_patterns(ROOT)
+        dropped = []
+        for path in sorted(ROOT.rglob("*")):
+            if not path.is_file() or ".git" in path.relative_to(ROOT).parts:
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            if any(rel.startswith(prefix) or ("/" + prefix) in ("/" + rel) for prefix in self.BY_DESIGN):
+                continue
+            if rel.endswith(".pyc") or path.name in (".DS_Store", "Thumbs.db"):
+                continue
+            if gitignored(rel, patterns):
+                dropped.append(rel)
+        self.assertEqual(dropped, [], "git would not commit these, so CI would not have them")
+
+
 
 if __name__ == "__main__":
     unittest.main()
