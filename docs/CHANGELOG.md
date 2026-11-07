@@ -77,6 +77,14 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **AVRCP volume: one volume, both directions (v9.8.98 test):** the incoming chain works end to end (capabilities,
+  registration, SetAbsoluteVolume 4..127, all accepted, gain following) and Windows sends full scale once engaged (pre-gain
+  peak steady while the gain swept 18..123). But the phone's buttons and HUD show iOS's output volume, a separate stage,
+  and nothing was ever sent back. iOS's output volume is now the volume: Windows' level is set with AVSystemController
+  setActiveCategoryVolumeTo: (what mediaremoted calls; read back and verified, falling back to Speaka's gain if
+  ineffective), the user's own changes go to Windows as CHANGED, and Speaka's gain stays at unity. Echoes of Windows'
+  sets are never reported (1 s window, coalesced sets); at connection the phone keeps its level and Windows' slider
+  adopts it. V107_LEVEL reports the submitted peak before and after gain. Every native hook now fails closed.
 - **AVRCP volume: why nothing arrived, and an initial-volume policy (v9.8.97 test):** no `AVRCP_VOLUME rx` line of any
   kind appeared - not even GetCapabilities. Traced in bluetoothd: the Target's command callback (+0xe1d9c, signed and
   registered by the Target registration) sends vendor commands through +0xe29fc to the hooked +0xe0ff4, and Apple's own

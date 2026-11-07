@@ -19,6 +19,8 @@ uint64_t sp_volume_now_ms(void);
 int sp_volume_mailbox_ready(const SPVolumeMailbox *);
 void sp_volume_mailbox_set(SPVolumeMailbox *,int enabled,unsigned value);
 unsigned sp_volume_mailbox_gain(const SPVolumeMailbox *);
+/* v9.9.10: Windows has engaged (a level is set) - sp_volume_mailbox_gain() alone can't tell 127 from "none". */
+int sp_volume_mailbox_enabled(const SPVolumeMailbox *);
 #ifdef __cplusplus
 }
 #endif

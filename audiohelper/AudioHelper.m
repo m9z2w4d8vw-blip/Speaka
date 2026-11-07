@@ -18,6 +18,7 @@
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <objc/message.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -99,6 +100,8 @@ typedef struct {
     unsigned paused;         /* v9.9.2: an interruption stopped the queue; queue and PCM are kept for the resume */
     uint64_t silence_gated, silence_priming, silence_underrun, silence_busy;   /* why silence was played (render) */
     uint32_t decoded_frames; /* PCM frames decoded: the progress a paused helper reports to keep the lease */
+    unsigned ios_domain;     /* v9.9.10: iOS output volume is the volume - Speaka's PCM gain stays at unity */
+    uint32_t level_pre_peak, level_post_peak;   /* v9.9.10: submitted PCM, before and after the gain */
     unsigned prime_target;   /* v9.9.4: this stream's lead (0 = PCM_PRIME); doubles after an underrun */
     unsigned trim_silence;   /* v9.9.4: a warm resume drops Windows' leading digital silence until real audio */
     SPVolumeMailbox *volume; /* immutable pointer until AudioQueueDispose completes */
@@ -142,9 +145,18 @@ static void render(void *context,AudioQueueRef queue,AudioQueueBufferRef buffer)
     if(__atomic_load_n(&o->stopping,__ATOMIC_ACQUIRE)) return;
     /* Optional Speaka gain is applied AFTER SBC/AAC decode and ring dequeue.
      * Unity does no writes. No I/O, session changes, or allocation in this callback. */
-    unsigned gain=sp_volume_mailbox_gain(o->volume);
+    /* v9.9.10: in the iOS domain the level is iOS's output volume, so the PCM stays at unity - one attenuation. */
+    unsigned gain=__atomic_load_n(&o->ios_domain,__ATOMIC_RELAXED)?127u:sp_volume_mailbox_gain(o->volume);
+    unsigned pre=0,post;
+    for(unsigned i=0;i<take*2u;i++) {unsigned v=(unsigned)(out[i]<0?-(int)out[i]:out[i]);if(v>pre) pre=v;}
     sp_volume_pcm(out,take*2u,gain);
-    if(gain<127) {nonzero=0;for(unsigned i=0;i<take*2u;i++) nonzero+=out[i]!=0;}
+    post=pre;
+    if(gain<127) {
+        nonzero=0;post=0;
+        for(unsigned i=0;i<take*2u;i++) {nonzero+=out[i]!=0;unsigned v=(unsigned)(out[i]<0?-(int)out[i]:out[i]);if(v>post) post=v;}
+    }
+    if(pre>__atomic_load_n(&o->level_pre_peak,__ATOMIC_RELAXED)) __atomic_store_n(&o->level_pre_peak,pre,__ATOMIC_RELAXED);
+    if(post>__atomic_load_n(&o->level_post_peak,__ATOMIC_RELAXED)) __atomic_store_n(&o->level_post_peak,post,__ATOMIC_RELAXED);
     buffer->mAudioDataByteSize=AUDIO_FRAMES*4u;
     OSStatus e=AudioQueueEnqueueBuffer(queue,buffer,0,NULL);
     if(e) {
@@ -548,6 +560,34 @@ static int assert_exclusive(void) {
     if(!ok) hlog(stdout,"V103_EXCLUSIVE_FAIL code=%ld\n",code);
     return ok?1:0;
 }
+/* v9.9.10: iOS output volume as the one user-facing volume (shared/VolumeControl.h, SPVolumeDomain). The setter is
+ * AVSystemController's setActiveCategoryVolumeTo: - iOS 17 binds AVSystemController from Celestial.framework, and
+ * mediaremoted, Apple's remote-volume daemon, calls it (objc stub +0x1c6c20, call site +0xc2c10, the level in s0). */
+static id ios_volume_controller(void) {
+    static id controller;static dispatch_once_t once;
+    dispatch_once(&once,^{
+        dlopen("/System/Library/PrivateFrameworks/Celestial.framework/Celestial",RTLD_LAZY);
+        Class k=NSClassFromString(@"AVSystemController");
+        SEL shared=NSSelectorFromString(@"sharedAVSystemController"),set=NSSelectorFromString(@"setActiveCategoryVolumeTo:");
+        if(k && [k respondsToSelector:shared]) {
+            id c=((id (*)(id,SEL))objc_msgSend)((id)k,shared);
+            if([c respondsToSelector:set]) controller=c;
+        }
+    });
+    return controller;
+}
+static int ios_volume_set(int level) {
+    id c=ios_volume_controller();
+    if(!c) return 0;
+    return ((BOOL (*)(id,SEL,float))objc_msgSend)(c,NSSelectorFromString(@"setActiveCategoryVolumeTo:"),(float)level/127.0f)?1:0;
+}
+static int ios_volume_read(void) { return (int)([AVAudioSession sharedInstance].outputVolume*127.0f+0.5f); }
+/* The user changed the phone's volume: the tweak sends it to a registered Windows as CHANGED (sp_volume_local). */
+static void report_local_volume(int level) {
+    NSDictionary *request=@{@"value":@(level),@"time":@(CFAbsoluteTimeGetCurrent())};
+    CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_REQUEST),(__bridge CFPropertyListRef)request,CFSTR(SPEAKA_PREFS_DOMAIN));
+    (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
+}
 static int reassert_speaker(Output *o,unsigned rate,AudioRing *s) {
     AVAudioSession *session=[AVAudioSession sharedInstance];NSError *error=nil;
     stop_output(o,s,"route_changed_reassert",0);
@@ -724,7 +764,18 @@ static void stream(int fd) {
     int warm=0;uint64_t healthy_since=0;   /* v9.9.4: has this connection streamed at real time yet? */
     excl_state_t excl;excl_init(&excl);uint64_t last_hint_poll=0;int hint_seen=-1;   /* v9.9.5 */
     unsigned volume_seen=127;   /* v9.9.8: the AVRCP gain last reported as reaching the output */
-    int ios_volume_seen=-1;uint64_t ios_volume_polled=0;   /* v9.9.9: iOS output volume, observed only */
+    uint64_t ios_volume_polled=0,level_reported=0;
+    /* v9.9.10: one volume - iOS's output volume - unless the setter is missing or --volume-domain speaka. */
+    SPVolumeDomain domain;
+    {
+        CFPropertyListRef want=CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_VOLUME_DOMAIN),CFSTR(SPEAKA_PREFS_DOMAIN));
+        int speaka=want && CFGetTypeID(want)==CFStringGetTypeID() && CFEqual(want,CFSTR("speaka"));
+        if(want) CFRelease(want);
+        sp_domain_init(&domain,o->volume && !speaka && ios_volume_controller()!=nil);
+        __atomic_store_n(&o->ios_domain,(unsigned)domain.ios,__ATOMIC_RELAXED);
+        if(o->volume) hlog(stdout,"V107_DOMAIN domain=%s setter=%s%s\n",domain.ios?"ios":"speaka",
+                           ios_volume_controller()?"AVSystemController":"unavailable",speaka?" (chosen)":"");
+    }
     input_rate_t input;input_rate_reset(&input,helper_ms(),(int)(__atomic_load_n(&s->generation,__ATOMIC_ACQUIRE)&1u));
     uint64_t other_quiet_since=0,last_poll=0;   /* v9.9.2: the other app's audio stopping clears an interruption */
     PCMLevels level={0};
@@ -773,20 +824,49 @@ static void stream(int fd) {
                 __atomic_store_n(&o->volume->heartbeat_ms,sp_volume_now_ms(),__ATOMIC_RELEASE);
                 /* v9.9.8: the gain the render callback now applies to every decoded buffer (AAC and SBC alike). */
                 unsigned gain=sp_volume_mailbox_gain(o->volume);
+                int windows=sp_volume_mailbox_enabled(o->volume)?(int)gain:-1;   /* Windows' level, once engaged */
                 if(gain!=volume_seen) {
-                    hlog(stdout,"V106_VOLUME gain=%u/127 (%u%%) output=%s\n",gain,(gain*100u+63u)/127u,
-                         o->queue&&!o->paused?"playing":"idle");
+                    hlog(stdout,"V106_VOLUME gain=%u/127 (%u%%) output=%s domain=%s\n",gain,(gain*100u+63u)/127u,
+                         o->queue&&!o->paused?"playing":"idle",domain.ios?"ios":"speaka");
                     volume_seen=gain;
-                }
-                /* v9.9.9: does this daemon see the iPhone's volume buttons / Control Center? (public, read-only;
-                 * nothing is sent or applied - iPhone-to-Windows needs one volume domain, docs/AVRCP-VOLUME.md) */
-                if(o->queue && now-ios_volume_polled>=500u) {
-                    ios_volume_polled=now;
-                    int ios=(int)([AVAudioSession sharedInstance].outputVolume*127.0f+0.5f);
-                    if(ios!=ios_volume_seen) {
-                        if(ios_volume_seen>=0) hlog(stdout,"V106_IOS_VOLUME %d/127 (was %d) - observed only\n",ios,ios_volume_seen);
-                        ios_volume_seen=ios;
+                    /* v9.9.10: Windows' level becomes iOS's output volume (coalesced while Windows drags). */
+                    int level=windows>=0?sp_domain_remote(&domain,windows,domain.seen,now):-1;
+                    if(level>=0) {
+                        sp_domain_set(&domain,level,now);
+                        hlog(stdout,"V107_IOS_SET level=%d/127 submitted=%d\n",level,ios_volume_set(level));
                     }
+                }
+                int due=sp_domain_due(&domain,domain.seen,now);
+                if(due>=0) {
+                    sp_domain_set(&domain,due,now);
+                    hlog(stdout,"V107_IOS_SET level=%d/127 submitted=%d coalesced\n",due,ios_volume_set(due));
+                }
+                if(o->queue && now-ios_volume_polled>=200u) {
+                    ios_volume_polled=now;
+                    int ios=ios_volume_read();
+                    if(sp_domain_verify(&domain,ios,now)) {
+                        __atomic_store_n(&o->ios_domain,0u,__ATOMIC_RELAXED);
+                        hlog(stdout,"V107_DOMAIN domain=speaka reason=setter_ineffective target=%d readback=%d\n",
+                             domain.target,ios);
+                    }
+                    int change=sp_domain_observed(&domain,ios,now);
+                    if(change) hlog(stdout,"V106_IOS_VOLUME %d/127 source=%s\n",ios,change==2?"initial":"user");
+                    /* The user's change goes to Windows; a set's own echo never does (SP_DOMAIN_ECHO_MS). */
+                    if(change==1) report_local_volume(ios);
+                    /* At connection: Windows' level if it has set one, else the phone's own - reported, not changed. */
+                    if(change==2 && domain.ios) {
+                        if(windows>=0 && windows!=ios) {sp_domain_set(&domain,windows,now);(void)ios_volume_set(windows);}
+                        else if(windows<0) report_local_volume(ios);
+                    }
+                }
+                /* The level actually submitted to the output, before and after Speaka's gain - rate-limited. */
+                if(o->queue && !o->paused && now-level_reported>=2000u) {
+                    level_reported=now;
+                    unsigned pre=__atomic_exchange_n(&o->level_pre_peak,0u,__ATOMIC_RELAXED);
+                    unsigned post=__atomic_exchange_n(&o->level_post_peak,0u,__ATOMIC_RELAXED);
+                    if(pre) hlog(stdout,"V107_LEVEL submitted_peak pre=%u post=%u pcm_gain=%u/127 ios=%d/127 domain=%s\n",
+                                 pre,post,__atomic_load_n(&o->ios_domain,__ATOMIC_RELAXED)?127u:gain,domain.seen,
+                                 domain.ios?"ios":"speaka");
                 }
             }
             /* Every path below keeps own.running equal to "a queue is running"; this only guards against a miss. */
@@ -1072,6 +1152,16 @@ int main(int argc, const char **argv) {
             return 0;
         }
         /* Local Speaka gain for the opt-in experiment. This does not set iOS system volume. */
+        if(argc==3 && strcmp(argv[1],"--volume-domain")==0) {
+            if(strcmp(argv[2],"ios") && strcmp(argv[2],"speaka")) return 2;
+            CFStringRef choice=CFStringCreateWithCString(NULL,argv[2],kCFStringEncodingUTF8);
+            if(!choice) return 1;
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_DOMAIN),choice,CFSTR(SPEAKA_PREFS_DOMAIN));
+            CFRelease(choice);
+            if(!CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN))) return 1;
+            hlog(stdout,"AVRCP volume domain saved: %s; tap Stop then Start in Speaka to apply\n",argv[2]);
+            return 0;
+        }
         if(argc==3 && strcmp(argv[1],"--volume")==0) {
             char *end=NULL;long value=strtol(argv[2],&end,10);
             if(!argv[2][0] || !end || *end || value<0 || value>127) return 2;
@@ -1090,7 +1180,8 @@ int main(int argc, const char **argv) {
         if (argc >= 2 && strcmp(argv[1], "--aac-selftest") == 0) return aac_selftest_main(argc, argv);
         hlog(stderr, "usage: BTPSAudioHelper --stream-service (launchd starts it: com.parv.speaka.audio)\n"
                      "       BTPSAudioHelper --volume-mode off|observe|experimental (run as mobile; restart Speaka)\n"
-                     "       BTPSAudioHelper --volume 0..127 (experimental Speaka gain, not iOS system volume)\n"
+                     "       BTPSAudioHelper --volume 0..127 (a local level for Windows; tests the CHANGED path)\n"
+                     "       BTPSAudioHelper --volume-domain ios|speaka (ios: Windows sets iOS output volume)\n"
                      "       BTPSAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=NAME|all]\n");   /* timestamped, as every line is */
         return 2;
     }

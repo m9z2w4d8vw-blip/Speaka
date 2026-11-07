@@ -77,3 +77,6 @@ static inline void speaka_state_unpack(uint64_t s, unsigned *loaded, unsigned *u
 /* The last volume that PC set (0..127), reported when it next registers - so a reconnection keeps its level.
  * Written by the tweak. */
 #define SPEAKA_KEY_VOLUME_LEVEL "SpeakaAVRCPVolumeLevel"
+/* v9.9.10: which volume Windows controls - "ios" (default: iOS output volume, one volume) or "speaka" (Speaka's own
+ * PCM gain, no reverse sync). Written by BTPSAudioHelper --volume-domain. */
+#define SPEAKA_KEY_VOLUME_DOMAIN "SpeakaAVRCPVolumeDomain"

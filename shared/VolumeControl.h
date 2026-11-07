@@ -33,6 +33,33 @@ int sp_volume_command(SPVolume *, const SPVolumeIO *, const uint8_t peer[6],
 int sp_volume_local(SPVolume *, const SPVolumeIO *, unsigned value);
 /* Retry a failed local CHANGED response; never creates a new subscription. */
 int sp_volume_flush(SPVolume *, const SPVolumeIO *);
+/* ---- one user-facing volume: iOS output volume (v9.9.10) ----
+ * The phone's buttons, Control Center and HUD all show iOS's output volume; Windows' slider drives the sink through
+ * SetAbsoluteVolume. They become one volume: Windows' level is set as iOS's output volume (AVSystemController
+ * setActiveCategoryVolumeTo:, the call mediaremoted makes), the user's iOS changes go to Windows as CHANGED, and
+ * Speaka's own PCM gain stays at unity - no second attenuation. If the setter is missing or ineffective, the domain falls
+ * back to Speaka's gain (Windows -> gain, no reverse sync). This is the pure policy; the helper does the I/O. */
+#define SP_DOMAIN_ECHO_MS 1000u      /* iOS changes this soon after a set are that set's own, never the user's */
+#define SP_DOMAIN_SET_MS 50u         /* at most one set per 50 ms while Windows drags; the newest level wins */
+#define SP_DOMAIN_VERIFY_MS 400u     /* a set is read back this long after */
+#define SP_DOMAIN_MAX_FAILURES 3u    /* consecutive ineffective sets before falling back to Speaka's gain */
+typedef struct {
+    int ios;                   /* 1: iOS output volume is the volume; 0: Speaka's gain (fallback) */
+    int target, pending, seen; /* last level set on iOS, a coalesced level waiting, last iOS level seen (-1: none) */
+    uint64_t target_ms, last_set_ms;
+    int verify;
+    unsigned failures;
+} SPVolumeDomain;
+void sp_domain_init(SPVolumeDomain *, int ios);
+/* Windows asked for level. Returns the level to set on iOS now, or -1 (none needed, or coalesced for later). */
+int sp_domain_remote(SPVolumeDomain *, int level, int current_ios, uint64_t now);
+/* Each tick: a coalesced level whose rate limit has passed, or -1. */
+int sp_domain_due(SPVolumeDomain *, int current_ios, uint64_t now);
+void sp_domain_set(SPVolumeDomain *, int level, uint64_t now);
+/* iOS reports level. 0: no change or the domain's own echo; 1: the user's change, for Windows; 2: the first reading. */
+int sp_domain_observed(SPVolumeDomain *, int level, uint64_t now);
+/* The read-back of the last set. Returns 1 when the domain just fell back to Speaka's gain. */
+int sp_domain_verify(SPVolumeDomain *, int readback, uint64_t now);
 /* Signed stereo/interleaved PCM; exact unity, exact digital mute, no clipping.
  * samples is the number of int16_t values, not the number of frames. */
 void sp_volume_pcm(int16_t *pcm, size_t samples, unsigned value);

@@ -301,3 +301,47 @@ of them). A single domain needs either Windows to drive iOS's output volume (a p
 buttons to drive Speaka's gain instead. This release only observes iOS's volume (`V106_IOS_VOLUME`, the helper,
 read-only) to establish that the daemon sees the buttons; nothing is sent or applied from it.
 
+## v9.9.10: one volume - iOS's output volume
+
+**Device evidence (v9.8.98).** The whole incoming chain works: AVCTP from Windows (09:11:35.228), GetCapabilities
+answered with `0x0d`, RegisterNotification answered INTERIM 64, then SetAbsoluteVolume 4..127 from 09:11:46, every one
+ACCEPTED (status 0) with `V106_VOLUME` following it. Two findings shaped this release:
+
+* **No double attenuation.** From 09:12:05 to 09:12:11 the slider swept the gain from 18 to 123 while the pre-gain decoded
+  peak (`V881_PCM`) held at ~18,700-19,250: once engaged, Windows sends full scale. The sink is the only attenuation.
+* **Two volumes.** The gain followed Windows, but the phone's buttons, HUD and Control Center show iOS's output volume -
+  a separate stage, which the helper saw change (`V106_IOS_VOLUME` 89 -> 95 -> 102 -> 89 -> 76, 09:12:02-04) and nothing
+  linked. No CHANGED was ever sent.
+
+**Decision: iOS's output volume is the volume.** Windows' level is set as iOS's output volume, the user's changes go to
+Windows, and Speaka's PCM gain stays at unity. The setter is the one Apple's remote-volume daemon uses: `mediaremoted`
+binds `AVSystemController` from `Celestial.framework` (chained-fixup import, ordinal 6) and calls
+`setActiveCategoryVolumeTo:` (objc stub `+0x1c6c20`, which loads selref `+0x285b38`; call site `+0xc2c10`, the level in
+`s0`). The active category's volume is what the hardware buttons control. Reading it back is public
+(`AVAudioSession.outputVolume`, already observed on the device).
+
+The policy is pure C (`shared/VolumeControl.c`, `SPVolumeDomain`) and host-tested:
+
+* Windows' levels are coalesced to one set per 50 ms; the newest wins.
+* An iOS change within 1 s of a set is that set's own echo and is never reported - Windows dragging its slider can't
+  turn into CHANGED responses fighting it. Later changes are the user's: the helper submits them as a local level, and
+  the tweak sends CHANGED on Windows' retained label (one-shot; Windows registers again).
+* Each set is read back 400 ms later; three ineffective sets in a row fall back to Speaka's gain (`V107_DOMAIN
+  domain=speaka`), with no reverse sync in that domain. `BTPSAudioHelper --volume-domain speaka` chooses it directly.
+* `V107_LEVEL submitted_peak pre= post= pcm_gain= ios=` reports, every 2 s while playing, the peak actually submitted to
+  the AudioQueue before and after Speaka's gain - the audible-attenuation check `V106_VOLUME` alone couldn't give.
+
+**Initial volume.** At connection the phone keeps its level: the helper reports iOS's current volume, so Windows'
+slider adopts it (INTERIM if it registers after, CHANGED if before) - no loudness change. If Windows pushes its own level,
+iOS follows it. Windows' volume on *another* output before the connection (the laptop's speakers) isn't carried over
+Bluetooth; AVRCP only carries Windows' level for this Bluetooth endpoint. Matching the former would need software on
+Windows.
+
+**Hook safety.** Every replacement checks its trampoline before calling it. A missing one degrades instead of calling
+null: the registration reports failure (bluetoothd logs "Failed to register as an AVRCP Target" and runs without it),
+receive and connect return the native "no handler" status, the observers drop the call - each logged once
+(`AVRCP_VOLUME FAILED CLOSED`).
+
+Still unverified on the device: that `setActiveCategoryVolumeTo:` works from the helper daemon (the read-back decides,
+and falls back if not), the CHANGED path, and Windows' reaction to CHANGED (moving its slider, re-registering).
+

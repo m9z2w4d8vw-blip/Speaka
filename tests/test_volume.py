@@ -229,7 +229,7 @@ int main(void) {
         self.assertLess(render.index("sp_volume_pcm(out,take*2u,gain);"), render.index("AudioQueueEnqueueBuffer(queue,buffer,0,NULL)"))
         writers = helper.split("static void hold_pcm(", 1)[1].split("static void keep_output(", 1)[0]
         self.assertNotIn("sp_volume", writers)                 # the ring holds decoded, un-attenuated PCM
-        self.assertIn('hlog(stdout,"V106_VOLUME gain=%u/127 (%u%%) output=%s\\n"', helper)
+        self.assertIn('hlog(stdout,"V106_VOLUME gain=%u/127 (%u%%) output=%s domain=%s\\n"', helper)
 
     def test_observation_hooks_pass_everything_through(self):
         # v9.9.9: the earliest points of the incoming Target path. They log and call the original, unconditionally,
@@ -243,7 +243,7 @@ int main(void) {
             self.assertIn(call.split("\n")[0].strip(), body)
             self.assertNotIn("consumed", body)
             self.assertNotIn("return 0;", body)
-        self.assertIn("uint64_t result=original_avrcp_connect(manager,device);", adapter)
+        self.assertIn("if(original_avrcp_connect) result=original_avrcp_connect(manager,device);", adapter)   # v9.9.10: guarded
         install = adapter.split("void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {", 1)[1]
         hooks = install.index("(void *)(base+0xe1d9c)")
         self.assertLess(install.index("if(!match)"), hooks)                       # gated by the build checks
@@ -296,3 +296,107 @@ int main(void) {
         self.assertIn("if(consumed && p[3]==0x31 && state.subscribed && !engaged && mailbox) {", receive)
         self.assertIn("sp_volume_mailbox_set(mailbox,1,state.value);engaged=1;", receive)
 
+
+
+class VolumeDomain(unittest.TestCase):
+    """v9.9.10 (device test v9.8.98): Windows' SetAbsoluteVolume reached Speaka's gain, but the phone's buttons and HUD
+    show iOS's output volume - two volumes, never mirrored, and no CHANGED was ever sent. iOS's output volume becomes the
+    one volume (mediaremoted's AVSystemController setActiveCategoryVolumeTo:), Speaka's gain stays at unity, and the
+    user's iOS changes go to Windows. The pre-gain PCM peak stayed ~19,000 while the slider swept 18..123 (09:12:05-11):
+    Windows sends full scale once engaged, so the sink is the only attenuation either way."""
+
+    def read(self, path):
+        return (ROOT / path).read_text()
+
+    def test_domain_policy_never_echoes_and_falls_back_when_ineffective(self):
+        harness = r"""
+#include <assert.h>
+#include <stdio.h>
+#include "shared/VolumeControl.h"
+int main(void) {
+    SPVolumeDomain d; sp_domain_init(&d, 1);
+    /* The connection: the first iOS reading is the phone's own level, reported as the initial value. */
+    assert(sp_domain_observed(&d, 76, 1000) == 2);
+    /* Already there: no set. */
+    assert(sp_domain_remote(&d, 77, 76, 1100) == -1);
+    /* Windows drags its slider: a level every 15 ms for 300 ms; iOS reads back the set before last (it lags). */
+    unsigned sets = 0; int last_set = -1, reports = 0;
+    uint64_t t = 2000;
+    for (int i = 0; i <= 20; i++, t += 15) {
+        int level = 20 + i * 5, ios = last_set >= 0 ? last_set : 76;
+        int now_set = sp_domain_remote(&d, level, ios, t);
+        if (now_set < 0) now_set = sp_domain_due(&d, ios, t);
+        if (now_set >= 0) { sp_domain_set(&d, now_set, t); last_set = now_set; sets++; }
+        reports += sp_domain_observed(&d, ios, t) == 1;
+    }
+    for (; t < 2300 + 1000; t += 10) {                       /* settle: the coalesced newest level, then readbacks */
+        int now_set = sp_domain_due(&d, last_set, t);
+        if (now_set >= 0) { sp_domain_set(&d, now_set, t); last_set = now_set; sets++; }
+        reports += sp_domain_observed(&d, last_set, t) == 1;
+        (void)sp_domain_verify(&d, last_set, t);
+    }
+    printf("drag: 21 levels in 300 ms -> %u sets, last %d, reports to Windows %d\n", sets, last_set, reports);
+    assert(sets <= 8 && last_set == 120 && reports == 0);   /* coalesced, newest wins, never an echo */
+    assert(d.ios == 1);
+    /* The user presses volume-down two seconds later: that is reported. */
+    assert(sp_domain_observed(&d, 112, t + 2000) == 1);
+    /* An ineffective setter: three sets that iOS ignores -> back to Speaka's gain, then nothing more is set or reported. */
+    SPVolumeDomain e; sp_domain_init(&e, 1); assert(sp_domain_observed(&e, 60, 100) == 2);
+    uint64_t u = 1000; int fell = 0;
+    for (int i = 0; i < 3; i++, u += 1000) {
+        int level = sp_domain_remote(&e, 90 + i, 60, u); assert(level >= 0);
+        sp_domain_set(&e, level, u);
+        fell |= sp_domain_verify(&e, 60, u + SP_DOMAIN_VERIFY_MS);
+    }
+    assert(fell && e.ios == 0);
+    assert(sp_domain_remote(&e, 100, 60, u + 5000) == -1 && sp_domain_observed(&e, 50, u + 9000) == 0);
+    /* A superseded set is not a failure: only a settled read-back counts. */
+    SPVolumeDomain f; sp_domain_init(&f, 1); (void)sp_domain_observed(&f, 60, 100);
+    sp_domain_set(&f, 90, 1000); (void)sp_domain_remote(&f, 95, 60, 1010);
+    assert(sp_domain_verify(&f, 60, 1000 + SP_DOMAIN_VERIFY_MS) == 0 && f.failures == 0);
+    /* The Speaka-gain domain never reports iOS changes. */
+    SPVolumeDomain g; sp_domain_init(&g, 0); (void)sp_domain_observed(&g, 60, 100);
+    assert(sp_domain_observed(&g, 70, 5000) == 0 && sp_domain_remote(&g, 30, 60, 5000) == -1);
+    return 0;
+}
+"""
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "domain.c"; exe = Path(td) / "domain"; src.write_text(harness)
+            build = subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), str(src),
+                                    str(ROOT / "shared/VolumeControl.c"), "-o", str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+            print(ran.stdout, end="")
+
+    def test_helper_sets_ios_volume_and_reports_the_users_changes(self):
+        helper = self.read("audiohelper/AudioHelper.m")
+        render = helper.split("#define PCM_CAPACITY", 1)[1].split("static void stop_output", 1)[0]
+        self.assertIn("unsigned gain=__atomic_load_n(&o->ios_domain,__ATOMIC_RELAXED)?127u:sp_volume_mailbox_gain(o->volume);", render)
+        self.assertLess(render.index("unsigned pre=0,post;"), render.index("sp_volume_pcm(out,take*2u,gain);"))
+        setter = helper.split("static id ios_volume_controller(void) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('dlopen("/System/Library/PrivateFrameworks/Celestial.framework/Celestial",RTLD_LAZY);', setter)
+        self.assertIn('NSClassFromString(@"AVSystemController")', setter)
+        self.assertIn("if([c respondsToSelector:set]) controller=c;", setter)          # missing: the gain domain
+        self.assertIn('((BOOL (*)(id,SEL,float))objc_msgSend)(c,NSSelectorFromString(@"setActiveCategoryVolumeTo:"),(float)level/127.0f)', helper)
+        loop = helper.split("int windows=sp_volume_mailbox_enabled(o->volume)?(int)gain:-1;", 1)[1].split("if(o->queue && !o->paused && now-level_reported>=2000u) {", 1)[0]
+        self.assertIn("if(change==1) report_local_volume(ios);", loop)                 # the user's change only
+        self.assertIn("__atomic_store_n(&o->ios_domain,0u,__ATOMIC_RELAXED);", loop)    # ineffective: back to gain
+        self.assertIn("else if(windows<0) report_local_volume(ios);", loop)            # initial: the phone's level
+        self.assertIn('hlog(stdout,"V107_LEVEL submitted_peak pre=%u post=%u', helper)
+        self.assertIn('strcmp(argv[1],"--volume-domain")==0', helper)
+        self.assertIn('#define SPEAKA_KEY_VOLUME_DOMAIN "SpeakaAVRCPVolumeDomain"', self.read("shared/SpeakaShared.h"))
+
+    def test_every_native_original_is_guarded(self):
+        # v9.9.10: a hook whose trampoline is missing degrades - it never calls a null original.
+        adapter = self.read("tweak/VolumeControl.m")
+        lines = adapter.splitlines()
+        for i, line in enumerate(lines):
+            for name in ("original_receive", "original_disconnect", "original_register_target",
+                         "original_target_command", "original_avctp_incoming", "original_avrcp_connect"):
+                if name + "(" in line and "MSHookFunction" not in line:
+                    context = line + lines[i - 1]
+                    self.assertTrue(("if(" + name) in context or ("if(!" + name) in context,
+                                    "unguarded call at line %d: %s" % (i + 1, line.strip()))
+        self.assertIn('SpeakaLogNow("AVRCP_VOLUME FAILED CLOSED: %s has no original; degraded, not called",which);', adapter)

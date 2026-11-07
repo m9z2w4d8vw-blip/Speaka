@@ -64,6 +64,14 @@ static TargetCommand original_target_command;
 static AvctpIncoming original_avctp_incoming;
 static AvrcpConnect original_avrcp_connect;
 static unsigned seen_commands,seen_incoming,seen_outgoing;
+/* v9.9.10: fail closed. A replacement whose trampoline is missing must not call it (a null call would crash
+ * bluetoothd - at startup, for the registration hook, on every relaunch). It degrades instead and logs once. */
+#define VOLUME_NATIVE_FAILED 0xce5u   /* the status the native dispatcher returns for "no handler" (+0xe29fc) */
+static unsigned missing_logged;
+static void missing_trampoline(unsigned bit,const char *which) {
+    if(__atomic_fetch_or(&missing_logged,bit,__ATOMIC_RELAXED)&bit) return;
+    SpeakaLogNow("AVRCP_VOLUME FAILED CLOSED: %s has no original; degraded, not called",which);
+}
 static Send send_response;
 static StackLock stack_lock,stack_unlock;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
@@ -183,7 +191,9 @@ static uint32_t receive(const uint8_t *address,uint8_t label,const NativeFrame *
         pthread_mutex_unlock(&lock);
     }
     /* A consumed volume command gets exactly one response path; everything else is native. */
-    return consumed?0:original_receive(address,label,incoming);
+    if(consumed) return 0;
+    if(!original_receive) {missing_trampoline(1u,"receive");return VOLUME_NATIVE_FAILED;}
+    return original_receive(address,label,incoming);
 }
 static void disconnected(const uint8_t *address,uint32_t reason) {
     uint8_t peer[6];
@@ -192,7 +202,8 @@ static void disconnected(const uint8_t *address,uint32_t reason) {
         if(state.bound && !memcmp(state.peer,peer,6)) reset_locked("avrcp_disconnected");
         pthread_mutex_unlock(&lock);
     }
-    original_disconnect(address,reason);
+    if(original_disconnect) original_disconnect(address,reason);
+    else missing_trampoline(2u,"disconnect");
 }
 /* The Target's SDP SupportedFeatures. observe: logged as advertised. experimental: Category 2 (Monitor/Amplifier) is
  * added - absolute volume belongs to it, and an AVRCP controller may not send SetAbsoluteVolume to a target that
@@ -202,6 +213,8 @@ static uint64_t register_target(uint64_t descriptor,uint32_t features,uint64_t a
     SpeakaLogNow("AVRCP_VOLUME sdp target_features=%#x advertised=%#x category2=%d",features,advertised,
                  (advertised&0x02u)!=0);
     SpeakaSetStatus("diag.v106.avrcp_sdp","target features %#x, advertised %#x",features,advertised);
+    /* No original: report failure - bluetoothd logs "Failed to register as an AVRCP Target" and runs without it. */
+    if(!original_register_target) {missing_trampoline(4u,"target registration");return VOLUME_NATIVE_FAILED;}
     return original_register_target(descriptor,advertised,a2,a3);
 }
 /* v9.9.9 observation: every incoming Target command, before any filter. Logged, then native. */
@@ -219,7 +232,8 @@ static void target_command(const uint8_t *address,uint64_t label,const NativeFra
                          frame.opcode==0?(ops[3]==0x10?"0x10":ops[3]==0x31?"0x31":ops[3]==0x50?"0x50":"other"):"");
         } else SpeakaLogNow("AVRCP_VOLUME tg_rx #%u peer=%s frame_unreadable",n,a);
     }
-    original_target_command(address,label,incoming);
+    if(original_target_command) original_target_command(address,label,incoming);
+    else missing_trampoline(8u,"target command");
 }
 static void avctp_incoming(uint64_t context,const uint8_t *address,uint64_t channel) {
     unsigned n=__atomic_add_fetch(&seen_incoming,1u,__ATOMIC_RELAXED);
@@ -228,13 +242,16 @@ static void avctp_incoming(uint64_t context,const uint8_t *address,uint64_t chan
         if(peek((uint64_t)address,peer,6)) peer_address_text(peer,a);
         SpeakaLogNow("AVRCP_VOLUME avctp_incoming #%u peer=%s channel=%#llx",n,a,(unsigned long long)channel);
     }
-    original_avctp_incoming(context,address,channel);
+    if(original_avctp_incoming) original_avctp_incoming(context,address,channel);
+    else missing_trampoline(16u,"AVCTP incoming");
 }
 static uint64_t avrcp_connect(uint64_t manager,uint64_t device) {
     unsigned n=__atomic_add_fetch(&seen_outgoing,1u,__ATOMIC_RELAXED);
     uint8_t peer[6];char a[18]="?";
     if(n<=16u && peek(device+PEER_DEVICE_ADDRESS,peer,6)) peer_address_text(peer,a);
-    uint64_t result=original_avrcp_connect(manager,device);
+    uint64_t result=VOLUME_NATIVE_FAILED;
+    if(original_avrcp_connect) result=original_avrcp_connect(manager,device);
+    else missing_trampoline(32u,"AVRCP connect");
     if(n<=16u) SpeakaLogNow("AVRCP_VOLUME avrcp_outgoing #%u peer=%s result=%#llx",n,a,(unsigned long long)result);
     return result;
 }

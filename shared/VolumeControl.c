@@ -76,3 +76,44 @@ void sp_volume_pcm(int16_t *pcm,size_t samples,unsigned value) {
     if(!value) {memset(pcm,0,samples*sizeof *pcm);return;}
     for(size_t i=0;i<samples;i++) pcm[i]=(int16_t)((int32_t)pcm[i]*(int32_t)value/SP_VOLUME_MAX);
 }
+
+static int sp_near(int a, int b, int tolerance) { return a >= b - tolerance && a <= b + tolerance; }
+void sp_domain_init(SPVolumeDomain *d, int ios) {
+    if(!d) return;
+    memset(d,0,sizeof *d);d->ios=ios?1:0;d->target=d->pending=d->seen=-1;
+}
+int sp_domain_remote(SPVolumeDomain *d, int level, int current_ios, uint64_t now) {
+    if(!d || !d->ios || level<0 || level>SP_VOLUME_MAX) return -1;
+    if(current_ios>=0 && sp_near(current_ios,level,1)) { d->pending=-1; return -1; }   /* already there */
+    if(d->last_set_ms && now-d->last_set_ms<SP_DOMAIN_SET_MS) { d->pending=level; return -1; }
+    d->pending=-1;
+    return level;
+}
+int sp_domain_due(SPVolumeDomain *d, int current_ios, uint64_t now) {
+    if(!d || !d->ios || d->pending<0 || now-d->last_set_ms<SP_DOMAIN_SET_MS) return -1;
+    int level=d->pending;d->pending=-1;
+    return current_ios>=0 && sp_near(current_ios,level,1) ? -1 : level;
+}
+void sp_domain_set(SPVolumeDomain *d, int level, uint64_t now) {
+    if(!d) return;
+    d->target=level;d->target_ms=now?now:1u;d->last_set_ms=d->target_ms;d->verify=1;
+}
+int sp_domain_observed(SPVolumeDomain *d, int level, uint64_t now) {
+    if(!d || level<0 || level>SP_VOLUME_MAX || level==d->seen) return 0;
+    int first=d->seen<0;
+    d->seen=level;
+    if(first) return 2;
+    if(!d->ios) return 0;
+    if(d->target_ms && now-d->target_ms<SP_DOMAIN_ECHO_MS) return 0;   /* the domain's own set, settling */
+    return 1;
+}
+int sp_domain_verify(SPVolumeDomain *d, int readback, uint64_t now) {
+    if(!d || !d->ios || !d->verify || now-d->target_ms<SP_DOMAIN_VERIFY_MS) return 0;
+    d->verify=0;
+    if(d->pending<0 && sp_near(readback,d->target,2)) { d->failures=0; return 0; }
+    if(d->pending>=0) return 0;                                          /* superseded: judge the next one */
+    if(++d->failures<SP_DOMAIN_MAX_FAILURES) return 0;
+    d->ios=0;d->pending=-1;
+    return 1;
+}
+
