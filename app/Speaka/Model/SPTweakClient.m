@@ -265,9 +265,11 @@ static NSString *SPOutputsDescription(id outputs)
     s.connected = s.session == SPSessionOn && (helperAttached || (peerUp && !helperEnded));
     NSString *routeName = SPBluetoothOutputName(helper[@"outputs"]);
     NSString *routeUID = @"";
-    // v9.9.6: the connection's own address (the tweak reads it from the PC's AVDTP connection, before any audio), and
-    // iOS's name/address pair for the PC if a route listed it during this connection (the helper's capture).
+    // v9.9.7: the connection's own address and name - the tweak reads them from bluetoothd's Device for this stream
+    // when the PC configures the speaker, before any audio - and iOS's name/address pair for the PC if a route listed it
+    // during this connection (the helper's capture).
     NSString *connection = SPString(status[@"diag.v105.peer_address"]);
+    NSString *connectionName = SPString(status[@"diag.v105.peer_name"]);
     NSString *captureName = @"", *captureUID = @"";
     id pc = helper[@"pc"];
     if ([pc isKindOfClass:[NSDictionary class]]) {
@@ -285,18 +287,25 @@ static NSString *SPOutputsDescription(id outputs)
         routeName = SPBluetoothOutputName(SPOwnRouteOutputs());
     s.routeName = routeName;
     s.routeUID = routeUID;
-    // v9.9.6: learn iOS's pair (a new PC, or a renamed one), then name the connection by its address.
+    // Learn verified pairs (the connection's own, a route capture's; a new PC, or a renamed one), then name the
+    // connection: by its own name, else by its address.
     peer_cache_t cache;
     SPPeerCacheLoad(&cache);
-    if (captureName.length && captureUID.length) {
-        const char *known = peer_cache_lookup(&cache, captureUID.UTF8String);
-        if (!known || strcmp(known, captureName.UTF8String) != 0) {
-            peer_cache_learn(&cache, captureUID.UTF8String, captureName.UTF8String, [[NSDate date] timeIntervalSince1970]);
-            SPPeerCacheSave(&cache);
+    BOOL learned = NO;
+    NSString *pairs[2][2] = { { connection, connectionName }, { captureUID, captureName } };
+    for (int i = 0; i < 2; i++) {
+        NSString *address = pairs[i][0], *name = pairs[i][1];
+        if (address.length == 0 || name.length == 0) continue;
+        const char *known = peer_cache_lookup(&cache, address.UTF8String);
+        if (!known || strcmp(known, name.UTF8String) != 0) {
+            peer_cache_learn(&cache, address.UTF8String, name.UTF8String, [[NSDate date] timeIntervalSince1970]);
+            learned = YES;
         }
     }
-    const char *resolved = peer_resolve(connection.length ? connection.UTF8String : NULL, captureUID.UTF8String,
-                                        captureName.UTF8String, &cache);
+    if (learned)
+        SPPeerCacheSave(&cache);
+    const char *resolved = peer_resolve(connection.length ? connection.UTF8String : NULL, connectionName.UTF8String,
+                                        captureUID.UTF8String, captureName.UTF8String, &cache);
     s.peerAddress = connection;
     s.peerName = resolved ? ([NSString stringWithUTF8String:resolved] ?: @"") : @"";
     id volume = helper[@"volume"];

@@ -526,3 +526,29 @@ The destructor frees the **currently published** table and its per-entry capabil
 - A successful allocation, SDP add or handler entry does NOT demonstrate live A2DP Sink reception.
 - The v8.3 post-hook is allowed only on the exact UUID and exact four-instruction signature.
 - `KILL-NATIVE-SINK-ACP` remains untriggered until a role-exclusion branch is proven. A protocol REJECT remains diagnostic evidence, not an automatic kill.
+
+## The peer's identity at SetConfiguration (v9.9.7)
+
+Same binary (UUID `5491BA47-B5AE-3D44-9536-B30161DF1E90`). Established by disassembling the reference copy in
+`docs/reference-binaries/ios17-iphone13/bluetoothd`; `tests/test_app.py` re-checks every offset below against its
+instructions on each run.
+
+* **SetConfigInd's x0 is not the connection.** The only reference to the handler (`+0x37ae68`) is a tail call from a
+  closure's invoke function at `+0x386708`, whose pointer sits in a closure vtable at `+0x92a540` (an authenticated
+  chained-fixup pointer, key IA, diversity `0xc13c`). It loads x0 from the global `+0x96fb68` behind a `dispatch_once`
+  check - the same manager object for every connection - and x1..x7 from the closure: transaction `+0xa`, stream
+  handle `+0xc` (u16), local/remote SEID `+0xe`/`+0xf`, `+0x10` (u16), capabilities `+0x18`, count `+0x20`. The
+  closure's first 8 bytes are its vtable, so it carries no address. The manager's dump (`V105_CONNECTION_OWNER`)
+  repeats `58 54 55 4D`: `0x4D555458`, Darwin's pthread mutex signature.
+* **The handler resolves the stream handle to its Device**, and logs it: "SetConfigInd setting a2dp stream handle to
+  %d for device %{public}s". `+0x3730e8 (manager, handle)` walks a `std::map<uint16_t, Device *>` at `manager+0x1f8`
+  (root at `+0x200`; node key u16 at `+0x20`, left `+0x0`, right `+0x8`); `+0x374ab8` (map::at) returns `node+0x28`,
+  the `Device *`.
+* **The Device's address** is six bytes at `device+0x80`: `+0x4108f8` reads bytes 0-5 and prints them with
+  `%02X:%02X:%02X:%02X:%02X:%02X` (`+0x837fc0`), so they are in display order.
+* **The Device's name** is the libc++ string at `device+0x118` if it is not empty, else the one at `device+0xf0`
+  (`+0x3def70`, under the device's lock). The power-logging path (`+0x35a804`) passes `x1+0x80` as the address and `x1`
+  to `+0x3def70`, so both belong to the same object.
+* The address is three pointers from x0 (manager -> node -> device -> +0x80): why v9.8.95's one-level search of x0
+  never found it, whatever its range.
+

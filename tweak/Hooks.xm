@@ -314,12 +314,13 @@ static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a
         unsigned seen=g_pc_config.valid;
         /* v9.9: the stream is configured: the helper is connected now and owns the output before the PC's START. */
         AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);
-        SpeakaPeerConnected(a0);           /* v9.9.6: who is it, from the connection (background queue, PeerIdentity.c) */
         pthread_mutex_unlock(&g_stream_control_lock);
         SpeakaLogNow("V88_CONFIG handle=%u local_seid=7 remote_seid=%u codec=%s%s",(unsigned)a2,(unsigned)a4,
                      avdtp_codec_name((uint8_t)codec),seen?"":" (assumed: SET_CONFIGURATION not seen)");
         /* v9.6: the PC's side of the speaker's stream, for the app's connection line (diag.v95.peer). */
         SpeakaSetStatus("diag.v95.peer","configured: the PC set up the speaker's stream");
+        /* v9.9.7: who it is - the stream handle's Device, read before the native handler looks it up (PeerIdentity.c). */
+        SpeakaPeerConnected(a0,(unsigned)a2);
     }
     return hook_setconfigind_observe(a0,a1,a2,a3,a4,a5,a6,a7);
 }

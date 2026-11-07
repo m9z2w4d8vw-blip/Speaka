@@ -565,90 +565,92 @@ int main(void) {
         self.assertIn("SPConnectedDevice.isAudioDevice(forRouteUID: next.routeUID)", model)
 
     def test_the_pc_is_named_from_the_connection_itself(self):
-        """Priority 1 (v9.9.6). v9.8.94: the paired-device records were never found, the route listed the PC in only 2
-        of 7 connections, and BluetoothManager stayed unavailable. Now the tweak reads the PC's address from its own
-        AVDTP connection - at a path learned by matching an address iOS verified (the route's name/UID pair) - and the
-        app names that address from a verified cache, before any audio. A different computer has a different address,
-        so it never inherits the last PC's name. Here: the scan, the path and the resolver against a synthetic memory
-        image and the five connection scenarios, then the wiring from SetConfigInd to the app's connection line."""
+        """Priority 1 (v9.9.7). v9.8.95: V105_PATH_NOT_FOUND every time - SetConfigInd's x0 is bluetoothd's process-wide
+        manager (loaded from a dispatch_once global; its dump is full of pthread mutexes, 58 54 55 4D), not the
+        connection. The connection is the stream handle, which the handler resolves through a std::map<uint16_t, Device *>
+        in the manager; the Device holds the peer's address and name. The tweak repeats that lookup with reads at
+        configuration time. Here: the walk against a synthetic memory image with a real tree, every failure mode named,
+        and the resolver; then the layout checked against bluetoothd's own instructions; then the wiring."""
         harness = r"""
 #include <assert.h>
 #include <string.h>
 #include "shared/PeerName.h"
-/* A synthetic address space: the native owner object and one object it points to. */
-static unsigned char owner_obj[0x400], child_obj[0x200];
-#define OWNER 0x200001000ull
-#define CHILD 0x300002000ull
+/* A synthetic address space of separate objects, like bluetoothd's heap. */
+typedef struct { uint64_t base; unsigned char bytes[0x200]; } region_t;
+static region_t mem[16]; static unsigned nmem;
+static unsigned char *obj(uint64_t base) { mem[nmem].base = base; memset(mem[nmem].bytes, 0, 0x200); return mem[nmem++].bytes; }
 static int fake_peek(uint64_t a, void *out, size_t n) {
-    if (a >= OWNER && a + n <= OWNER + sizeof owner_obj) { memcpy(out, owner_obj + (a - OWNER), n); return 1; }
-    if (a >= CHILD && a + n <= CHILD + sizeof child_obj) { memcpy(out, child_obj + (a - CHILD), n); return 1; }
+    for (unsigned i = 0; i < nmem; i++)
+        if (a >= mem[i].base && a + n <= mem[i].base + 0x200) { memcpy(out, mem[i].bytes + (a - mem[i].base), n); return 1; }
     return 0;                                                       /* unmapped: like vm_read_overwrite failing */
 }
-static void put_address(unsigned char *at, const char *text, int reversed) {
-    unsigned char b[6]; assert(peer_address_bytes(text, b));
-    for (int i = 0; i < 6; i++) at[i] = reversed ? b[5 - i] : b[i];
+static void put64(unsigned char *at, uint64_t v) { memcpy(at, &v, 8); }
+static void put16(unsigned char *at, uint16_t v) { memcpy(at, &v, 2); }
+static void short_string(unsigned char *at, const char *t) { size_t n = strlen(t); memcpy(at, t, n); at[23] = (unsigned char)n; }
+static void long_string(unsigned char *at, uint64_t data, unsigned char *data_obj, const char *t) {
+    size_t n = strlen(t); memcpy(data_obj, t, n + 1); put64(at, data); put64(at + 8, n); put64(at + 16, 0x8000000000000030ull);
 }
+static void address(unsigned char *at, const char *t) { unsigned char b[6]; assert(peer_address_bytes(t, b)); memcpy(at, b, 6); }
+#define MANAGER 0x200000000ull
 int main(void) {
-    const char *laptop_uid = "24:B2:B9:A1:A4:68-tacl";            /* the v9.8.94 route capture */
-    unsigned char laptop[6], got[6]; char text[18], stored[64];
-    assert(peer_address_bytes(laptop_uid, laptop) && laptop[0] == 0x24 && laptop[5] == 0x68);
-    peer_address_text(laptop, text); assert(!strcmp(text, "24:B2:B9:A1:A4:68"));
-    unsigned char zero[6] = {0}, ones[6] = {255, 255, 255, 255, 255, 255};
-    assert(!peer_address_plausible(zero) && !peer_address_plausible(ones) && peer_address_plausible(laptop));
+    /* The manager: std::map at +0x1f8, root (end node's left) at +0x200 - here at its own address so +0x1f8 fits. */
+    unsigned char *mgr = obj(MANAGER + 0x100);                     /* covers manager+0x100 .. +0x2ff */
+    unsigned char *n2 = obj(0x300000000ull), *n1 = obj(0x300001000ull), *n5 = obj(0x300002000ull);
+    unsigned char *laptop = obj(0x400000000ull);                   /* each object spans 0x200: +0x80..+0x130 fit */
+    unsigned char *other = obj(0x400010000ull), *other_name = obj(0x400020000ull);
+    unsigned char *blank = obj(0x400030000ull);
+    put64(mgr + 0x1f8 + 8 - 0x100, 0x300000000ull);                 /* root = handle 2 */
+    put16(n2 + 0x20, 2); put64(n2 + 0x0, 0x300001000ull); put64(n2 + 0x8, 0x300002000ull); put64(n2 + 0x28, 0x400010000ull);
+    put16(n1 + 0x20, 1); put64(n1 + 0x28, 0x400000000ull);
+    put16(n5 + 0x20, 5); put64(n5 + 0x28, 0x400030000ull);
+    /* handle 1: the laptop - name in the fallback field, short string; preferred field empty. */
+    address(laptop + 0x80, "24:B2:B9:A1:A4:68"); short_string(laptop + 0xf0, "LAPTOP-UGIVBIA5");
+    /* handle 2: another computer with a user-assigned name long enough to live out of line. */
+    address(other + 0x80, "11:22:33:44:55:66"); short_string(other + 0xf0, "DESKTOP-OTHER");
+    long_string(other + 0x118, 0x400020000ull, other_name, "Parv's Living Room Desktop PC");
+    /* handle 5: a Device whose address was never set. */
+    (void)blank;
+    peer_identity_t id; char a[18];
+    assert(peer_identify_stream(MANAGER, 1, fake_peek, &id) == PEER_OK);
+    peer_address_text(id.address, a);
+    assert(!strcmp(a, "24:B2:B9:A1:A4:68") && !strcmp(id.name, "LAPTOP-UGIVBIA5") && id.name_source == 2 && id.nodes == 2);
+    assert(peer_identify_stream(MANAGER, 2, fake_peek, &id) == PEER_OK);
+    peer_address_text(id.address, a);
+    assert(!strcmp(a, "11:22:33:44:55:66") && !strcmp(id.name, "Parv's Living Room Desktop PC") && id.name_source == 1);
+    assert(peer_identify_stream(MANAGER, 5, fake_peek, &id) == PEER_ADDRESS_IMPLAUSIBLE);
+    assert(peer_identify_stream(MANAGER, 3, fake_peek, &id) == PEER_HANDLE_ABSENT);   /* 2 -> right 5 -> left: none */
+    assert(peer_identify_stream(MANAGER, 9, fake_peek, &id) == PEER_HANDLE_ABSENT);
+    /* Unreadable memory and an absent handle are different answers. */
+    assert(peer_identify_stream(0x700000000ull, 1, fake_peek, &id) == PEER_ROOT_UNREADABLE);
+    assert(peer_identify_stream(0, 1, fake_peek, &id) == PEER_NO_MANAGER);
+    put64(n2 + 0x0, 0x380000000ull);                                 /* a left child that isn't mapped */
+    assert(peer_identify_stream(MANAGER, 1, fake_peek, &id) == PEER_NODE_UNREADABLE);
+    put64(n2 + 0x0, 0x300000000ull);                                 /* a cycle: bounded, never a hang */
+    assert(peer_identify_stream(MANAGER, 1, fake_peek, &id) == PEER_TOO_DEEP);
+    put64(n2 + 0x0, 0x300001000ull);
+    put64(mgr + 0x1f8 + 8 - 0x100, 0);
+    assert(peer_identify_stream(MANAGER, 1, fake_peek, &id) == PEER_MAP_EMPTY);
+    put64(mgr + 0x1f8 + 8 - 0x100, 0x300000000ull);
+    /* A name field holding something that isn't a name gives the address without a name. */
+    laptop[0xf0] = 0x07;
+    assert(peer_identify_stream(MANAGER, 1, fake_peek, &id) == PEER_OK && id.name_source == 0 && !id.name[0]);
+    laptop[0xf0] = 'L';
 
-    /* The connection keeps its peer one pointer deep, byte-reversed (as Bluetooth stacks often store it). */
-    memset(owner_obj, 0, sizeof owner_obj); memset(child_obj, 0, sizeof child_obj);
-    uint64_t child = CHILD; memcpy(owner_obj + 0x18, &child, 8);
-    put_address(child_obj + 0x30, "24:B2:B9:A1:A4:68", 1);
-    peer_path_t path, parsed;
-    assert(peer_scan_for_address(OWNER, fake_peek, laptop, &path));
-    assert(path.depth == 1 && path.off1 == 0x18 && path.off2 == 0x30 && path.reversed);
-    assert(peer_path_format(&path, stored, sizeof stored) && !strcmp(stored, "d1:0x18:0x30:r"));
-    assert(peer_path_parse(stored, &parsed) && !memcmp(&parsed, &path, sizeof path));   /* survives preferences */
-    assert(peer_read_path(OWNER, fake_peek, &parsed, got) && !memcmp(got, laptop, 6));
-    /* Or directly in the owner, forwards. */
-    memset(owner_obj, 0, sizeof owner_obj); put_address(owner_obj + 0x58, "24:B2:B9:A1:A4:68", 0);
-    assert(peer_scan_for_address(OWNER, fake_peek, laptop, &path) && path.depth == 0 && path.off1 == 0x58 && !path.reversed);
-    /* Not there: nothing is learned. An unreadable pointer just fails. */
-    memset(owner_obj, 0, sizeof owner_obj);
-    assert(!peer_scan_for_address(OWNER, fake_peek, laptop, &path));
-    uint64_t wild = 0x500000000ull; memcpy(owner_obj + 0x18, &wild, 8);
-    assert(!peer_read_path(OWNER, fake_peek, &parsed, got));
-    assert(!peer_path_parse("d2:0x18:0x30:r", &path) && !peer_path_parse("d1:0x19:0:f", &path) && !peer_path_parse("", &path));
-
-    /* The verified cache: iOS's pairs only; a renamed PC updates; the least recently seen goes first. */
+    /* The app's resolution: the connection's own name first; never another device's. */
     peer_cache_t cache; memset(&cache, 0, sizeof cache);
-    peer_cache_learn(&cache, laptop_uid, "LAPTOP-UGIVBIA5", 100);
-    assert(!strcmp(peer_cache_lookup(&cache, "24:b2:b9:a1:a4:68"), "LAPTOP-UGIVBIA5"));
+    assert(!strcmp(peer_resolve("24:B2:B9:A1:A4:68", "LAPTOP-UGIVBIA5", "", "", &cache), "LAPTOP-UGIVBIA5"));
+    peer_cache_learn(&cache, "24:B2:B9:A1:A4:68", "LAPTOP-UGIVBIA5", 100);
+    assert(!strcmp(peer_resolve("24:B2:B9:A1:A4:68", "", "", "", &cache), "LAPTOP-UGIVBIA5"));   /* name read failed */
+    assert(peer_resolve("11:22:33:44:55:66", "", "24:B2:B9:A1:A4:68-tacl", "LAPTOP-UGIVBIA5", &cache) == NULL);
+    assert(!strcmp(peer_resolve("11:22:33:44:55:66", "DESKTOP-OTHER", "", "", &cache), "DESKTOP-OTHER"));
+    assert(!strcmp(peer_resolve(NULL, NULL, "24:B2:B9:A1:A4:68-tacl", "LAPTOP-UGIVBIA5", &cache), "LAPTOP-UGIVBIA5"));
+    assert(peer_resolve(NULL, NULL, "", "", &cache) == NULL);
+    /* The bounded cache: a renamed PC updates; the least recently seen goes first. */
     peer_cache_learn(&cache, "24:B2:B9:A1:A4:68", "Parv's Laptop", 200);
-    assert(cache.n == 1 && !strcmp(peer_cache_lookup(&cache, laptop_uid), "Parv's Laptop"));
-    peer_cache_learn(&cache, laptop_uid, "LAPTOP-UGIVBIA5", 300);
-    for (int i = 0; i < 8; i++) { char uid[32]; snprintf(uid, sizeof uid, "10:00:00:00:00:%02X-tacl", i);
-                                  char nm[16]; snprintf(nm, sizeof nm, "PC-%d", i); peer_cache_learn(&cache, uid, nm, 400 + i); }
-    assert(cache.n == PEER_CACHE_SIZE);
-    assert(peer_cache_lookup(&cache, laptop_uid) == NULL);           /* evicted: the least recently seen */
-    assert(!strcmp(peer_cache_lookup(&cache, "10:00:00:00:00:07"), "PC-7"));
-    memset(&cache, 0, sizeof cache);
-    peer_cache_learn(&cache, laptop_uid, "LAPTOP-UGIVBIA5", 100);
-
-    /* Scenario 1/4: connected, no audio, no route capture this time - the path's address names it from the cache. */
-    assert(!strcmp(peer_resolve("24:B2:B9:A1:A4:68", "", "", &cache), "LAPTOP-UGIVBIA5"));
-    /* First connection ever: no path yet, but iOS listed the PC in a route during this connection. */
-    memset(&cache, 0, sizeof cache);
-    assert(!strcmp(peer_resolve(NULL, laptop_uid, "LAPTOP-UGIVBIA5", &cache), "LAPTOP-UGIVBIA5"));
-    assert(peer_resolve(NULL, "", "", &cache) == NULL);              /* nothing known: "Your PC" */
-    peer_cache_learn(&cache, laptop_uid, "LAPTOP-UGIVBIA5", 100);
-    /* Scenario 5: another computer at the same path - a different address. Never the laptop's name. */
-    put_address(child_obj + 0x30, "11:22:33:44:55:66", 1); memcpy(owner_obj + 0x18, &child, 8);
-    assert(peer_read_path(OWNER, fake_peek, &parsed, got)); peer_address_text(got, text);
-    assert(!strcmp(text, "11:22:33:44:55:66"));
-    assert(peer_resolve(text, "", "", &cache) == NULL);
-    /* ...even if the last connection's capture (the laptop) is still around: it is another device's. */
-    assert(peer_resolve(text, laptop_uid, "LAPTOP-UGIVBIA5", &cache) == NULL);
-    /* Its own capture names it. */
-    assert(!strcmp(peer_resolve(text, "11:22:33:44:55:66-tacl", "DESKTOP-OTHER", &cache), "DESKTOP-OTHER"));
-    /* A renamed laptop: the fresh capture wins over the cached name. */
-    assert(!strcmp(peer_resolve("24:B2:B9:A1:A4:68", laptop_uid, "Parv's Laptop", &cache), "Parv's Laptop"));
+    assert(cache.n == 1 && !strcmp(peer_cache_lookup(&cache, "24:b2:b9:a1:a4:68"), "Parv's Laptop"));
+    for (int i = 0; i < 8; i++) { char uid[32], nm[16]; snprintf(uid, sizeof uid, "10:00:00:00:00:%02X", i);
+                                  snprintf(nm, sizeof nm, "PC-%d", i); peer_cache_learn(&cache, uid, nm, 300 + i); }
+    assert(cache.n == PEER_CACHE_SIZE && peer_cache_lookup(&cache, "24:B2:B9:A1:A4:68") == NULL);
     return 0;
 }
 """
@@ -663,36 +665,67 @@ int main(void) {
                 self.assertEqual(build.returncode, 0, build.stderr)
                 ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
                 self.assertEqual(ran.returncode, 0, ran.stderr)
-        # The tweak: at CONFIGURE, from the connection's owner object; the address is cleared first and read at once.
+
+        # The layout is bluetoothd's own: decode the instructions it uses for each step and compare with PeerName.h.
+        import struct
+        binary = (ROOT / "docs/reference-binaries/ios17-iphone13/bluetoothd").read_bytes()
+        text_vm, text_file = 0x100000000, 0      # __TEXT maps from file offset 0 at 0x100000000 in this thin arm64e binary
+        def word(va):
+            return struct.unpack_from("<I", binary, text_file + va - text_vm)[0]
+        def ldr_imm(w):     # any load, unsigned offset (LDR/LDRH/LDRB/LDRSB...): (size, rt, rn, byte offset)
+            size = w >> 30
+            self.assertEqual(w & 0x3f000000, 0x39000000, hex(w))
+            self.assertNotEqual((w >> 22) & 3, 0, hex(w))                                    # a load, not a store
+            return size, w & 31, (w >> 5) & 31, ((w >> 10) & 0xfff) << size
+        def add_imm(w):     # ADD (immediate, 64-bit): (rd, rn, imm)
+            self.assertEqual(w & 0xffc00000, 0x91000000, hex(w))
+            return w & 31, (w >> 5) & 31, (w >> 10) & 0xfff
+        header = read(ROOT / "shared/PeerName.h")
+        def const(name):
+            return int(re.search(r"#define %s (0x[0-9a-f]+)u" % name, header).group(1), 16)
+        self.assertEqual(binary[:4], b"\xcf\xfa\xed\xfe")                                   # thin 64-bit Mach-O
+        self.assertEqual(word(0x10037ae68), 0xd503237f)                                      # the hooked handler
+        # The wrapper hands the handler x0 from a global, and x2 from the closure's handle.
+        self.assertEqual(ldr_imm(word(0x100386730))[3], 0xb68)                              # ldr x0, [x8, #0xb68]
+        self.assertEqual(ldr_imm(word(0x100386738))[:2] + (ldr_imm(word(0x100386738))[3],), (1, 2, 0xc))   # ldrh w2
+        # +0x3730e8: the stream map's root, the node key; +0x374ab8 (map::at): the mapped value.
+        self.assertEqual(ldr_imm(word(0x100373104))[3], const("PEER_MGR_STREAM_MAP") + const("PEER_MAP_ROOT"))
+        self.assertEqual(ldr_imm(word(0x10037311c))[::3], (1, const("PEER_NODE_KEY")))      # ldrh w11, [x9, #0x20]
+        self.assertEqual(ldr_imm(word(0x100374adc))[3], const("PEER_NODE_LEFT"))            # left: [x8, #0]
+        self.assertEqual(ldr_imm(word(0x100374af0))[3], const("PEER_NODE_RIGHT"))           # right: [x8, #8]
+        self.assertEqual(add_imm(word(0x100374afc))[2], const("PEER_NODE_VALUE"))           # add x0, x8, #0x28
+        # The handler formats device+0x80; the formatter reads six bytes and prints them %02X:...
+        self.assertEqual(add_imm(word(0x10037af4c))[1:], (28, const("PEER_DEVICE_ADDRESS")))  # add x0, x28, #0x80
+        self.assertEqual([ldr_imm(word(0x100410928 + 4 * i))[3] for i in range(6)], [0, 1, 2, 3, 4, 5])
+        fmt = binary[0x100837fc0 - text_vm:0x100837fc0 - text_vm + 30].split(b"\0")[0]
+        self.assertEqual(fmt, b"%02X:%02X:%02X:%02X:%02X:%02X")
+        # The name: device+0x118 if not empty, else device+0xf0.
+        self.assertEqual(add_imm(word(0x1003def9c))[2], const("PEER_DEVICE_NAME_PREFERRED"))
+        self.assertEqual(add_imm(word(0x1003defb4))[2], const("PEER_DEVICE_NAME_FALLBACK"))
+        self.assertEqual(ldr_imm(word(0x1003defa0))[3], const("PEER_DEVICE_NAME_PREFERRED") + 23)   # its size byte
+        log = binary.find(b"SetConfigInd setting a2dp stream handle to %d for device %{public}s")
+        self.assertGreater(log, 0)
+
+        # The tweak: at CONFIGURE, from the stream handle, before the native handler runs; reads only.
         hooks = read(ROOT / "tweak/Hooks.xm")
         config = block_until(hooks, "static uint64_t hook_setconfigind(", "\n}\n")
-        self.assertIn("AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);\n        SpeakaPeerConnected(a0);", config)
+        self.assertLess(config.index("SpeakaPeerConnected(a0,(unsigned)a2);"), config.index("return hook_setconfigind_observe("))
         peer = read(ROOT / "tweak/PeerIdentity.c")
-        connected = block_until(peer, "void SpeakaPeerConnected(uint64_t owner)", "\n}\n")
-        self.assertLess(connected.index('SpeakaSetStatus("diag.v105.peer_address", "%s", "");'),
-                        connected.index("dispatch_async_f(q, context, attempt);"))   # immediate, before any audio
-        self.assertIn("vm_read_overwrite(mach_task_self()", peer)                     # a stale pointer fails, never crashes
+        self.assertIn("vm_read_overwrite(mach_task_self()", peer)
+        self.assertIn("int st = peer_identify_stream(manager, handle, peek, &id);", peer)
+        self.assertIn('SpeakaSetStatus("diag.v105.peer_name", "%s", id.name);', peer)
+        self.assertIn('SpeakaLogNow("V105_PEER_UNRESOLVED step=%s', peer)                    # the failing step, by name
+        unresolved = peer[peer.index("} else {", peer.index("if (st == PEER_OK)")):]
+        self.assertIn('SpeakaSetStatus("diag.v105.peer_name", "%s", "");', unresolved)        # never the last PC's name
         self.assertNotIn("^{", peer)
-        attempt = block_until(peer, "static void attempt(void *context)", "\n}\n")
-        self.assertIn("if (connection != __atomic_load_n(&g_connection, __ATOMIC_ACQUIRE)) return;", attempt)
-        # Learned only from a route capture made during this connection, and forgotten if a capture ever disagrees.
-        self.assertIn("if (when >= g_configured_at && pc", peer)
-        self.assertLess(attempt.index("V105_PATH_MISMATCH"), attempt.index("peer_scan_for_address(owner, peek, captured, &learned)"))
-        self.assertIn("save_path(NULL);", attempt)
-        self.assertNotIn("MobileBluetooth.devices", peer)                              # the records lookup is gone
-        # The helper: a capture belongs to the connection it was made in.
-        helper = read(ROOT / "audiohelper/AudioHelper.m")
-        self.assertIn("if(state==AUDIO_STREAM_CONFIGURED) forget_pc_port();", helper)
-        # The app: the connection's address, the verified cache, the resolver - and the connection line shows it.
+        self.assertNotIn("peer_scan_for_address", peer + header)                             # the scan is gone
+        # The app: the connection's own name first, both verified pairs cached, and the line shows it before audio.
         client = read(ROOT / "app/Speaka/Model/SPTweakClient.m")
-        self.assertIn('NSString *connection = SPString(status[@"diag.v105.peer_address"]);', client)
-        self.assertIn("static NSString *const SPPeerCacheKey = @SPEAKA_APP_KEY_PEER_NAMES;", client)
-        self.assertIn("peer_cache_learn(&cache, captureUID.UTF8String, captureName.UTF8String,", client)
-        self.assertIn("const char *resolved = peer_resolve(connection.length ? connection.UTF8String : NULL,", client)
+        self.assertIn('NSString *connectionName = SPString(status[@"diag.v105.peer_name"]);', client)
+        self.assertIn("const char *resolved = peer_resolve(connection.length ? connection.UTF8String : NULL, connectionName.UTF8String,", client)
         model = read(MODEL)
-        self.assertIn("let peer: String? = snapshot.peerName.isEmpty ? nil : snapshot.peerName", model)
         line = block(model, "var statusLine: StatusLine? {")
-        self.assertLess(line.index("let name = peer ??"), line.index('text: "\\(who) · connected"'))   # named before audio
+        self.assertLess(line.index("let name = peer ??"), line.index('text: "\\(who) · connected"'))
 
     def test_the_pcs_name_shows_as_soon_as_it_connects(self):
         """The PC is named from iOS's Bluetooth list once it's connected, before any audio, whatever form its device class

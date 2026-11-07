@@ -77,6 +77,17 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **The PC's name, read from the connection (v9.8.95 test):** V105_PATH_NOT_FOUND every time, and the reason is now
+  established from bluetoothd's code (docs/BLUETOOTHD.md): SetConfigInd's x0 is a process-wide manager loaded from a
+  global for every connection (its dump's 58 54 55 4D is a pthread mutex signature), so searching it was the wrong
+  approach. The connection is the stream handle; the native handler resolves it through a std::map in the manager to
+  the Device that owns the stream, whose address is at +0x80 and whose name is at +0x118 (or +0xf0). The tweak now
+  repeats that lookup with reads at configuration time, before the handler and before any audio, and publishes the
+  address and the name (diag.v105.peer_address / peer_name); the app shows that name first and caches the pair. No
+  route capture, learning or output switching is needed, and another computer reads as itself. A failed read logs its
+  step (V105_PEER_UNRESOLVED step=...) and clears the name, so the app shows "Your PC", never the last PC. The scan and
+  its saved path are removed. Every offset is re-checked against bluetoothd's instructions by the tests. Unverified on
+  the device: the reads themselves (V105_PEER address=... name=... source=stream_map).
 - **The PC's name from the connection itself (v9.8.94 test):** the paired-device records were never found ("no
   paired-device records found", every connection), the route listed the PC in only 2 of 7 connections (V102_PC_ROUTE),
   and BluetoothManager stayed unavailable. When a route does list the PC, iOS gives its name and address together
