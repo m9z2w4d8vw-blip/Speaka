@@ -2159,9 +2159,12 @@ int main(void) {
 
     def test_the_daemon_checks_and_posts_as_speaka(self):
         daemon = read(ROOT / "updatecheck/UpdateCheck.m")
-        main = daemon.split("int main(int argc, char *argv[]) {", 1)[1]
+        entry = daemon.split("int main(int argc, char *argv[]) {", 1)[1]
+        main = daemon.split("static void check_releases(void) {", 1)[1].split("\n}\n", 1)[0]   # v9.9.5: the check itself
         # The switch decides before anything goes to the network (--now and --test aside).
-        self.assertLess(main.index("CFSTR(SPEAKA_KEY_UPDATE_NOTIFY)"), main.index("dataTaskWithRequest:request"))
+        self.assertLess(entry.index("if (!now && !switch_on()) return 0;"), entry.index("check_releases();"))
+        switch = daemon.split("static int switch_on(void) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(switch.index("CFPreferencesAppSynchronize"), switch.index("CFSTR(SPEAKA_KEY_UPDATE_NOTIFY)"))
         # Conditional: the ETag only with the answer it belongs to; a 304 reuses it; a 200 replaces both.
         self.assertIn("NSString *etag = cached ? string_pref(CFSTR(SPEAKA_KEY_UPDATE_ETAG)) : nil;", main)
         self.assertIn('[request setValue:etag forHTTPHeaderField:@"If-None-Match"];', main)
@@ -2208,16 +2211,22 @@ int main(void) {
         self.assertNotIn("CODESIGN_FLAGS", read(ROOT / "audiohelper/Makefile"))        # the audio helper: unchanged
         job = plistlib.loads((ROOT / "layout/Library/LaunchDaemons/com.parv.speaka.updatecheck.plist").read_bytes())
         self.assertEqual(job["Label"], "com.parv.speaka.updatecheck")
-        self.assertEqual(job["ProgramArguments"], ["/var/jb/usr/bin/SpeakaUpdateCheck"])
+        # v9.9.5: kept running (launchd's StartInterval didn't repeat on iOS: runs = 1 hours after install).
+        self.assertEqual(job["ProgramArguments"], ["/var/jb/usr/bin/SpeakaUpdateCheck", "--daemon"])
         self.assertEqual((job["UserName"], job["GroupName"]), ("mobile", "mobile"))
-        self.assertEqual(job["StartInterval"], 900)
+        self.assertNotIn("StartInterval", job)
         self.assertTrue(job["RunAtLoad"])
+        self.assertTrue(job["KeepAlive"])
+        self.assertEqual(job["ThrottleInterval"], 60)
         self.assertEqual(job["ProcessType"], "Background")
         postinst = read(ROOT / "layout/DEBIAN/postinst")
         block_ = postinst.split("updates=/var/jb/Library/LaunchDaemons/com.parv.speaka.updatecheck.plist", 1)[1].split("\n    fi\n", 1)[0]
         self.assertIn('launchctl bootstrap system "$updates" >/dev/null 2>&1 || echo', block_)
         self.assertNotIn("exit 1", block_)                                                # never fails the install
-        self.assertIn("launchctl bootout system/com.parv.speaka.updatecheck", read(ROOT / "layout/DEBIAN/prerm"))
+        for script in ("postinst", "prerm"):            # iOS keeps a mobile job in user/foreground: both names
+            text = read(ROOT / "layout/DEBIAN" / script)
+            self.assertIn("launchctl bootout system/com.parv.speaka.updatecheck", text)
+            self.assertIn("launchctl bootout user/foreground/com.parv.speaka.updatecheck", text)
         for script in ("postinst", "prerm"):
             self.assertEqual(subprocess.run(["sh", "-n", str(ROOT / "layout/DEBIAN" / script)]).returncode, 0)
         workflow = read(ROOT / ".github/workflows/build.yml")
@@ -2312,4 +2321,45 @@ class NotificationsButton(unittest.TestCase):
         column = settings.split("VStack(spacing: WindowActionButton.spacing) {", 1)[1]
         self.assertLess(column.index('title: "Credits"'), column.index('title: "Update notifications"'))
         self.assertLess(column.index('title: "Update notifications"'), column.index('"Check for Updates"'))
+
+
+class UpdateCheckDaemon(unittest.TestCase):
+    """v9.9.5: on the device launchd loaded the job (run interval = 900 seconds) but ran it once, at install, and never
+    again (runs = 1, hours later): StartInterval doesn't repeat there. So SpeakaUpdateCheck stays running under
+    KeepAlive and checks every 15 minutes by the wall clock, re-reading the switch each time."""
+
+    def daemon(self):
+        return read(ROOT / "updatecheck/UpdateCheck.m")
+
+    def test_the_loop(self):
+        source = self.daemon()
+        loop = source.split("static void run_daemon(void) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("#define CHECK_EVERY_SECONDS 900", source)
+        self.assertIn("#define WAKE_EVERY_SECONDS 60", source)
+        self.assertIn("for (;;) {", loop)
+        # By the wall clock: sleep() runs on mach time, which stops while the iPhone sleeps.
+        self.assertIn("if (on && time(NULL) >= next) {", loop)
+        self.assertIn("next = time(NULL) + CHECK_EVERY_SECONDS;", loop)
+        self.assertIn("sleep(WAKE_EVERY_SECONDS);", loop)
+        # The switch, read fresh each turn; a change is logged, and turning it on checks at once.
+        self.assertIn("int on = switch_on();", loop)
+        self.assertIn('"SWITCH off: no checks until Update notifications is turned on"', loop)
+        self.assertIn("if (on) next = 0;", loop)
+        self.assertIn("@autoreleasepool { check_releases(); }", loop)
+        entry = source.split("int main(int argc, char *argv[]) {", 1)[1]
+        self.assertIn('BOOL daemon = argc > 1 && strcmp(argv[1], "--daemon") == 0;', entry)
+        self.assertLess(entry.index("if (test) {"), entry.index("if (daemon) {"))          # --test still posts at once
+
+    def test_it_can_run_for_days(self):
+        source = self.daemon()
+        # One URL session for the process, not one per check that's never freed.
+        check = source.split("static void check_releases(void) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("static NSURLSession *session;\n    static dispatch_once_t once;", check)
+        self.assertEqual(source.count("sessionWithConfiguration:"), 1)
+        # The log is opened per line (and /tmp's folder made again), restarted past 64 KB.
+        log = source.split("static void ulog(const char *format, ...) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("mkdir(kLogDirectory, 0777);", log)
+        self.assertIn('st.st_size > 64 * 1024 ? "w" : "a"', log)
+        self.assertIn("fclose(log);", log)
+        self.assertNotIn("g_log", source)
 

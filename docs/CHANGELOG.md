@@ -9,6 +9,12 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **Update notifications arrive on their own.** On the device the checker posted as Speaka and found new releases,
+  but launchd ran it only once, at install: `runs = 1` hours later, with `run interval = 900 seconds` - StartInterval
+  doesn't repeat there. SpeakaUpdateCheck now stays running (KeepAlive) and checks every 15 minutes by the wall clock
+  (it wakes each minute it's awake, since the timers it could sleep on stop while the iPhone sleeps), re-reads the
+  switch each time, checks at once when it's turned on, and logs when it's turned off. One URL session for the
+  process, and a log opened per line, so it can run for days.
 - **Update notifications is a button**, centred like the others: a bell when off; when on, the whole button is iOS's
   system green with a checkmark. A tap toggles it, as the switch did (turning it on asks iOS for permission first).
 - **Update notifications work.** The app's background check runs only when iOS chooses (often hours apart, never

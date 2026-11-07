@@ -3,12 +3,13 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>com.parv.speaka.updatecheck</string>
   <key>ProgramArguments</key><array>
-    <string>/var/jb/usr/bin/SpeakaUpdateCheck</string>
+    <string>/var/jb/usr/bin/SpeakaUpdateCheck</string><string>--daemon</string>
   </array>
   <key>UserName</key><string>mobile</string>
   <key>GroupName</key><string>mobile</string>
-  <key>StartInterval</key><integer>900</integer>
   <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
   <key>ProcessType</key><string>Background</string>
   <key>LowPriorityIO</key><true/>
   <key>Nice</key><integer>10</integer>

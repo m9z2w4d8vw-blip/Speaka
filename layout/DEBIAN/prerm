@@ -2,5 +2,6 @@
 if [ "$1" = remove ] || [ "$1" = upgrade ] || [ "$1" = deconfigure ]; then
     launchctl bootout system/com.parv.speaka.audio >/dev/null 2>&1 || true
     launchctl bootout system/com.parv.speaka.updatecheck >/dev/null 2>&1 || true
+    launchctl bootout user/foreground/com.parv.speaka.updatecheck >/dev/null 2>&1 || true
 fi
 exit 0

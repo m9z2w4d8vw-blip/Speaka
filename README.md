@@ -111,7 +111,8 @@ restarts Bluetooth, so a running speaker stops. **Check for Updates** in Setting
 if there is one.
 
 With **Update notifications** on, a notification says when a release is ready, and tapping it opens the update.
-SpeakaUpdateCheck, a launchd job the tweak installs, checks every 15 minutes whether Speaka is running or not; the app
+SpeakaUpdateCheck, a small background checker the tweak installs (kept running by launchd), checks every 15 minutes
+by the clock whether Speaka is running or not; the app
 also checks every 2 minutes while it's open, each time it comes to the front, and when iOS lets it in the background.
 Each release is announced once, and only while iOS allows Speaka's notifications (turned off in iOS Settings, the
 switch turns off too). Checks ask GitHub conditionally, so an unchanged list doesn't count against its hourly limit.

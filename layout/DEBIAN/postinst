@@ -14,12 +14,14 @@ if [ "$1" = configure ]; then
         exit 1
     }
     # v9.9.3: Settings > Update notifications, checked every 15 minutes (SpeakaUpdateCheck). Optional: if it can't
-    # start now it starts at the next boot, and it never fails the install.
+    # start now it starts at the next boot, and it never fails the install. v9.9.5: it stays running (launchd's
+    # StartInterval didn't repeat on iOS), and iOS keeps a mobile job in user/foreground, so both names are stopped.
     updates=/var/jb/Library/LaunchDaemons/com.parv.speaka.updatecheck.plist
     if [ -f "$updates" ]; then
         chown root:wheel "$updates" || true
         chmod 644 "$updates" || true
         launchctl bootout system/com.parv.speaka.updatecheck >/dev/null 2>&1 || true
+        launchctl bootout user/foreground/com.parv.speaka.updatecheck >/dev/null 2>&1 || true
         launchctl bootstrap system "$updates" >/dev/null 2>&1 || echo 'Speaka: update checks start at the next reboot.' >&2
     fi
     # Load the newly installed tweak into bluetoothd now. Installing a package does not restart running daemons:
