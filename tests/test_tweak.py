@@ -542,7 +542,7 @@ class SinkSDPRecord(unittest.TestCase):
             self.assertEqual(name.id,0x100)
             self.assertEqual(ctypes.string_at(name.element.value,name.element.length),b'Audio Sink')
     def test_binary_signatures_if_uploaded_present(self):
-        b=pathlib.Path('/mnt/data/files/bluetoothd')
+        b=pathlib.Path(os.environ.get('BTPS_BLUETOOTHD', str(ROOT/'docs/reference-binaries/ios17-iphone13/bluetoothd')))
         if not b.exists(): self.skipTest('device binary is not committed to GitHub; verify locally')
         data=b.read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(),

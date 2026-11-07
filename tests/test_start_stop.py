@@ -186,6 +186,7 @@ static pthread_mutex_t g_stream_control_lock=PTHREAD_MUTEX_INITIALIZER;
 static int last_active=-9,changes=0;
 void AudioRelaySetActive(int active) {last_active=active;changes++;}
 static unsigned last_state=0;
+void SpeakaVolumeDisconnect(void) {}
 void AudioRelaySetStreamState(uint32_t state) {last_state=state;}   /* v9.9: what the helper is told */
 void SpeakaLogNow(const char *,...) {}
 static uint64_t speaka_since_launch_ms(void) {return 0;}
@@ -389,6 +390,8 @@ static void SpeakaSetStatus(const char *key, const char *fmt, ...) {
 }
 static void AudioRelaySetActive(int active) { set_active_calls++; last_active = active; }
 static unsigned last_stream_state = 0;
+static unsigned volume_disconnects;
+static void SpeakaVolumeDisconnect(void) { ++volume_disconnects; }
 static void AudioRelaySetStreamState(uint32_t state) { last_stream_state = state; }
 static void register_sink_after_sources(uint64_t) {   /* first power-up installs the Sink, later ones cannot */
     post_source_calls++;
@@ -404,10 +407,12 @@ int main() {
     assert(g_sink_accepted == 0 && set_active_calls == 1 && last_active == 0);
     assert(strncmp(last_sep, "LOST", 4) == 0 && strstr(last_sep, "tap Start"));
     assert(last_stream_state == AUDIO_STREAM_CLOSED);  /* v9.9: the speaker's stream is gone; the helper may let go */
+    assert(volume_disconnects == 1);
     /* Not armed: nothing is reported or changed. */
     g_sink_armed = 0; last_sep[0] = 0; set_active_calls = 0;
     hook_native_registration(0x3000);
     assert(set_active_calls == 0 && !last_sep[0]);
+    assert(volume_disconnects == 1);
     return 0;
 }
 ''', cpp=True)

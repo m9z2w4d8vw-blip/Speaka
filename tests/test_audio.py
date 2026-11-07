@@ -23,6 +23,9 @@ import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+# The extracted real render callback now uses the real portable gain backend.
+VOLUME_SUPPORT = ''.join('#include "' + str(ROOT / path) + '"\n' for path in
+                         ('shared/VolumeControl.c', 'shared/VolumeMailbox.c'))
 
 
 # ---- the ring, stream control and the decoder, run on this machine ----
@@ -263,8 +266,8 @@ int main() {
 ''', cpp=True)
 
     def test_exact_binary_gates(self):
-        path = os.environ.get("BTPS_BLUETOOTHD")
-        if not path:
+        path = os.environ.get("BTPS_BLUETOOTHD", str(ROOT / "docs/reference-binaries/ios17-iphone13/bluetoothd"))
+        if not pathlib.Path(path).exists():
             self.skipTest("Set BTPS_BLUETOOTHD to the verified iOS 17.0 device binary")
         data = pathlib.Path(path).read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(), "e9408df54c3eebfd263eb745a0b06cf1130dd3228f56c104697f92264c91dbd6")
@@ -555,6 +558,17 @@ int main(void) {
     render(&o,&o,&buffer);assert(enqueues==1);
     pthread_mutex_destroy(&o.lock);
 
+    /* Enabled volume reaches the REAL callback after dequeue. A system/decoder
+     * test double is not sufficient to catch a missed integration point. */
+    init_output(&o);SPVolumeMailbox volume={0};o.volume=&volume;
+    o.count=3;memcpy(o.pcm,expected,sizeof expected);
+    sp_volume_mailbox_set(&volume,1,64);render(&o,&o,&buffer);
+    for(unsigned i=0;i<6;i++) assert(data[i]==(int32_t)expected[i]*64/127);
+    o.read=0;o.count=3;o.priming=0;memcpy(o.pcm,expected,sizeof expected);
+    sp_volume_mailbox_set(&volume,1,0);render(&o,&o,&buffer);
+    for(unsigned i=0;i<AUDIO_FRAMES*2;i++) assert(data[i]==0);
+    pthread_mutex_destroy(&o.lock);
+
     PCMLevels level={0};
     measure_pcm(&level,expected,3);
     assert(level.samples==6 && level.nonzero==4 && level.peak==32768);
@@ -577,7 +591,7 @@ int main(void) {
         with tempfile.TemporaryDirectory() as td:
             c = pathlib.Path(td) / "render.c"
             exe = pathlib.Path(td) / "render"
-            c.write_text(harness)
+            c.write_text(VOLUME_SUPPORT + harness)
             built = subprocess.run([cc, *flags, str(c), "-o", str(exe)], capture_output=True, text=True, timeout=30)
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
             ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=10, env=env)
@@ -658,7 +672,7 @@ int main(void) {
             flags += ["-fsanitize=address,undefined","-fno-omit-frame-pointer"]
             env["ASAN_OPTIONS"]="detect_leaks=0"; env["UBSAN_OPTIONS"]="halt_on_error=1"
         with tempfile.TemporaryDirectory() as td:
-            c = pathlib.Path(td)/"jb.c"; exe = pathlib.Path(td)/"jb"; c.write_text(harness)
+            c = pathlib.Path(td)/"jb.c"; exe = pathlib.Path(td)/"jb"; c.write_text(VOLUME_SUPPORT + harness)
             built = subprocess.run([cc,*flags,str(c),"-o",str(exe)],capture_output=True,text=True,timeout=30)
             self.assertEqual(built.returncode,0,built.stdout+built.stderr)
             ran = subprocess.run([str(exe)],capture_output=True,text=True,timeout=10,env=env)
@@ -760,7 +774,7 @@ int main(void) {
         cc = shutil.which("cc"); self.assertIsNotNone(cc)
         flags = ["-std=gnu11","-O2","-Wall","-Wextra","-Werror","-pthread","-I"+str(ROOT/"audiohelper"),"-I"+str(ROOT)]
         with tempfile.TemporaryDirectory() as td:
-            c = pathlib.Path(td)/"startup.c"; exe = pathlib.Path(td)/"startup"; c.write_text(harness)
+            c = pathlib.Path(td)/"startup.c"; exe = pathlib.Path(td)/"startup"; c.write_text(VOLUME_SUPPORT + harness)
             built = subprocess.run([cc,*flags,str(c),"-o",str(exe)],capture_output=True,text=True,timeout=60)
             self.assertEqual(built.returncode,0,built.stdout+built.stderr)
             ran = subprocess.run([str(exe)],capture_output=True,text=True,timeout=60)
@@ -857,7 +871,7 @@ int main(void) {
         cc = shutil.which("cc"); self.assertIsNotNone(cc)
         flags = ["-std=gnu11","-O2","-Wall","-Wextra","-Werror","-pthread","-I"+str(ROOT/"audiohelper"),"-I"+str(ROOT)]
         with tempfile.TemporaryDirectory() as td:
-            c = pathlib.Path(td)/"lease.c"; exe = pathlib.Path(td)/"lease"; c.write_text(harness)
+            c = pathlib.Path(td)/"lease.c"; exe = pathlib.Path(td)/"lease"; c.write_text(VOLUME_SUPPORT + harness)
             built = subprocess.run([cc,*flags,str(c),"-o",str(exe)],capture_output=True,text=True,timeout=60)
             self.assertEqual(built.returncode,0,built.stdout+built.stderr)
             ran = subprocess.run([str(exe)],capture_output=True,text=True,timeout=60)
@@ -970,7 +984,7 @@ int main(void) {
         # extracted writers include hold_pcm, which a healthy resume never needs.
         flags = ["-std=gnu11","-O2","-Wall","-Wextra","-Werror","-Wno-unused-parameter","-Wno-unused-function","-pthread","-I"+str(ROOT/"audiohelper"),"-I"+str(ROOT)]
         with tempfile.TemporaryDirectory() as td:
-            c = pathlib.Path(td)/"resume.c"; exe = pathlib.Path(td)/"resume"; c.write_text(harness)
+            c = pathlib.Path(td)/"resume.c"; exe = pathlib.Path(td)/"resume"; c.write_text(VOLUME_SUPPORT + harness)
             built = subprocess.run([cc,*flags,str(c),"-o",str(exe)],capture_output=True,text=True,timeout=60)
             self.assertEqual(built.returncode,0,built.stdout+built.stderr)
             ran = subprocess.run([str(exe)],capture_output=True,text=True,timeout=60)
@@ -1635,6 +1649,7 @@ static pthread_mutex_t g_stream_control_lock=PTHREAD_MUTEX_INITIALIZER;
 static char line[256];
 void AudioRelaySetActive(int) {}
 void AudioRelaySetStreamState(uint32_t) {}
+void SpeakaVolumeDisconnect(void) {}
 void SpeakaLogNow(const char *fmt,...) {va_list ap;va_start(ap,fmt);vsnprintf(line,sizeof line,fmt,ap);va_end(ap);}
 void SpeakaSetStatus(const char *,const char *,...) {}   /* v9.6: diag.v95.peer, checked in test_v89 */
 static uint64_t speaka_since_launch_ms(void) {return 1234;}

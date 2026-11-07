@@ -77,6 +77,15 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **AVRCP absolute volume, integrated (off by default):** Astra's implementation (portable target protocol, volume
+  mailbox, post-decode PCM gain for AAC and SBC, build-gated native adapter, evidence) is applied, with corrections:
+  the AVRCP peer is bound to the A2DP device v9.8.96 identifies from the stream map (not the obsolete learned path),
+  persisted so Windows' early requests are answered; the iPhone's AVRCP Target SDP record advertises features 0x1d1 or
+  0x11 - no Category 2, where absolute volume belongs - so experimental mode adds it at registration; capability and
+  notification requests no longer wait for the helper. observe logs only; experimental answers SetAbsoluteVolume (0x50),
+  GetCapabilities with event 0x0d, RegisterNotification INTERIM/CHANGED, and sets Speaka's gain (not iOS system volume).
+  Enable with BTPSAudioHelper --volume-mode observe|experimental, then Stop/Start. Host-tested, including all 128 values
+  and sanitizers; nothing is verified on the device yet (docs/AVRCP-VOLUME.md).
 - **The PC's name, read from the connection (v9.8.95 test):** V105_PATH_NOT_FOUND every time, and the reason is now
   established from bluetoothd's code (docs/BLUETOOTHD.md): SetConfigInd's x0 is a process-wide manager loaded from a
   global for every connection (its dump's 58 54 55 4D is a pthread mutex signature), so searching it was the wrong

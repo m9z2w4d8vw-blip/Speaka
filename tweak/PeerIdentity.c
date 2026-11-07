@@ -9,6 +9,7 @@
  * through vm_read_overwrite, so a stale pointer fails instead of crashing bluetoothd, and a failure names its step. A
  * route capture later in the connection (the helper's) is compared with it, for the log. */
 #include "Tweak.h"
+#include "VolumeControl.h"
 #include "../shared/PeerName.h"
 #include "../shared/SpeakaShared.h"
 #include <CoreFoundation/CoreFoundation.h>
@@ -85,11 +86,13 @@ void SpeakaPeerConnected(uint64_t manager, unsigned handle)
         SpeakaSetStatus("diag.v105.peer_name", "%s", id.name);
         SpeakaLogNow("V105_PEER address=%s name=%s name_field=%s handle=%u nodes=%u source=stream_map", a, id.name,
                      id.name_source == 1 ? "0x118" : id.name_source == 2 ? "0xf0" : "none", handle, id.nodes);
+        SpeakaVolumeConfigure(id.address);   /* v9.9.8: AVRCP volume answers this device (VolumeControl.m) */
     } else {
         /* Nothing known about this connection: clear the last one's, so the app shows "Your PC", never the old PC. */
         SpeakaSetStatus("diag.v105.peer_address", "%s", "");
         SpeakaSetStatus("diag.v105.peer_name", "%s", "");
         SpeakaLogNow("V105_PEER_UNRESOLVED step=%s handle=%u nodes=%u", peer_status_text(st), handle, id.nodes);
+        SpeakaVolumeConfigure(NULL);
     }
     dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
     void *context = (void *)(uintptr_t)connection;

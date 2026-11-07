@@ -295,6 +295,7 @@ int stream_control_signal(StreamControl *,unsigned direction,uint64_t cid,
 extern "C" {
 #endif
 int AudioRelayPrepare(void);
+int AudioRelayIdentity(AudioRingHello *out);
 void AudioRelaySetActive(int active);
 /* v9.9: the PC's stream state (AUDIO_STREAM_*, AudioRing.h), so the helper can tell a pause (keep the output) from a
  * close. Any open state also connects the helper at once, before the stream starts, so it owns the output before

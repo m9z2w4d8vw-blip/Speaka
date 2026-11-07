@@ -1,3 +1,5 @@
+#include "../shared/VolumeControl.h"
+#include "../shared/VolumeMailbox.h"
 /* AudioHelper.m - BTPSAudioHelper: plays the audio bluetoothd hands it. launchd starts it on demand, as mobile,
  * when the tweak connects to 127.0.0.1:37594 (layout/Library/LaunchDaemons/com.parv.speaka.audio.plist).
  *
@@ -99,6 +101,7 @@ typedef struct {
     uint32_t decoded_frames; /* PCM frames decoded: the progress a paused helper reports to keep the lease */
     unsigned prime_target;   /* v9.9.4: this stream's lead (0 = PCM_PRIME); doubles after an underrun */
     unsigned trim_silence;   /* v9.9.4: a warm resume drops Windows' leading digital silence until real audio */
+    SPVolumeMailbox *volume; /* immutable pointer until AudioQueueDispose completes */
     AudioQueueRef queue;
 } Output;
 
@@ -137,6 +140,11 @@ static void render(void *context,AudioQueueRef queue,AudioQueueBufferRef buffer)
         pthread_mutex_unlock(&o->lock);
     } else why=3;
     if(__atomic_load_n(&o->stopping,__ATOMIC_ACQUIRE)) return;
+    /* Optional Speaka gain is applied AFTER SBC/AAC decode and ring dequeue.
+     * Unity does no writes. No I/O, session changes, or allocation in this callback. */
+    unsigned gain=sp_volume_mailbox_gain(o->volume);
+    sp_volume_pcm(out,take*2u,gain);
+    if(gain<127) {nonzero=0;for(unsigned i=0;i<take*2u;i++) nonzero+=out[i]!=0;}
     buffer->mAudioDataByteSize=AUDIO_FRAMES*4u;
     OSStatus e=AudioQueueEnqueueBuffer(queue,buffer,0,NULL);
     if(e) {
@@ -686,6 +694,9 @@ static void stream(int fd) {
     if(send(fd,&ack,1,0)!=1 || flags<0 || fcntl(fd,F_SETFL,flags|O_NONBLOCK)<0) {
         pthread_mutex_destroy(&o->lock);free(o);munmap(s,sizeof *s);close(file);return;
     }
+    char volume_path[256];
+    snprintf(volume_path,sizeof volume_path,AUDIO_RING_PATH_FORMAT ".volume",hello.pid,(unsigned long long)hello.token);
+    o->volume=sp_volume_mailbox_open(volume_path,hello.pid,hello.token,0);
     load_output_settings();g_last_refusal=-1;
     if(g_output_notify<0 && notify_register_check(SPEAKA_NOTIFY_OUTPUT,&g_output_notify)!=NOTIFY_STATUS_OK)
         g_output_notify=-1;
@@ -712,6 +723,7 @@ static void stream(int fd) {
     capture_pc_port([AVAudioSession sharedInstance].currentRoute,"before_activation");
     int warm=0;uint64_t healthy_since=0;   /* v9.9.4: has this connection streamed at real time yet? */
     excl_state_t excl;excl_init(&excl);uint64_t last_hint_poll=0;int hint_seen=-1;   /* v9.9.5 */
+    unsigned volume_seen=127;   /* v9.9.8: the AVRCP gain last reported as reaching the output */
     input_rate_t input;input_rate_reset(&input,helper_ms(),(int)(__atomic_load_n(&s->generation,__ATOMIC_ACQUIRE)&1u));
     uint64_t other_quiet_since=0,last_poll=0;   /* v9.9.2: the other app's audio stopping clears an interruption */
     PCMLevels level={0};
@@ -756,6 +768,16 @@ static void stream(int fd) {
             if(n==0 || (n<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)) break;
             __atomic_fetch_add(&s->helper_heartbeat,1,__ATOMIC_RELEASE);
             uint64_t now=helper_ms();
+            if(o->volume) {
+                __atomic_store_n(&o->volume->heartbeat_ms,sp_volume_now_ms(),__ATOMIC_RELEASE);
+                /* v9.9.8: the gain the render callback now applies to every decoded buffer (AAC and SBC alike). */
+                unsigned gain=sp_volume_mailbox_gain(o->volume);
+                if(gain!=volume_seen) {
+                    hlog(stdout,"V106_VOLUME gain=%u/127 (%u%%) output=%s\n",gain,(gain*100u+63u)/127u,
+                         o->queue&&!o->paused?"playing":"idle");
+                    volume_seen=gain;
+                }
+            }
             /* Every path below keeps own.running equal to "a queue is running"; this only guards against a miss. */
             if((!o->queue || o->paused) && own.running) own_start_failed(&own,now,0);
             else if(o->queue && !o->paused && !own.running) own_started(&own,now);
@@ -1000,7 +1022,9 @@ static void stream(int fd) {
     [[NSNotificationCenter defaultCenter] removeObserver:observer];
     [[NSNotificationCenter defaultCenter] removeObserver:route_observer];
     [[NSNotificationCenter defaultCenter] removeObserver:reset_observer];
-    stop_output(o,s,"ipc_closed",1);codec_decoder_end(&decoder);pthread_mutex_destroy(&o->lock);free(o);
+    stop_output(o,s,"ipc_closed",1);codec_decoder_end(&decoder);
+    if(o->volume) __atomic_store_n(&o->volume->heartbeat_ms,0,__ATOMIC_RELEASE);
+    sp_volume_mailbox_close(o->volume);pthread_mutex_destroy(&o->lock);free(o);
     publish_status(@"stopped",@"Bluetooth speaker session ended",YES);
     munmap(s,sizeof *s);close(file);
 }
@@ -1025,11 +1049,37 @@ static int stream_service_main(void) {
 
 int main(int argc, const char **argv) {
     @autoreleasepool {
+        if(argc==3 && strcmp(argv[1],"--volume-mode")==0) {
+            if(strcmp(argv[2],"off") && strcmp(argv[2],"observe") && strcmp(argv[2],"experimental")) return 2;
+            CFStringRef mode=CFStringCreateWithCString(NULL,argv[2],kCFStringEncodingUTF8);
+            if(!mode) return 1;
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),mode,CFSTR(SPEAKA_PREFS_DOMAIN));
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_REQUEST),NULL,CFSTR(SPEAKA_PREFS_DOMAIN));
+            CFRelease(mode);
+            if(!CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN))) return 1;
+            hlog(stdout,"AVRCP volume mode saved: %s; tap Stop then Start in Speaka to apply\n",argv[2]);
+            return 0;
+        }
+        /* Local Speaka gain for the opt-in experiment. This does not set iOS system volume. */
+        if(argc==3 && strcmp(argv[1],"--volume")==0) {
+            char *end=NULL;long value=strtol(argv[2],&end,10);
+            if(!argv[2][0] || !end || *end || value<0 || value>127) return 2;
+            CFPropertyListRef mode=CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_VOLUME_MODE),CFSTR(SPEAKA_PREFS_DOMAIN));
+            int enabled=mode && CFGetTypeID(mode)==CFStringGetTypeID() && CFEqual(mode,CFSTR("experimental"));if(mode) CFRelease(mode);
+            if(!enabled) {hlog(stderr,"AVRCP volume experiment is not enabled for this user\n");return 2;}
+            NSDictionary *request=@{@"value":@(value),@"time":@(CFAbsoluteTimeGetCurrent())};
+            CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_REQUEST),(__bridge CFPropertyListRef)request,CFSTR(SPEAKA_PREFS_DOMAIN));
+            if(!CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN))) return 1;
+            hlog(stdout,"Local volume request submitted: %ld/127; check AVRCP_VOLUME local accepted= in daemon log\n",value);
+            return 0;
+        }
         if (argc == 2 && strcmp(argv[1], "--stream-service") == 0) return stream_service_main();
         /* A diagnostic, run by hand over SSH: decodes an embedded AAC fixture through the real decoder (AACSelfTest.c).
          * It touches nothing else - no ring, no preferences, no audio output. */
         if (argc >= 2 && strcmp(argv[1], "--aac-selftest") == 0) return aac_selftest_main(argc, argv);
         hlog(stderr, "usage: BTPSAudioHelper --stream-service (launchd starts it: com.parv.speaka.audio)\n"
+                     "       BTPSAudioHelper --volume-mode off|observe|experimental (run as mobile; restart Speaka)\n"
+                     "       BTPSAudioHelper --volume 0..127 (experimental Speaka gain, not iOS system volume)\n"
                      "       BTPSAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=NAME|all]\n");   /* timestamped, as every line is */
         return 2;
     }

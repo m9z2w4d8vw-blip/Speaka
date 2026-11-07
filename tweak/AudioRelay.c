@@ -293,6 +293,11 @@ static void *worker(void *arg) {
     }
     return NULL;
 }
+/* Read the already-created audio identity; volume never starts the helper itself. */
+int AudioRelayIdentity(AudioRingHello *out) {
+    if(!out || !__atomic_load_n(&g_shared,__ATOMIC_ACQUIRE)) return 0;
+    *out=g_hello;return 1;
+}
 int AudioRelayPrepare(void) {
     if(g_shared) return 1;
     uint64_t token; arc4random_buf(&token,sizeof token);

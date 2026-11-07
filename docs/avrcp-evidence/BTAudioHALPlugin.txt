@@ -1,0 +1,458 @@
+BTAudioHALPlugin SHA-256 5194ccb2c0168bb7a5b70ee039024b194a5497b66dc5fc8fa72e21cb8ede1f68 UUID 22d918ef-8f6e-3c25-80b6-2306d4c12560
+All addresses are unslid VAs. Labels are descriptive; no live hook validation.
+
+
+IDENTIFICATION: Send scalar-volume property via XPC LC_FUNCTION_STARTS: 0xfd34 .. 0xfe3c
+Direct branch/call sites: 0xc88c, 0x1984c, 0x2d8a4, 0x2dad8, 0x2dd94, 0x32740, 0x34f94
+Chained-fixup pointers: 
+FUNCTION 0xfd34  end 0xfe3c
+0000000fd34: 7f2303d5 pacibsp                                                  
+0000000fd38: ff8301d1 sub       sp, sp, #0x60                                  
+0000000fd3c: e923036d stp       d9, d8, [sp, #0x30]                            
+0000000fd40: f44f04a9 stp       x20, x19, [sp, #0x40]                          
+0000000fd44: fd7b05a9 stp       x29, x30, [sp, #0x50]                          
+0000000fd48: fd430191 add       x29, sp, #0x50                                 
+0000000fd4c: 0840201e fmov      s8, s0                                         
+0000000fd50: f30300aa mov       x19, x0                                        
+0000000fd54: 1f2003d5 nop                                                      
+0000000fd58: 085f3658 ldr       x8, #0x7c938                                   ___stack_chk_guard
+0000000fd5c: 080140f9 ldr       x8, [x8]                                       
+0000000fd60: e81700f9 str       x8, [sp, #0x28]                                
+0000000fd64: 1f2003d5 nop                                                      
+0000000fd68: d4744058 ldr       x20, #0x90c00                                  ref 0x90c00
+0000000fd6c: e00314aa mov       x0, x20                                        
+0000000fd70: 41008052 mov       w1, #2                                         
+0000000fd74: 9b480194 bl        #0x61fe0                                       _os_log_type_enabled
+0000000fd78: 08c1221e fcvt      d8, s8                                         
+0000000fd7c: 20040037 tbnz      w0, #0, #0xfe00                                
+0000000fd80: e8652b50 adr       x8, #0x66a3e                                   'kBTAudioMsgPropertyVolumeScalar'
+0000000fd84: 1f2003d5 nop                                                      
+0000000fd88: e80b00f9 str       x8, [sp, #0x10]                                
+0000000fd8c: 0041601e fmov      d0, d8                                         
+0000000fd90: b4490194 bl        #0x62460                                       _xpc_double_create
+0000000fd94: e00700f9 str       x0, [sp, #8]                                   
+0000000fd98: e0430091 add       x0, sp, #0x10                                  
+0000000fd9c: e1230091 add       x1, sp, #8                                     
+0000000fda0: 22008052 mov       w2, #1                                         
+0000000fda4: 8f490194 bl        #0x623e0                                       _xpc_dictionary_create
+0000000fda8: 000100b4 cbz       x0, #0xfdc8                                    
+0000000fdac: f40300aa mov       x20, x0                                        
+0000000fdb0: e00313aa mov       x0, x19                                        
+0000000fdb4: 61008052 mov       w1, #3                                         
+0000000fdb8: e20314aa mov       x2, x20                                        
+0000000fdbc: 93feff97 bl        #0xf808                                        ref 0xf808
+0000000fdc0: e00314aa mov       x0, x20                                        
+0000000fdc4: bb490194 bl        #0x624b0                                       _xpc_release
+0000000fdc8: e00740f9 ldr       x0, [sp, #8]                                   
+0000000fdcc: 400000b4 cbz       x0, #0xfdd4                                    
+0000000fdd0: b8490194 bl        #0x624b0                                       _xpc_release
+0000000fdd4: e81740f9 ldr       x8, [sp, #0x28]                                
+0000000fdd8: 1f2003d5 nop                                                      
+0000000fddc: e95a3658 ldr       x9, #0x7c938                                   ___stack_chk_guard
+0000000fde0: 290140f9 ldr       x9, [x9]                                       
+0000000fde4: 3f0108eb cmp       x9, x8                                         
+0000000fde8: 81020054 b.ne      #0xfe38                                        
+0000000fdec: fd7b45a9 ldp       x29, x30, [sp, #0x50]                          
+0000000fdf0: f44f44a9 ldp       x20, x19, [sp, #0x40]                          
+0000000fdf4: e923436d ldp       d9, d8, [sp, #0x30]                            
+0000000fdf8: ff830191 add       sp, sp, #0x60                                  
+0000000fdfc: ff0f5fd6 retab                                                    
+0000000fe00: 08208052 mov       w8, #0x100                                     
+0000000fe04: 0800a172 movk      w8, #0x800, lsl #16                            
+0000000fe08: e81300b9 str       w8, [sp, #0x10]                                
+0000000fe0c: e84301fc stur      d8, [sp, #0x14]                                
+0000000fe10: 800ff810 adr       x0, #0                                         ref 0x0
+0000000fe14: 1f2003d5 nop                                                      
+0000000fe18: 43ff2d10 adr       x3, #0x6be00                                   'Send XPC volume changed to %f'
+0000000fe1c: 1f2003d5 nop                                                      
+0000000fe20: e4430091 add       x4, sp, #0x10                                  
+0000000fe24: e10314aa mov       x1, x20                                        
+0000000fe28: 42008052 mov       w2, #2                                         
+0000000fe2c: 85018052 mov       w5, #0xc                                       
+0000000fe30: f4460194 bl        #0x61a00                                       __os_log_debug_impl
+0000000fe34: d3ffff17 b         #0xfd80                                        ref 0xfd80
+0000000fe38: ea460194 bl        #0x619e0                                       ___stack_chk_fail
+
+IDENTIFICATION: Audio XPC envelope and xpc_connection_send_message LC_FUNCTION_STARTS: 0xf808 .. 0xf92c
+Direct branch/call sites: 0xf7b0, 0xf964, 0xf988, 0xf9dc, 0xfa58, 0xfb38, 0xfc00, 0xfcb4, 0xfdbc, 0xfea0, 0xff50, 0x1004c, 0x10148, 0x1023c, 0x102e4, 0x1038c, 0x10434, 0x104fc, 0x105d8, 0x107b0, 0x1099c, 0x10a90, 0x10b6c, 0x10c48, 0x10d24, 0x10e70, 0x10fac, 0x11090, 0x1114c, 0x111f4
+Chained-fixup pointers: 
+FUNCTION 0xf808  end 0xf92c
+0000000f808: 7f2303d5 pacibsp                                                  
+0000000f80c: ffc301d1 sub       sp, sp, #0x70                                  
+0000000f810: f65704a9 stp       x22, x21, [sp, #0x40]                          
+0000000f814: f44f05a9 stp       x20, x19, [sp, #0x50]                          
+0000000f818: fd7b06a9 stp       x29, x30, [sp, #0x60]                          
+0000000f81c: fd830191 add       x29, sp, #0x60                                 
+0000000f820: f40302aa mov       x20, x2                                        
+0000000f824: f60301aa mov       x22, x1                                        
+0000000f828: f50300aa mov       x21, x0                                        
+0000000f82c: 1f2003d5 nop                                                      
+0000000f830: 48883658 ldr       x8, #0x7c938                                   ___stack_chk_guard
+0000000f834: 080140f9 ldr       x8, [x8]                                       
+0000000f838: a8831df8 stur      x8, [x29, #-0x28]                              
+0000000f83c: 1f2003d5 nop                                                      
+0000000f840: 1f2003d5 nop                                                      
+0000000f844: 20e64058 ldr       x0, #0x91508                                   ref 0x91508
+0000000f848: c7a20094 bl        #0x38364                                       ref 0x38364
+0000000f84c: 600400b4 cbz       x0, #0xf8d8                                    
+0000000f850: f30300aa mov       x19, x0                                        
+0000000f854: a8143710 adr       x8, #0x7dae8                                   ->'kBTAudioMsgId'
+0000000f858: 1f2003d5 nop                                                      
+0000000f85c: 0001c03d ldr       q0, [x8]                                       ->'kBTAudioMsgId'
+0000000f860: e00b803d str       q0, [sp, #0x20]                                
+0000000f864: 080940f9 ldr       x8, [x8, #0x10]                                ->'kBTAudioMsgArgs'
+0000000f868: e81b00f9 str       x8, [sp, #0x30]                                
+0000000f86c: e003162a mov       w0, w22                                        
+0000000f870: 084b0194 bl        #0x62490                                       _xpc_int64_create
+0000000f874: e00700f9 str       x0, [sp, #8]                                   
+0000000f878: a00240f9 ldr       x0, [x21]                                      
+0000000f87c: 394b0194 bl        #0x62560                                       objc:UTF8String / _objc_msgSend
+0000000f880: 144b0194 bl        #0x624d0                                       _xpc_string_create
+0000000f884: e05301a9 stp       x0, x20, [sp, #0x10]                           
+0000000f888: 9f0200f1 cmp       x20, #0                                        
+0000000f88c: 48008052 mov       w8, #2                                         
+0000000f890: 0205889a cinc      x2, x8, ne                                     
+0000000f894: e0830091 add       x0, sp, #0x20                                  
+0000000f898: e1230091 add       x1, sp, #8                                     
+0000000f89c: d14a0194 bl        #0x623e0                                       _xpc_dictionary_create
+0000000f8a0: e00000b4 cbz       x0, #0xf8bc                                    
+0000000f8a4: f40300aa mov       x20, x0                                        
+0000000f8a8: e00313aa mov       x0, x19                                        
+0000000f8ac: e10314aa mov       x1, x20                                        
+0000000f8b0: bc4a0194 bl        #0x623a0                                       _xpc_connection_send_message
+0000000f8b4: e00314aa mov       x0, x20                                        
+0000000f8b8: fe4a0194 bl        #0x624b0                                       _xpc_release
+0000000f8bc: e00b40f9 ldr       x0, [sp, #0x10]                                
+0000000f8c0: 400000b4 cbz       x0, #0xf8c8                                    
+0000000f8c4: fb4a0194 bl        #0x624b0                                       _xpc_release
+0000000f8c8: e00740f9 ldr       x0, [sp, #8]                                   
+0000000f8cc: 200100b4 cbz       x0, #0xf8f0                                    
+0000000f8d0: f84a0194 bl        #0x624b0                                       _xpc_release
+0000000f8d4: 07000014 b         #0xf8f0                                        ref 0xf8f0
+0000000f8d8: 1f2003d5 nop                                                      
+0000000f8dc: 33994058 ldr       x19, #0x90c00                                  ref 0x90c00
+0000000f8e0: e00313aa mov       x0, x19                                        
+0000000f8e4: 01028052 mov       w1, #0x10                                      
+0000000f8e8: be490194 bl        #0x61fe0                                       _os_log_type_enabled
+0000000f8ec: 80010035 cbnz      w0, #0xf91c                                    
+0000000f8f0: a8835df8 ldur      x8, [x29, #-0x28]                              
+0000000f8f4: 1f2003d5 nop                                                      
+0000000f8f8: 09823658 ldr       x9, #0x7c938                                   ___stack_chk_guard
+0000000f8fc: 290140f9 ldr       x9, [x9]                                       
+0000000f900: 3f0108eb cmp       x9, x8                                         
+0000000f904: 21010054 b.ne      #0xf928                                        
+0000000f908: fd7b46a9 ldp       x29, x30, [sp, #0x60]                          
+0000000f90c: f44f45a9 ldp       x20, x19, [sp, #0x50]                          
+0000000f910: f65744a9 ldp       x22, x21, [sp, #0x40]                          
+0000000f914: ffc30191 add       sp, sp, #0x70                                  
+0000000f918: ff0f5fd6 retab                                                    
+0000000f91c: e00313aa mov       x0, x19                                        
+0000000f920: d8250194 bl        #0x59080                                       ref 0x59080
+0000000f924: f3ffff17 b         #0xf8f0                                        ref 0xf8f0
+0000000f928: 2e480194 bl        #0x619e0                                       ___stack_chk_fail
+
+IDENTIFICATION: Native audio property dispatcher LC_FUNCTION_STARTS: 0x6550 .. 0x7624
+Direct branch/call sites: 0x2412c, 0x2591c
+Chained-fixup pointers: 
+FUNCTION 0x6550  end 0x65d4
+00000006550: 7f2303d5 pacibsp                                                  
+00000006554: ff4301d1 sub       sp, sp, #0x50                                  
+00000006558: f65702a9 stp       x22, x21, [sp, #0x20]                          
+0000000655c: f44f03a9 stp       x20, x19, [sp, #0x30]                          
+00000006560: fd7b04a9 stp       x29, x30, [sp, #0x40]                          
+00000006564: fd030191 add       x29, sp, #0x40                                 
+00000006568: f40302aa mov       x20, x2                                        
+0000000656c: f50301aa mov       x21, x1                                        
+00000006570: f30300aa mov       x19, x0                                        
+00000006574: 1f2003d5 nop                                                      
+00000006578: 081e3b58 ldr       x8, #0x7c938                                   ___stack_chk_guard
+0000000657c: 080140f9 ldr       x8, [x8]                                       
+00000006580: e80f00f9 str       x8, [sp, #0x18]                                
+00000006584: c1253050 adr       x1, #0x66a3e                                   'kBTAudioMsgPropertyVolumeScalar'
+00000006588: 1f2003d5 nop                                                      
+0000000658c: e00315aa mov       x0, x21                                        
+00000006590: 106f0194 bl        #0x621d0                                       _strcmp
+00000006594: 40160034 cbz       w0, #0x685c                                    
+00000006598: 413b3010 adr       x1, #0x66d00                                   'kBTAudioMsgPropertyInputVolumeScalar'
+0000000659c: 1f2003d5 nop                                                      
+000000065a0: e00315aa mov       x0, x21                                        
+000000065a4: 0b6f0194 bl        #0x621d0                                       _strcmp
+000000065a8: 40190034 cbz       w0, #0x68d0                                    
+000000065ac: c13b3030 adr       x1, #0x66d25                                   'kBTAudioMsgPropertyLatency'
+000000065b0: 1f2003d5 nop                                                      
+000000065b4: e00315aa mov       x0, x21                                        
+000000065b8: 066f0194 bl        #0x621d0                                       _strcmp
+000000065bc: 401c0034 cbz       w0, #0x6944                                    
+000000065c0: 01203050 adr       x1, #0x669c2                                   'kBTAudioMsgPropertyVolumeIsAbsolute'
+000000065c4: 1f2003d5 nop                                                      
+000000065c8: e00315aa mov       x0, x21                                        
+000000065cc: 016f0194 bl        #0x621d0                                       _strcmp
+000000065d0: 801e0034 cbz       w0, #0x69a0                                    
+FUNCTION 0x685c  end 0x68d0
+0000000685c: e00314aa mov       x0, x20                                        
+00000006860: 046f0194 bl        #0x62470                                       _xpc_double_get_value
+00000006864: 700240f9 ldr       x16, [x19]                                     
+00000006868: f10313aa mov       x17, x19                                       
+0000000686c: b18feff2 movk      x17, #0x7c7d, lsl #48                          
+00000006870: 301ac1da autda     x16, x17                                       
+00000006874: 112a80d2 mov       x17, #0x150                                    
+00000006878: 1002118b add       x16, x16, x17                                  
+0000000687c: 010240f9 ldr       x1, [x16]                                      
+00000006880: e80f40f9 ldr       x8, [sp, #0x18]                                
+00000006884: 1f2003d5 nop                                                      
+00000006888: 89053b58 ldr       x9, #0x7c938                                   ___stack_chk_guard
+0000000688c: 290140f9 ldr       x9, [x9]                                       
+00000006890: 3f0108eb cmp       x9, x8                                         
+00000006894: 616c0054 b.ne      #0x7620                                        
+00000006898: e20310aa mov       x2, x16                                        
+0000000689c: 0040621e fcvt      s0, d0                                         
+000000068a0: e00313aa mov       x0, x19                                        
+000000068a4: fd7b44a9 ldp       x29, x30, [sp, #0x40]                          
+000000068a8: f44f43a9 ldp       x20, x19, [sp, #0x30]                          
+000000068ac: f65742a9 ldp       x22, x21, [sp, #0x20]                          
+000000068b0: ff430191 add       sp, sp, #0x50                                  
+000000068b4: ff2303d5 autibsp                                                  
+000000068b8: d0071eca eor       x16, x30, x30, lsl #1                          
+000000068bc: 5000f0b6 tbz       x16, #0x3e, #0x68c4                            
+000000068c0: 208e38d4 brk       #0xc471                                        
+000000068c4: f00302aa mov       x16, x2                                        
+000000068c8: d01feff2 movk      x16, #0x78fe, lsl #48                          
+000000068cc: 30081fd7 braa      x1, x16                                        
+FUNCTION 0x69a0  end 0x6a10
+000000069a0: e00314aa mov       x0, x20                                        
+000000069a4: 736e0194 bl        #0x62370                                       _xpc_bool_get_value
+000000069a8: f40300aa mov       x20, x0                                        
+000000069ac: 1f2003d5 nop                                                      
+000000069b0: 950a4058 ldr       x21, #0x86b00                                  ref 0x86b00
+000000069b4: e00315aa mov       x0, x21                                        
+000000069b8: 41008052 mov       w1, #2                                         
+000000069bc: 896d0194 bl        #0x61fe0                                       _os_log_type_enabled
+000000069c0: c01b0035 cbnz      w0, #0x6d38                                    
+000000069c4: 700240f9 ldr       x16, [x19]                                     
+000000069c8: f10313aa mov       x17, x19                                       
+000000069cc: b18feff2 movk      x17, #0x7c7d, lsl #48                          
+000000069d0: 301ac1da autda     x16, x17                                       
+000000069d4: 118a80d2 mov       x17, #0x450                                    
+000000069d8: 1002118b add       x16, x16, x17                                  
+000000069dc: 080240f9 ldr       x8, [x16]                                      
+000000069e0: e90310aa mov       x9, x16                                        
+000000069e4: e00313aa mov       x0, x19                                        
+000000069e8: e10314aa mov       x1, x20                                        
+000000069ec: f10309aa mov       x17, x9                                        
+000000069f0: 5135fbf2 movk      x17, #0xd9aa, lsl #48                          
+000000069f4: 11093fd7 blraa     x8, x17                                        
+000000069f8: 54240034 cbz       w20, #0x6e80                                   
+000000069fc: 700240f9 ldr       x16, [x19]                                     
+00000006a00: f10313aa mov       x17, x19                                       
+00000006a04: b18feff2 movk      x17, #0x7c7d, lsl #48                          
+00000006a08: 301ac1da autda     x16, x17                                       
+00000006a0c: 113d80d2 mov       x17, #0x1e8                                    
+
+IDENTIFICATION: A2DP incoming native device volume LC_FUNCTION_STARTS: 0x2ff70 .. 0x3018c
+Direct branch/call sites: 
+Chained-fixup pointers: 0x7e890
+FUNCTION 0x2ff70  end 0x3018c
+0000002ff70: 7f2303d5 pacibsp                                                  
+0000002ff74: ff8301d1 sub       sp, sp, #0x60                                  
+0000002ff78: e923026d stp       d9, d8, [sp, #0x20]                            
+0000002ff7c: f65703a9 stp       x22, x21, [sp, #0x30]                          
+0000002ff80: f44f04a9 stp       x20, x19, [sp, #0x40]                          
+0000002ff84: fd7b05a9 stp       x29, x30, [sp, #0x50]                          
+0000002ff88: fd430191 add       x29, sp, #0x50                                 
+0000002ff8c: 0840201e fmov      s8, s0                                         
+0000002ff90: f30300aa mov       x19, x0                                        
+0000002ff94: 1f2003d5 nop                                                      
+0000002ff98: 084d2658 ldr       x8, #0x7c938                                   ___stack_chk_guard
+0000002ff9c: 080140f9 ldr       x8, [x8]                                       
+0000002ffa0: e80f00f9 str       x8, [sp, #0x18]                                
+0000002ffa4: 08b040f9 ldr       x8, [x0, #0x160]                               
+0000002ffa8: 08f551f9 ldr       x8, [x8, #0x23e8]                              
+0000002ffac: 09e94339 ldrb      w9, [x8, #0xfa]                                
+0000002ffb0: e9000034 cbz       w9, #0x2ffcc                                   
+0000002ffb4: 09ed4339 ldrb      w9, [x8, #0xfb]                                
+0000002ffb8: a9000034 cbz       w9, #0x2ffcc                                   
+0000002ffbc: 08f14339 ldrb      w8, [x8, #0xfc]                                
+0000002ffc0: 1f010071 cmp       w8, #0                                         
+0000002ffc4: f5079f1a cset      w21, ne                                        
+0000002ffc8: 02000014 b         #0x2ffd0                                       ref 0x2ffd0
+0000002ffcc: 15008052 mov       w21, #0                                        
+0000002ffd0: 1f2003d5 nop                                                      
+0000002ffd4: f46c3058 ldr       x20, #0x90d70                                  ref 0x90d70
+0000002ffd8: e00314aa mov       x0, x20                                        
+0000002ffdc: 01008052 mov       w1, #0                                         
+0000002ffe0: 00c80094 bl        #0x61fe0                                       _os_log_type_enabled
+0000002ffe4: 80020034 cbz       w0, #0x30034                                   
+0000002ffe8: 09c1221e fcvt      d9, s8                                         
+0000002ffec: e00313aa mov       x0, x19                                        
+0000002fff0: 1052ff97 bl        #0x4830                                        ref 0x4830
+0000002fff4: 48408052 mov       w8, #0x202                                     
+0000002fff8: 0800a172 movk      w8, #0x800, lsl #16                            
+0000002fffc: e80300b9 str       w8, [sp]                                       
+00000030000: e94300fc stur      d9, [sp, #4]                                   
+00000030004: 48088152 mov       w8, #0x842                                     
+00000030008: e81b0079 strh      w8, [sp, #0xc]                                 
+0000003000c: e0e300f8 stur      x0, [sp, #0xe]                                 
+00000030010: 80ffe710 adr       x0, #0                                         ref 0x0
+00000030014: 1f2003d5 nop                                                      
+00000030018: a34a2030 adr       x3, #0x7096d                                   'A2DP : Volume received from bluetoothd: volume %f Device %{public}@'
+0000003001c: 1f2003d5 nop                                                      
+00000030020: e4030091 mov       x4, sp                                         
+00000030024: e10314aa mov       x1, x20                                        
+00000030028: 02008052 mov       w2, #0                                         
+0000003002c: c5028052 mov       w5, #0x16                                      
+00000030030: 80c60094 bl        #0x61a30                                       __os_log_impl
+00000030034: 35020034 cbz       w21, #0x30078                                  
+00000030038: 700240f9 ldr       x16, [x19]                                     
+0000003003c: f50313aa mov       x21, x19                                       
+00000030040: b58feff2 movk      x21, #0x7c7d, lsl #48                          
+00000030044: f10313aa mov       x17, x19                                       
+00000030048: b18feff2 movk      x17, #0x7c7d, lsl #48                          
+0000003004c: 301ac1da autda     x16, x17                                       
+00000030050: 118f80d2 mov       x17, #0x478                                    
+00000030054: 1002118b add       x16, x16, x17                                  
+00000030058: 080240f9 ldr       x8, [x16]                                      
+0000003005c: e90310aa mov       x9, x16                                        
+00000030060: e00313aa mov       x0, x19                                        
+00000030064: 0041201e fmov      s0, s8                                         
+00000030068: f10309aa mov       x17, x9                                        
+0000003006c: 7106f1f2 movk      x17, #0x8833, lsl #48                          
+00000030070: 11093fd7 blraa     x8, x17                                        
+00000030074: 1d000014 b         #0x300e8                                       ref 0x300e8
+00000030078: 6c870094 bl        #0x51e28                                       ref 0x51e28
+0000003007c: 0821201e fcmp      s8, #0.0                                       
+00000030080: 40010054 b.eq      #0x300a8                                       
+00000030084: 20010034 cbz       w0, #0x300a8                                   
+00000030088: 60b240f9 ldr       x0, [x19, #0x160]                              
+0000003008c: 08f451f9 ldr       x8, [x0, #0x23e8]                              
+00000030090: 099940b9 ldr       w9, [x8, #0x98]                                
+00000030094: a9000034 cbz       w9, #0x300a8                                   
+00000030098: 1f9900b9 str       wzr, [x8, #0x98]                               
+0000003009c: a18c8e52 mov       w1, #0x7465                                    
+000000300a0: a1aead72 movk      w1, #0x6d75, lsl #16                           
+000000300a4: b3700094 bl        #0x4c370                                       ref 0x4c370
+000000300a8: 700240f9 ldr       x16, [x19]                                     
+000000300ac: f50313aa mov       x21, x19                                       
+000000300b0: b58feff2 movk      x21, #0x7c7d, lsl #48                          
+000000300b4: f10313aa mov       x17, x19                                       
+000000300b8: b18feff2 movk      x17, #0x7c7d, lsl #48                          
+000000300bc: 301ac1da autda     x16, x17                                       
+000000300c0: 113980d2 mov       x17, #0x1c8                                    
+000000300c4: 1002118b add       x16, x16, x17                                  
+000000300c8: 080240f9 ldr       x8, [x16]                                      
+000000300cc: e90310aa mov       x9, x16                                        
+000000300d0: e00313aa mov       x0, x19                                        
+000000300d4: 0041201e fmov      s0, s8                                         
+000000300d8: 21008052 mov       w1, #1                                         
+000000300dc: f10309aa mov       x17, x9                                        
+000000300e0: 3174f8f2 movk      x17, #0xc3a1, lsl #48                          
+000000300e4: 11093fd7 blraa     x8, x17                                        
+000000300e8: 700240f9 ldr       x16, [x19]                                     
+000000300ec: b01ac1da autda     x16, x21                                       
+000000300f0: 112480d2 mov       x17, #0x120                                    
+000000300f4: 1002118b add       x16, x16, x17                                  
+000000300f8: 080240f9 ldr       x8, [x16]                                      
+000000300fc: e90310aa mov       x9, x16                                        
+00000030100: e00313aa mov       x0, x19                                        
+00000030104: f10309aa mov       x17, x9                                        
+00000030108: 31e3e4f2 movk      x17, #0x2719, lsl #48                          
+0000003010c: 11093fd7 blraa     x8, x17                                        
+00000030110: 40020034 cbz       w0, #0x30158                                   
+00000030114: b69f3010 adr       x22, #0x91508                                  ref 0x91508
+00000030118: 1f2003d5 nop                                                      
+0000003011c: d40240f9 ldr       x20, [x22]                                     ref 0x91508
+00000030120: 700240f9 ldr       x16, [x19]                                     
+00000030124: b01ac1da autda     x16, x21                                       
+00000030128: 080e41f8 ldr       x8, [x16, #0x10]!                              
+0000003012c: e90310aa mov       x9, x16                                        
+00000030130: e00313aa mov       x0, x19                                        
+00000030134: f10309aa mov       x17, x9                                        
+00000030138: 717ae7f2 movk      x17, #0x3bd3, lsl #48                          
+0000003013c: 11093fd7 blraa     x8, x17                                        
+00000030140: e10300aa mov       x1, x0                                         
+00000030144: e00314aa mov       x0, x20                                        
+00000030148: 262f0094 bl        #0x3bde0                                       ref 0x3bde0
+0000003014c: 60000034 cbz       w0, #0x30158                                   
+00000030150: c00240f9 ldr       x0, [x22]                                      
+00000030154: cb2e0094 bl        #0x3bc80                                       ref 0x3bc80
+00000030158: e80f40f9 ldr       x8, [sp, #0x18]                                
+0000003015c: 1f2003d5 nop                                                      
+00000030160: c93e2658 ldr       x9, #0x7c938                                   ___stack_chk_guard
+00000030164: 290140f9 ldr       x9, [x9]                                       
+00000030168: 3f0108eb cmp       x9, x8                                         
+0000003016c: e1000054 b.ne      #0x30188                                       
+00000030170: fd7b45a9 ldp       x29, x30, [sp, #0x50]                          
+00000030174: f44f44a9 ldp       x20, x19, [sp, #0x40]                          
+00000030178: f65743a9 ldp       x22, x21, [sp, #0x30]                          
+0000003017c: e923426d ldp       d9, d8, [sp, #0x20]                            
+00000030180: ff830191 add       sp, sp, #0x60                                  
+00000030184: ff0f5fd6 retab                                                    
+00000030188: 16c60094 bl        #0x619e0                                       ___stack_chk_fail
+
+IDENTIFICATION: A2DP outgoing volume update LC_FUNCTION_STARTS: 0x2d7d8 .. 0x2d8d8
+Direct branch/call sites: 
+Chained-fixup pointers: 0x7eb80
+FUNCTION 0x2d7d8  end 0x2d8d8
+0000002d7d8: 7f2303d5 pacibsp                                                  
+0000002d7dc: ff4301d1 sub       sp, sp, #0x50                                  
+0000002d7e0: f65702a9 stp       x22, x21, [sp, #0x20]                          
+0000002d7e4: f44f03a9 stp       x20, x19, [sp, #0x30]                          
+0000002d7e8: fd7b04a9 stp       x29, x30, [sp, #0x40]                          
+0000002d7ec: fd030191 add       x29, sp, #0x40                                 
+0000002d7f0: f30300aa mov       x19, x0                                        
+0000002d7f4: 1f2003d5 nop                                                      
+0000002d7f8: 088a2758 ldr       x8, #0x7c938                                   ___stack_chk_guard
+0000002d7fc: 080140f9 ldr       x8, [x8]                                       
+0000002d800: e80f00f9 str       x8, [sp, #0x18]                                
+0000002d804: 100040f9 ldr       x16, [x0]                                      
+0000002d808: f10300aa mov       x17, x0                                        
+0000002d80c: b18feff2 movk      x17, #0x7c7d, lsl #48                          
+0000002d810: 301ac1da autda     x16, x17                                       
+0000002d814: 119a80d2 mov       x17, #0x4d0                                    
+0000002d818: 1002118b add       x16, x16, x17                                  
+0000002d81c: 080240f9 ldr       x8, [x16]                                      
+0000002d820: e90310aa mov       x9, x16                                        
+0000002d824: f10309aa mov       x17, x9                                        
+0000002d828: f146eef2 movk      x17, #0x7237, lsl #48                          
+0000002d82c: 11093fd7 blraa     x8, x17                                        
+0000002d830: c0030034 cbz       w0, #0x2d8a8                                   
+0000002d834: 68624539 ldrb      w8, [x19, #0x158]                              
+0000002d838: 88030034 cbz       w8, #0x2d8a8                                   
+0000002d83c: 755640f9 ldr       x21, [x19, #0xa8]                              
+0000002d840: 550300b4 cbz       x21, #0x2d8a8                                  
+0000002d844: 1f2003d5 nop                                                      
+0000002d848: 54a93158 ldr       x20, #0x90d70                                  ref 0x90d70
+0000002d84c: e00314aa mov       x0, x20                                        
+0000002d850: 01008052 mov       w1, #0                                         
+0000002d854: e3d10094 bl        #0x61fe0                                       _os_log_type_enabled
+0000002d858: 20020034 cbz       w0, #0x2d89c                                   
+0000002d85c: 607241bd ldr       s0, [x19, #0x170]                              
+0000002d860: 00c0221e fcvt      d0, s0                                         
+0000002d864: 08208052 mov       w8, #0x100                                     
+0000002d868: 0800a172 movk      w8, #0x800, lsl #16                            
+0000002d86c: e80300b9 str       w8, [sp]                                       
+0000002d870: e04300fc stur      d0, [sp, #4]                                   
+0000002d874: 603ce910 adr       x0, #0                                         ref 0x0
+0000002d878: 1f2003d5 nop                                                      
+0000002d87c: e34d2170 adr       x3, #0x7023b                                   'A2DPAudioDevice: volume update back to headphone %f'
+0000002d880: 1f2003d5 nop                                                      
+0000002d884: e4030091 mov       x4, sp                                         
+0000002d888: e10314aa mov       x1, x20                                        
+0000002d88c: 02008052 mov       w2, #0                                         
+0000002d890: 85018052 mov       w5, #0xc                                       
+0000002d894: 67d00094 bl        #0x61a30                                       __os_log_impl
+0000002d898: 755640f9 ldr       x21, [x19, #0xa8]                              
+0000002d89c: 607241bd ldr       s0, [x19, #0x170]                              
+0000002d8a0: e00315aa mov       x0, x21                                        
+0000002d8a4: 2489ff97 bl        #0xfd34                                        ref 0xfd34
+0000002d8a8: e80f40f9 ldr       x8, [sp, #0x18]                                
+0000002d8ac: 1f2003d5 nop                                                      
+0000002d8b0: 49842758 ldr       x9, #0x7c938                                   ___stack_chk_guard
+0000002d8b4: 290140f9 ldr       x9, [x9]                                       
+0000002d8b8: 3f0108eb cmp       x9, x8                                         
+0000002d8bc: c1000054 b.ne      #0x2d8d4                                       
+0000002d8c0: fd7b44a9 ldp       x29, x30, [sp, #0x40]                          
+0000002d8c4: f44f43a9 ldp       x20, x19, [sp, #0x30]                          
+0000002d8c8: f65742a9 ldp       x22, x21, [sp, #0x20]                          
+0000002d8cc: ff430191 add       sp, sp, #0x50                                  
+0000002d8d0: ff0f5fd6 retab                                                    
+0000002d8d4: 43d00094 bl        #0x619e0                                       ___stack_chk_fail

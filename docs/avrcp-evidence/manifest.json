@@ -1,0 +1,263 @@
+{
+  "tools": {
+    "lief": "1.0.0-d05b3499b",
+    "capstone": "5.0.7"
+  },
+  "binaries": {
+    "BTAudioHALPlugin": {
+      "sha256": "5194ccb2c0168bb7a5b70ee039024b194a5497b66dc5fc8fa72e21cb8ede1f68",
+      "size": 612784,
+      "uuid": "22d918ef-8f6e-3c25-80b6-2306d4c12560",
+      "image_base": "0x0",
+      "functions": [
+        {
+          "label": "Send scalar-volume property via XPC",
+          "entry": "0xfd34",
+          "end": "0xfe3c",
+          "first_32_bytes": "7f2303d5ff8301d1e923036df44f04a9fd7b05a9fd4301910840201ef30300aa",
+          "sha256": "ef496069cf11abc66ef3828f55bc2ae4253cdaf7177f8c83cb84fcbd9fd12491"
+        },
+        {
+          "label": "Audio XPC envelope and xpc_connection_send_message",
+          "entry": "0xf808",
+          "end": "0xf92c",
+          "first_32_bytes": "7f2303d5ffc301d1f65704a9f44f05a9fd7b06a9fd830191f40302aaf60301aa",
+          "sha256": "fc56784a715d46ce17827a4aba292a5b1ffe1a788219aadfeb5788a46046ccdc"
+        },
+        {
+          "label": "Native audio property dispatcher",
+          "entry": "0x6550",
+          "end": "0x7624",
+          "first_32_bytes": "7f2303d5ff4301d1f65702a9f44f03a9fd7b04a9fd030191f40302aaf50301aa",
+          "sha256": "36fb6bb8242d2b9e41ff03d1453f0d526084cd786758d5de75bd731fe5f66fb6"
+        },
+        {
+          "label": "A2DP incoming native device volume",
+          "entry": "0x2ff70",
+          "end": "0x3018c",
+          "first_32_bytes": "7f2303d5ff8301d1e923026df65703a9f44f04a9fd7b05a9fd4301910840201e",
+          "sha256": "de547cbdd501add8a035673e4f695ea901a9eff36a7f4e925017410c359c2b3d"
+        },
+        {
+          "label": "A2DP outgoing volume update",
+          "entry": "0x2d7d8",
+          "end": "0x2d8d8",
+          "first_32_bytes": "7f2303d5ff4301d1f65702a9f44f03a9fd7b04a9fd030191f30300aa1f2003d5",
+          "sha256": "a11f5ed57288886f57b2127c1db72c96a4408dbd2a09f7e0c495bdf9ea47f995"
+        }
+      ]
+    },
+    "bluetoothd": {
+      "sha256": "e9408df54c3eebfd263eb745a0b06cf1130dd3228f56c104697f92264c91dbd6",
+      "size": 10196720,
+      "uuid": "5491ba47-b5ae-3d44-9536-b30161df1e90",
+      "image_base": "0x100000000",
+      "functions": [
+        {
+          "label": "Register AVRCP target/controller callbacks",
+          "entry": "0x10054f5c0",
+          "end": "0x10054f780",
+          "first_32_bytes": "7f2303d5ffc300d1f44f01a9fd7b02a9fd830091f30300aaff230039e0230091",
+          "sha256": "19b909826a0dd8e4cbfaa66d629d9e080d599ecd70bfa436f4582bd3a311ea76"
+        },
+        {
+          "label": "Target registration / callback structure copy",
+          "entry": "0x1000e1a98",
+          "end": "0x1000e1d9c",
+          "first_32_bytes": "7f2303d5ffc302d1f85f07a9f65708a9f44f09a9fd7b0aa9fd83029168450090",
+          "sha256": "b09e324cdda07b623b2fd1b55f9390ddb0ec11b306cb375d3a955abd94b7cd1d"
+        },
+        {
+          "label": "Target vendor command parser and dispatcher (includes inlined UnmarshalCommand)",
+          "entry": "0x1000e0ff4",
+          "end": "0x1000e18a0",
+          "first_32_bytes": "7f2303d5fc6fbaa9fa6701a9f85f02a9f65703a9f44f04a9fd7b05a9fd430191",
+          "sha256": "028057d1bfc04872e9ebcd187ac5250c75e2dcda4e169a7a55bbda8dc6861438"
+        },
+        {
+          "label": "Target GetCapabilities",
+          "entry": "0x100551cf4",
+          "end": "0x100551ef8",
+          "first_32_bytes": "7f2303d5ff4302d1fa6704a9f85f05a9f65706a9f44f07a9fd7b08a9fd030291",
+          "sha256": "37f03b46959c14d344c3685a2e695de5cb18c6e195b8f9a1554e20c83d6e9f69"
+        },
+        {
+          "label": "Target RegisterNotification",
+          "entry": "0x100552cf8",
+          "end": "0x10055337c",
+          "first_32_bytes": "7f2303d5ffc302d1fa6706a9f85f07a9f65708a9f44f09a9fd7b0aa9fd830291",
+          "sha256": "9ca94149640f92033b197f9bc2ad569068fd91a632b475a1d008df784c612667"
+        },
+        {
+          "label": "Target notification callback thunk",
+          "entry": "0x10055b940",
+          "end": "0x10055b9bc",
+          "first_32_bytes": "7f2303d5f657bda9f44f01a9fd7b02a9fd830091f30302aaf40301aaf50300aa",
+          "sha256": "d82c88287525ae08fb6d45a2e3cce31004b24b756c4b57979e1322658fd8b36e"
+        },
+        {
+          "label": "Simple metadata response builder",
+          "entry": "0x1000decac",
+          "end": "0x1000dee0c",
+          "first_32_bytes": "7f2303d5ff4301d1f44f03a9fd7b04a9fd030191c8410090089541f9080140f9",
+          "sha256": "f015971b2786e2c49a1e40757144d5f95d84b6ca5e83fc2b88ee57ba49416079"
+        },
+        {
+          "label": "Target AV/C response entry",
+          "entry": "0x1000e28e4",
+          "end": "0x1000e293c",
+          "first_32_bytes": "7f2303d5fd7bbfa9fd030091484500f01f2003d508714bb948010034600100b4",
+          "sha256": "2385f14339ffce4c4fec65917e092d5ca6205d1913cdfc27fe5b1b76bfa5f19d"
+        },
+        {
+          "label": "Common AV/C serializer and AVCTP send",
+          "entry": "0x1000dd580",
+          "end": "0x1000dd79c",
+          "first_32_bytes": "7f2303d5f85fbca9f65701a9f44f02a9fd7b03a9fdc30091884500901f2003d5",
+          "sha256": "35d289f12bcc44ff376745cd736d5fa1a17c830df9e1dca18431c852021008f9"
+        },
+        {
+          "label": "Controller SetAbsoluteVolume command builder",
+          "entry": "0x100093fe0",
+          "end": "0x100094094",
+          "first_32_bytes": "7f2303d5ff0301d1fd7b03a9fdc30091084400f0089541f9080140f9a8831ff8",
+          "sha256": "0caf853c7286d567c8704e31e0786fab1f8cc6d3a440856760170fd2ade4ce92"
+        },
+        {
+          "label": "Controller scalar-to-wire-volume setter",
+          "entry": "0x100559fcc",
+          "end": "0x10055a3d8",
+          "first_32_bytes": "7f2303d5ff8304d1e9230c6dfa670da9f85f0ea9f6570fa9f44f10a9fd7b11a9",
+          "sha256": "255f78be365ca7844cec612425c77b749d20fc155b7d8846797727a71423e81d"
+        },
+        {
+          "label": "Controller RegisterNotification command builder",
+          "entry": "0x1000ddc64",
+          "end": "0x1000ddcb0",
+          "first_32_bytes": "7f2303d5ffc300d1fd7b02a9fd83009100e4006fe00300ad000100b4e10000b4",
+          "sha256": "dd6ff6b6566b52a7879df1e0b3a82ecbd7be4cae23e0de701a4d2e8a1f48b716"
+        },
+        {
+          "label": "OI_AVRCPController_UnmarshalMetaResponse (assertion identification)",
+          "entry": "0x1000ddef8",
+          "end": "0x1000dec34",
+          "first_32_bytes": "7f2303d5ffc301d1fc6f01a9fa6702a9f85f03a9f65704a9f44f05a9fd7b06a9",
+          "sha256": "c036a63bd94db3d046077da3b7e3cd2c0b808826ca54559b282c3884478bac73"
+        },
+        {
+          "label": "Controller metadata response handler",
+          "entry": "0x1005593e4",
+          "end": "0x100559e80",
+          "first_32_bytes": "7f2303d5fc6fbaa9fa6701a9f85f02a9f65703a9f44f04a9fd7b05a9fd430191",
+          "sha256": "5b0187ff0d2ca8db11671660cdd0ecbfc4edf60d602f5a9f02294e5c0516d637"
+        },
+        {
+          "label": "Remote-volume bridge toward native audio device",
+          "entry": "0x10037ec98",
+          "end": "0x10037edac",
+          "first_32_bytes": "7f2303d5ff8301d1e923026df65703a9f44f04a9fd7b05a9fd430191f30302aa",
+          "sha256": "7758f4af5fd4e7e37bcf0d45914c9eb6853ac6fd3b80861e6751651a1f55f309"
+        },
+        {
+          "label": "Audio volumeDidUpdate schedules controller send",
+          "entry": "0x100380fe8",
+          "end": "0x1003810dc",
+          "first_32_bytes": "7f2303d5ffc301d1e923046df44f05a9fd7b06a9fd8301910840201ef40301aa",
+          "sha256": "d245a94dfd6c8534e060141c28ee21ac31aa34b7ca0de5f933e2d068122fb6d8"
+        },
+        {
+          "label": "Scheduled audio-volume send block",
+          "entry": "0x1003810dc",
+          "end": "0x100381218",
+          "first_32_bytes": "7f2303d5ff4301d1f65702a9f44f03a9fd7b04a9fd030191f30300aaa82c00b0",
+          "sha256": "4b39b0068d0f9536010a99516695bed7a0a7618e2238edb1e4d4716e7b4aba5c"
+        },
+        {
+          "label": "Native audio volume-property wrapper",
+          "entry": "0x10026f1b8",
+          "end": "0x10026f1c4",
+          "first_32_bytes": "812d00f021b42d91b90200147f2303d5ff0301d1f44f02a9fd7b03a9fdc30091",
+          "sha256": "9e0f931bfd77d8bc6e5ff04435eaf256258e56797a5bee2c872f48cba67dfa96"
+        },
+        {
+          "label": "Native float property conversion and notification",
+          "entry": "0x10026fca4",
+          "end": "0x10026fd20",
+          "first_32_bytes": "7f2303d5ff0301d1f65701a9f44f02a9fd7b03a9fdc30091f30301aaf40300aa",
+          "sha256": "a40f996dd8cddc3c54c143d2e39c3585a8b66d059d78dfe603d243a919834bc8"
+        },
+        {
+          "label": "Connection teardown callback thunk (ABI candidate)",
+          "entry": "0x10055b2f4",
+          "end": "0x10055b360",
+          "first_32_bytes": "7f2303d5f44fbea9fd7b01a9fd430091f30301aaf40300aaa820009008e547f9",
+          "sha256": "7b2fc494876e39f4ce365f1d636bb5e48040adc5cc4d38764f3d04cb8981138b"
+        },
+        {
+          "label": "Connection teardown removes registered per-peer state",
+          "entry": "0x100550eb0",
+          "end": "0x100551148",
+          "first_32_bytes": "7f2303d5ffc301d1f85f03a9f65704a9f44f05a9fd7b06a9fd830191f30302aa",
+          "sha256": "3c6fc31d084962a38387836ddda2c8399a9cf6f01a82517ae26bfd828bd6beac"
+        },
+        {
+          "label": "Native stack mutex lock",
+          "entry": "0x1000a042c",
+          "end": "0x1000a0528",
+          "first_32_bytes": "7f2303d5f44fbea9fd7b01a9fd430091a0460090000027912ff11a9446f11a94",
+          "sha256": "ecd6702df40ff122ee065a169f6774558ec2ba124df66b4e3970b0c2ee288d4e"
+        },
+        {
+          "label": "Native stack mutex unlock",
+          "entry": "0x1000a0528",
+          "end": "0x1000a0578",
+          "first_32_bytes": "7f2303d5f44fbea9fd7b01a9fd43009167be0394f30300aaa046009000002791",
+          "sha256": "7a2b3c48b734b0548dc5d69b7ab3fbc2e7241727d8f7e6b09b58716e3272a1cf"
+        },
+        {
+          "label": "Stack lock RAII constructor",
+          "entry": "0x100247c10",
+          "end": "0x100247c40",
+          "first_32_bytes": "7f2303d5f44fbea9fd7b01a9fd430091f30300aa28008052080000390062f997",
+          "sha256": "0a02f43ab3908b5518d40592751dd392bbbf840ceaa0cd21caf51d2ccc5b9359"
+        },
+        {
+          "label": "Stack lock RAII destructor",
+          "entry": "0x100247c48",
+          "end": "0x100247c7c",
+          "first_32_bytes": "7f2303d5f44fbea9fd7b01a9fd430091f30300aa08004039680000347f020039",
+          "sha256": "0307d736c627899603a809f5d853be5c454066fb82862f787ed0c0e5a68423c5"
+        },
+        {
+          "label": "BD_ADDR formatter establishes byte order",
+          "entry": "0x1004108f8",
+          "end": "0x10041099c",
+          "first_32_bytes": "7f2303d5ffc301d1f44f05a9fd7b06a9fd830191f30308aa282800d0089541f9",
+          "sha256": "48bf227da62ca1878a82550d688e4d7da5584e45a1bc801319627594918186d8"
+        }
+      ]
+    },
+    "BTAvrcp": {
+      "sha256": "4bd97270734de51a461fd787aac6b76b574df656c5c234817b8bbd8bdb1bfa61",
+      "size": 174800,
+      "uuid": "fffba70c-3450-3fd2-8fa9-86c70c83dd99",
+      "image_base": "0x100000000",
+      "functions": [
+        {
+          "label": "handleMsg: Objective-C method / XPC dispatcher",
+          "entry": "0x1000071c8",
+          "end": "0x1000072e0",
+          "first_32_bytes": "7f2303d5ff0302d1f85f04a9f65705a9f44f06a9fd7b07a9fdc30191f40300aa",
+          "sha256": "5620e3f78c0d7b34b685e480fb2d28f51acac012c864022b2b14b0f193cce4a3"
+        },
+        {
+          "label": "handleRegisterForChangesMsg:replyBlock: Objective-C method",
+          "entry": "0x100005f14",
+          "end": "0x100005f80",
+          "first_32_bytes": "7f2303d5ffc300d1f44f01a9fd7b02a9fd830091f30300aae52a0094e00700f9",
+          "sha256": "abce38558c5dedd6a6dbd9d4e16d132c200bdf6e7cdaeec1f1418a2bec7fc4be"
+        }
+      ]
+    }
+  }
+}

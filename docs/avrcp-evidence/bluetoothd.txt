@@ -1,0 +1,1189 @@
+bluetoothd SHA-256 e9408df54c3eebfd263eb745a0b06cf1130dd3228f56c104697f92264c91dbd6 UUID 5491ba47-b5ae-3d44-9536-b30161df1e90
+All addresses are unslid VAs. Labels are descriptive; no live hook validation.
+
+
+IDENTIFICATION: Register AVRCP target/controller callbacks LC_FUNCTION_STARTS: 0x10054f5c0 .. 0x10054f780
+Direct branch/call sites: 
+Chained-fixup pointers: 0x100936c40
+FUNCTION 0x10054f65c  end 0x10054f674
+0010054f65c: 201f00f0 adrp      x0, #0x100936000                               
+0010054f660: 00802791 add       x0, x0, #0x9e0                                 ref 0x1009369e0
+0010054f664: 231f00f0 adrp      x3, #0x100936000                               
+0010054f668: 63202891 add       x3, x3, #0xa08                                 ref 0x100936a08
+0010054f66c: 020080d2 mov       x2, #0                                         
+0010054f670: 0a49ee97 bl        #0x1000e1a98                                   ref 0x1000e1a98
+
+IDENTIFICATION: Target registration / callback structure copy LC_FUNCTION_STARTS: 0x1000e1a98 .. 0x1000e1d9c
+Direct branch/call sites: 0x10054f670
+Chained-fixup pointers: 
+FUNCTION 0x1000e1b34  end 0x1000e1bd0
+001000e1b34: f60302aa mov       x22, x2                                        
+001000e1b38: f50301aa mov       x21, x1                                        
+001000e1b3c: 00038052 mov       w0, #0x18                                      
+001000e1b40: 5721ff97 bl        #0x1000aa09c                                   ref 0x1000aa09c
+001000e1b44: e80240f9 ldr       x8, [x23]                                      
+001000e1b48: 000d00f9 str       x0, [x8, #0x18]                                
+001000e1b4c: 200500b4 cbz       x0, #0x1000e1bf0                               
+001000e1b50: 08654139 ldrb      w8, [x8, #0x59]                                
+001000e1b54: 00e97bd3 lsl       x0, x8, #5                                     
+001000e1b58: 5121ff97 bl        #0x1000aa09c                                   ref 0x1000aa09c
+001000e1b5c: e80300aa mov       x8, x0                                         
+001000e1b60: e90240f9 ldr       x9, [x23]                                      
+001000e1b64: 200d40f9 ldr       x0, [x9, #0x18]                                
+001000e1b68: 080400f9 str       x8, [x0, #8]                                   
+001000e1b6c: 680400b4 cbz       x8, #0x1000e1bf8                               
+001000e1b70: 330900f9 str       x19, [x9, #0x10]                               
+001000e1b74: 50110010 adr       x16, #0x1000e1d9c                              ref 0x1000e1d9c
+001000e1b78: 1f2003d5 nop                                                      
+001000e1b7c: f023c1da paciza    x16                                            
+001000e1b80: 301500f9 str       x16, [x9, #0x28]                               
+001000e1b84: f0300010 adr       x16, #0x1000e21a0                              ref 0x1000e21a0
+001000e1b88: 1f2003d5 nop                                                      
+001000e1b8c: f023c1da paciza    x16                                            
+001000e1b90: 301d00f9 str       x16, [x9, #0x38]                               
+001000e1b94: 01100091 add       x1, x0, #4                                     
+001000e1b98: c04100b0 adrp      x0, #0x10091a000                               
+001000e1b9c: 00603a91 add       x0, x0, #0xe98                                 ref 0x10091ae98
+001000e1ba0: a7500294 bl        #0x100175e3c                                   ref 0x100175e3c
+001000e1ba4: 00030034 cbz       w0, #0x1000e1c04                               
+001000e1ba8: f30300aa mov       x19, x0                                        
+001000e1bac: 40008052 mov       w0, #2                                         
+001000e1bb0: 81008052 mov       w1, #4                                         
+001000e1bb4: 5e520494 bl        #0x1001f652c                                   ref 0x1001f652c
+001000e1bb8: 600d0034 cbz       w0, #0x1000e1d64                               
+001000e1bbc: f30300f9 str       x19, [sp]                                      
+001000e1bc0: 403800b0 adrp      x0, #0x1007ea000                               
+001000e1bc4: 009c0191 add       x0, x0, #0x67                                  'OI_BIPSRV_RegisterAVRCPImagingResponder failed with status %!'
+001000e1bc8: 5b520494 bl        #0x1001f6534                                   ref 0x1001f6534
+001000e1bcc: 80008052 mov       w0, #4                                         
+
+IDENTIFICATION: Target vendor command parser and dispatcher (includes inlined UnmarshalCommand) LC_FUNCTION_STARTS: 0x1000e0ff4 .. 0x1000e18a0
+Direct branch/call sites: 0x1000e2a34
+Chained-fixup pointers: 
+FUNCTION 0x1000e0ff4  end 0x1000e1108
+001000e0ff4: 7f2303d5 pacibsp                                                  
+001000e0ff8: fc6fbaa9 stp       x28, x27, [sp, #-0x60]!                        
+001000e0ffc: fa6701a9 stp       x26, x25, [sp, #0x10]                          
+001000e1000: f85f02a9 stp       x24, x23, [sp, #0x20]                          
+001000e1004: f65703a9 stp       x22, x21, [sp, #0x30]                          
+001000e1008: f44f04a9 stp       x20, x19, [sp, #0x40]                          
+001000e100c: fd7b05a9 stp       x29, x30, [sp, #0x50]                          
+001000e1010: fd430191 add       x29, sp, #0x50                                 
+001000e1014: ffc308d1 sub       sp, sp, #0x230                                 
+001000e1018: f50302aa mov       x21, x2                                        
+001000e101c: f30301aa mov       x19, x1                                        
+001000e1020: f40300aa mov       x20, x0                                        
+001000e1024: 00e4006f movi      v0.2d, #0000000000000000                       
+001000e1028: a0033cad stp       q0, q0, [x29, #-0x80]                          
+001000e102c: e0030fad stp       q0, q0, [sp, #0x1e0]                           
+001000e1030: e0030ead stp       q0, q0, [sp, #0x1c0]                           
+001000e1034: e0030dad stp       q0, q0, [sp, #0x1a0]                           
+001000e1038: e0030cad stp       q0, q0, [sp, #0x180]                           
+001000e103c: e0030bad stp       q0, q0, [sp, #0x160]                           
+001000e1040: e0030aad stp       q0, q0, [sp, #0x140]                           
+001000e1044: e00309ad stp       q0, q0, [sp, #0x120]                           
+001000e1048: e00308ad stp       q0, q0, [sp, #0x100]                           
+001000e104c: e00307ad stp       q0, q0, [sp, #0xe0]                            
+001000e1050: e00306ad stp       q0, q0, [sp, #0xc0]                            
+001000e1054: e00305ad stp       q0, q0, [sp, #0xa0]                            
+001000e1058: e00304ad stp       q0, q0, [sp, #0x80]                            
+001000e105c: e00303ad stp       q0, q0, [sp, #0x60]                            
+001000e1060: e00302ad stp       q0, q0, [sp, #0x40]                            
+001000e1064: e00301ad stp       q0, q0, [sp, #0x20]                            
+001000e1068: e00300ad stp       q0, q0, [sp]                                   
+001000e106c: 200600b4 cbz       x0, #0x1000e1130                               
+001000e1070: 550600b4 cbz       x21, #0x1000e1138                              
+001000e1074: 5a450090 adrp      x26, #0x100989000                              
+001000e1078: 5a231891 add       x26, x26, #0x608                               ref 0x100989608
+001000e107c: 480340f9 ldr       x8, [x26]                                      ref 0x100989608
+001000e1080: 080940f9 ldr       x8, [x8, #0x10]                                
+001000e1084: 190940f9 ldr       x25, [x8, #0x10]                               
+001000e1088: b90000b5 cbnz      x25, #0x1000e109c                              
+001000e108c: 88550494 bl        #0x1001f66ac                                   ref 0x1001f66ac
+001000e1090: 480340f9 ldr       x8, [x26]                                      
+001000e1094: 080940f9 ldr       x8, [x8, #0x10]                                
+001000e1098: 190940f9 ldr       x25, [x8, #0x10]                               
+001000e109c: a80e4039 ldrb      w8, [x21, #3]                                  
+001000e10a0: 1ff10171 cmp       w8, #0x7c                                      
+001000e10a4: 01020054 b.ne      #0x1000e10e4                                   
+001000e10a8: a90640f9 ldr       x9, [x21, #8]                                  
+001000e10ac: 28014039 ldrb      w8, [x9]                                       
+001000e10b0: 0a190012 and       w10, w8, #0x7f                                 
+001000e10b4: 5ff90171 cmp       w10, #0x7e                                     
+001000e10b8: 81000054 b.ne      #0x1000e10c8                                   
+001000e10bc: aa224079 ldrh      w10, [x21, #0x10]                              
+001000e10c0: 5f1d0071 cmp       w10, #7                                        
+001000e10c4: e2030054 b.hs      #0x1000e1140                                   
+001000e10c8: 02008052 mov       w2, #0                                         
+001000e10cc: 03008052 mov       w3, #0                                         
+001000e10d0: 44018052 mov       w4, #0xa                                       
+001000e10d4: e00314aa mov       x0, x20                                        
+001000e10d8: e10313aa mov       x1, x19                                        
+001000e10dc: a0ffff97 bl        #0x1000e0f5c                                   ref 0x1000e0f5c
+001000e10e0: 54010014 b         #0x1000e1630                                   ref 0x1000e1630
+001000e10e4: e00314aa mov       x0, x20                                        
+001000e10e8: 01008052 mov       w1, #0                                         
+001000e10ec: f7edff97 bl        #0x1000dc8c8                                   ref 0x1000dc8c8
+001000e10f0: 402900b4 cbz       x0, #0x1000e1618                               
+001000e10f4: f60300aa mov       x22, x0                                        
+001000e10f8: bb0640f9 ldr       x27, [x21, #8]                                 
+001000e10fc: fb0300b4 cbz       x27, #0x1000e1178                              
+001000e1100: bc224079 ldrh      w28, [x21, #0x10]                              
+001000e1104: dc030034 cbz       w28, #0x1000e117c                              
+FUNCTION 0x1000e127c  end 0x1000e12c8
+001000e127c: 09008052 mov       w9, #0                                         
+001000e1280: 680f4039 ldrb      w8, [x27, #3]                                  
+001000e1284: a8031838 sturb     w8, [x29, #-0x80]                              
+001000e1288: 8a130051 sub       w10, w28, #4                                   
+001000e128c: 97008052 mov       w23, #4                                        
+001000e1290: eb0e0011 add       w11, w23, #3                                   
+001000e1294: 5f090071 cmp       w10, #2                                        
+001000e1298: 6cc1971a csel      w12, w11, w23, gt                              
+001000e129c: 979d8152 mov       w23, #0xcec                                    
+001000e12a0: 09f70737 tbnz      w9, #0, #0x1000e1180                           
+001000e12a4: 5f0d0071 cmp       w10, #3                                        
+001000e12a8: cbf6ff54 b.lt      #0x1000e1180                                   
+001000e12ac: 092b8352 mov       w9, #0x1958                                    
+001000e12b0: 1f03096b cmp       w24, w9                                        
+001000e12b4: 61f6ff54 b.ne      #0x1000e1180                                   
+001000e12b8: 379d8152 mov       w23, #0xce9                                    
+001000e12bc: 1fc10071 cmp       w8, #0x30                                      
+001000e12c0: 8c040054 b.gt      #0x1000e1350                                   
+001000e12c4: 10410051 sub       w16, w8, #0x10                                 
+FUNCTION 0x1000e1310  end 0x1000e1398
+001000e1310: 1f3d0171 cmp       w8, #0x4f                                      
+001000e1314: 6c030054 b.gt      #0x1000e1380                                   
+001000e1318: 1ffd0071 cmp       w8, #0x3f                                      
+001000e131c: 2c090054 b.gt      #0x1000e1440                                   
+001000e1320: 1fc10071 cmp       w8, #0x30                                      
+001000e1324: a0140054 b.eq      #0x1000e15b8                                   
+001000e1328: 1fc50071 cmp       w8, #0x31                                      
+001000e132c: 81170054 b.ne      #0x1000e161c                                   
+001000e1330: 282f40f9 ldr       x8, [x25, #0x58]                               
+001000e1334: 681a00b4 cbz       x8, #0x1000e1680                               
+001000e1338: a2835838 ldurb     w2, [x29, #-0x78]                              
+001000e133c: a3c358b8 ldur      w3, [x29, #-0x74]                              
+001000e1340: e00314aa mov       x0, x20                                        
+001000e1344: e10313aa mov       x1, x19                                        
+001000e1348: 1f093fd6 blraaz    x8                                             
+001000e134c: b9000014 b         #0x1000e1630                                   ref 0x1000e1630
+001000e1350: 1f7d0171 cmp       w8, #0x5f                                      
+001000e1354: ac020054 b.gt      #0x1000e13a8                                   
+001000e1358: 09010151 sub       w9, w8, #0x40                                  
+001000e135c: 3f090071 cmp       w9, #2                                         
+001000e1360: 63060054 b.lo      #0x1000e142c                                   
+001000e1364: 1fc50071 cmp       w8, #0x31                                      
+001000e1368: e0080054 b.eq      #0x1000e1484                                   
+001000e136c: 1f410171 cmp       w8, #0x50                                      
+001000e1370: a1f0ff54 b.ne      #0x1000e1184                                   
+001000e1374: 9f011c6b cmp       w12, w28                                       
+001000e1378: e3050054 b.lo      #0x1000e1434                                   
+001000e137c: c8000014 b         #0x1000e169c                                   ref 0x1000e169c
+001000e1380: 1fcd0171 cmp       w8, #0x73                                      
+001000e1384: cc060054 b.gt      #0x1000e145c                                   
+001000e1388: 1f410171 cmp       w8, #0x50                                      
+001000e138c: 20120054 b.eq      #0x1000e15d0                                   
+001000e1390: 1f810171 cmp       w8, #0x60                                      
+001000e1394: 41140054 b.ne      #0x1000e161c                                   
+FUNCTION 0x1000e142c  end 0x1000e14b4
+001000e142c: 9f011c6b cmp       w12, w28                                       
+001000e1430: 021e0054 b.hs      #0x1000e17f0                                   
+001000e1434: 684b6c38 ldrb      w8, [x27, w12, uxtw]                           
+001000e1438: a8831838 sturb     w8, [x29, #-0x78]                              
+001000e143c: ef000014 b         #0x1000e17f8                                   ref 0x1000e17f8
+001000e1440: 1f010171 cmp       w8, #0x40                                      
+001000e1444: 400d0054 b.eq      #0x1000e15ec                                   
+001000e1448: 1f050171 cmp       w8, #0x41                                      
+001000e144c: 810e0054 b.ne      #0x1000e161c                                   
+001000e1450: 283740f9 ldr       x8, [x25, #0x68]                               
+001000e1454: 280c00b5 cbnz      x8, #0x1000e15d8                               
+001000e1458: 8a000014 b         #0x1000e1680                                   ref 0x1000e1680
+001000e145c: 1fd10171 cmp       w8, #0x74                                      
+001000e1460: a00f0054 b.eq      #0x1000e1654                                   
+001000e1464: 1f410271 cmp       w8, #0x90                                      
+001000e1468: a10d0054 b.ne      #0x1000e161c                                   
+001000e146c: 285f40f9 ldr       x8, [x25, #0xb8]                               
+001000e1470: 680f00b5 cbnz      x8, #0x1000e165c                               
+001000e1474: 83000014 b         #0x1000e1680                                   ref 0x1000e1680
+001000e1478: 1fc10071 cmp       w8, #0x30                                      
+001000e147c: e01b0054 b.eq      #0x1000e17f8                                   
+001000e1480: 41ffff17 b         #0x1000e1184                                   ref 0x1000e1184
+001000e1484: 9f011c6b cmp       w12, w28                                       
+001000e1488: e2180054 b.hs      #0x1000e17a4                                   
+001000e148c: 88050091 add       x8, x12, #1                                    
+001000e1490: 694b6c38 ldrb      w9, [x27, w12, uxtw]                           
+001000e1494: a9831838 sturb     w9, [x29, #-0x78]                              
+001000e1498: 8903084b sub       w9, w28, w8                                    
+001000e149c: 3f110071 cmp       w9, #4                                         
+001000e14a0: 8b1a0054 b.lt      #0x1000e17f0                                   
+001000e14a4: 686b68b8 ldr       w8, [x27, x8]                                  
+001000e14a8: 0809c05a rev       w8, w8                                         
+001000e14ac: a8c318b8 stur      w8, [x29, #-0x74]                              
+001000e14b0: d2000014 b         #0x1000e17f8                                   ref 0x1000e17f8
+FUNCTION 0x1000e15d0  end 0x1000e15ec
+001000e15d0: 286340f9 ldr       x8, [x25, #0xc0]                               
+001000e15d4: c81500b4 cbz       x8, #0x1000e188c                               
+001000e15d8: a2835838 ldurb     w2, [x29, #-0x78]                              
+001000e15dc: e00314aa mov       x0, x20                                        
+001000e15e0: e10313aa mov       x1, x19                                        
+001000e15e4: 1f093fd6 blraaz    x8                                             
+001000e15e8: 12000014 b         #0x1000e1630                                   ref 0x1000e1630
+FUNCTION 0x1000e1618  end 0x1000e1638
+001000e1618: 979d8152 mov       w23, #0xcec                                    
+001000e161c: a2035838 ldurb     w2, [x29, #-0x80]                              
+001000e1620: e00314aa mov       x0, x20                                        
+001000e1624: e10313aa mov       x1, x19                                        
+001000e1628: e30317aa mov       x3, x23                                        
+001000e162c: a0f5ff97 bl        #0x1000decac                                   ref 0x1000decac
+001000e1630: 00008052 mov       w0, #0                                         
+001000e1634: ffc30891 add       sp, sp, #0x230                                 
+FUNCTION 0x1000e188c  end 0x1000e1894
+001000e188c: 379d8152 mov       w23, #0xce9                                    
+001000e1890: 63ffff17 b         #0x1000e161c                                   ref 0x1000e161c
+
+IDENTIFICATION: Target GetCapabilities LC_FUNCTION_STARTS: 0x100551cf4 .. 0x100551ef8
+Direct branch/call sites: 0x10055b654
+Chained-fixup pointers: 
+FUNCTION 0x100551e24  end 0x100551e7c
+00100551e24: bf0a0071 cmp       w21, #2                                        
+00100551e28: e1000054 b.ne      #0x100551e44                                   
+00100551e2c: e3730091 add       x3, sp, #0x1c                                  
+00100551e30: e00314aa mov       x0, x20                                        
+00100551e34: e10313aa mov       x1, x19                                        
+00100551e38: 22008052 mov       w2, #1                                         
+00100551e3c: fb33ee97 bl        #0x1000dee28                                   ref 0x1000dee28
+00100551e40: 0f000014 b         #0x100551e7c                                   ref 0x100551e7c
+00100551e44: bf0e0071 cmp       w21, #3                                        
+00100551e48: 01010054 b.ne      #0x100551e68                                   
+00100551e4c: 43110090 adrp      x3, #0x100779000                               
+00100551e50: 63601291 add       x3, x3, #0x498                                 ref 0x100779498
+00100551e54: e00314aa mov       x0, x20                                        
+00100551e58: e10313aa mov       x1, x19                                        
+00100551e5c: e2008052 mov       w2, #7                                         
+00100551e60: 3c38ee97 bl        #0x1000dff50                                   ref 0x1000dff50
+00100551e64: 0d000014 b         #0x100551e98                                   ref 0x100551e98
+00100551e68: e00314aa mov       x0, x20                                        
+00100551e6c: e10313aa mov       x1, x19                                        
+00100551e70: 02028052 mov       w2, #0x10                                      
+00100551e74: 439d8152 mov       w3, #0xcea                                     
+00100551e78: 8d33ee97 bl        #0x1000decac                                   ref 0x1000decac
+
+IDENTIFICATION: Target RegisterNotification LC_FUNCTION_STARTS: 0x100552cf8 .. 0x10055337c
+Direct branch/call sites: 0x10055b9a0
+Chained-fixup pointers: 
+FUNCTION 0x100552d78  end 0x100552d94
+00100552d78: e00700f9 str       x0, [sp, #8]                                   
+00100552d7c: 1f330071 cmp       w24, #0xc                                      
+00100552d80: 88080054 b.hi      #0x100552e90                                   
+00100552d84: 6822d81a lsl       w8, w19, w24                                   
+00100552d88: c9e08352 mov       w9, #0x1f06                                    
+00100552d8c: 1f01096a tst       w8, w9                                         
+00100552d90: 00080054 b.eq      #0x100552e90                                   
+FUNCTION 0x100552e90  end 0x100552ed4
+00100552e90: 19070051 sub       w25, w24, #1                                   
+00100552e94: 3f370071 cmp       w25, #0xd                                      
+00100552e98: 489d8152 mov       w8, #0xcea                                     
+00100552e9c: a99c8152 mov       w9, #0xce5                                     
+00100552ea0: 3331881a csel      w19, w9, w8, lo                                
+00100552ea4: e8210090 adrp      x8, #0x10098e000                               
+00100552ea8: 1f2003d5 nop                                                      
+00100552eac: 142941f9 ldr       x20, [x8, #0x250]                              ref 0x10098e250
+00100552eb0: e00314aa mov       x0, x20                                        
+00100552eb4: 01028052 mov       w1, #0x10                                      
+00100552eb8: d6250894 bl        #0x10075c610                                   _os_log_type_enabled
+00100552ebc: 60200035 cbnz      w0, #0x1005532c8                               
+00100552ec0: e00317aa mov       x0, x23                                        
+00100552ec4: e10316aa mov       x1, x22                                        
+00100552ec8: 22068052 mov       w2, #0x31                                      
+00100552ecc: e30313aa mov       x3, x19                                        
+00100552ed0: 772fee97 bl        #0x1000decac                                   ref 0x1000decac
+
+IDENTIFICATION: Target notification callback thunk LC_FUNCTION_STARTS: 0x10055b940 .. 0x10055b9bc
+Direct branch/call sites: 
+Chained-fixup pointers: 0x100936dd0
+FUNCTION 0x10055b940  end 0x10055b9bc
+0010055b940: 7f2303d5 pacibsp                                                  
+0010055b944: f657bda9 stp       x22, x21, [sp, #-0x30]!                        
+0010055b948: f44f01a9 stp       x20, x19, [sp, #0x10]                          
+0010055b94c: fd7b02a9 stp       x29, x30, [sp, #0x20]                          
+0010055b950: fd830091 add       x29, sp, #0x20                                 
+0010055b954: f30302aa mov       x19, x2                                        
+0010055b958: f40301aa mov       x20, x1                                        
+0010055b95c: f50300aa mov       x21, x0                                        
+0010055b960: a8200090 adrp      x8, #0x10096f000                               
+0010055b964: 08e547f9 ldr       x8, [x8, #0xfc8]                               ref 0x10096ffc8
+0010055b968: 1f0500b1 cmn       x8, #1                                         
+0010055b96c: c1010054 b.ne      #0x10055b9a4                                   
+0010055b970: a8200090 adrp      x8, #0x10096f000                               
+0010055b974: 00e147f9 ldr       x0, [x8, #0xfc0]                               ref 0x10096ffc0
+0010055b978: e10315aa mov       x1, x21                                        
+0010055b97c: e20314aa mov       x2, x20                                        
+0010055b980: e30313aa mov       x3, x19                                        
+0010055b984: fd7b42a9 ldp       x29, x30, [sp, #0x20]                          
+0010055b988: f44f41a9 ldp       x20, x19, [sp, #0x10]                          
+0010055b98c: f657c3a8 ldp       x22, x21, [sp], #0x30                          
+0010055b990: ff2303d5 autibsp                                                  
+0010055b994: d0071eca eor       x16, x30, x30, lsl #1                          
+0010055b998: 5000f0b6 tbz       x16, #0x3e, #0x10055b9a0                       
+0010055b99c: 208e38d4 brk       #0xc471                                        
+0010055b9a0: d6dcff17 b         #0x100552cf8                                   ref 0x100552cf8
+0010055b9a4: a0200090 adrp      x0, #0x10096f000                               
+0010055b9a8: 00203f91 add       x0, x0, #0xfc8                                 ref 0x10096ffc8
+0010055b9ac: c11e00f0 adrp      x1, #0x100936000                               
+0010055b9b0: 21603591 add       x1, x1, #0xd58                                 __NSConcreteGlobalBlock
+0010055b9b4: 0b000894 bl        #0x10075b9e0                                   _dispatch_once
+0010055b9b8: eeffff17 b         #0x10055b970                                   ref 0x10055b970
+
+IDENTIFICATION: Simple metadata response builder LC_FUNCTION_STARTS: 0x1000decac .. 0x1000dee0c
+Direct branch/call sites: 0x1000e162c, 0x100551e78, 0x1005521ec, 0x100552800, 0x100552b88, 0x100552c50, 0x100552ed0, 0x100554cb8, 0x10055926c
+Chained-fixup pointers: 
+FUNCTION 0x1000decac  end 0x1000ded18
+001000decac: 7f2303d5 pacibsp                                                  
+001000decb0: ff4301d1 sub       sp, sp, #0x50                                  
+001000decb4: f44f03a9 stp       x20, x19, [sp, #0x30]                          
+001000decb8: fd7b04a9 stp       x29, x30, [sp, #0x40]                          
+001000decbc: fd030191 add       x29, sp, #0x40                                 
+001000decc0: c8410090 adrp      x8, #0x100916000                               
+001000decc4: 089541f9 ldr       x8, [x8, #0x328]                               ___stack_chk_guard
+001000decc8: 080140f9 ldr       x8, [x8]                                       
+001000deccc: a8831ef8 stur      x8, [x29, #-0x18]                              
+001000decd0: ffff00a9 stp       xzr, xzr, [sp, #8]                             
+001000decd4: 08208352 mov       w8, #0x1900                                    
+001000decd8: 080ba072 movk      w8, #0x58, lsl #16                             
+001000decdc: ffa301a9 stp       xzr, x8, [sp, #0x18]                           
+001000dece0: 600300b4 cbz       x0, #0x1000ded4c                               
+001000dece4: 70943371 subs      w16, w3, #0xce5                                
+001000dece8: 48018052 mov       w8, #0xa                                       
+001000decec: 09018052 mov       w9, #8                                         
+001000decf0: 2801881a csel      w8, w9, w8, eq                                 
+001000decf4: 7f000071 cmp       w3, #0                                         
+001000decf8: 29018052 mov       w9, #9                                         
+001000decfc: 2801881a csel      w8, w9, w8, eq                                 
+001000ded00: e8230039 strb      w8, [sp, #8]                                   
+001000ded04: e9930078 sturh     w9, [sp, #9]                                   
+001000ded08: ff2f0039 strb      wzr, [sp, #0xb]                                
+001000ded0c: e8830091 add       x8, sp, #0x20                                  
+001000ded10: e80b00f9 str       x8, [sp, #0x10]                                
+001000ded14: e28f0039 strb      w2, [sp, #0x23]                                
+FUNCTION 0x1000ded58  end 0x1000ded94
+001000ded58: 83000035 cbnz      w3, #0x1000ded68                               
+001000ded5c: ff530278 sturh     wzr, [sp, #0x25]                               
+001000ded60: e8008052 mov       w8, #7                                         
+001000ded64: 08000014 b         #0x1000ded84                                   ref 0x1000ded84
+001000ded68: 68008052 mov       w8, #3                                         
+001000ded6c: 02000014 b         #0x1000ded74                                   ref 0x1000ded74
+001000ded70: 48008052 mov       w8, #2                                         
+001000ded74: 09208052 mov       w9, #0x100                                     
+001000ded78: e9530278 sturh     w9, [sp, #0x25]                                
+001000ded7c: e89f0039 strb      w8, [sp, #0x27]                                
+001000ded80: 08018052 mov       w8, #8                                         
+001000ded84: e8330079 strh      w8, [sp, #0x18]                                
+001000ded88: e2230091 add       x2, sp, #8                                     
+001000ded8c: d60e0094 bl        #0x1000e28e4                                   ref 0x1000e28e4
+001000ded90: f30300aa mov       x19, x0                                        
+
+IDENTIFICATION: Target AV/C response entry LC_FUNCTION_STARTS: 0x1000e28e4 .. 0x1000e293c
+Direct branch/call sites: 0x1000ded8c, 0x1000df92c, 0x1000e0bd4, 0x1000e0fd8, 0x100555004, 0x100557698, 0x10055780c
+Chained-fixup pointers: 
+FUNCTION 0x1000e28e4  end 0x1000e293c
+001000e28e4: 7f2303d5 pacibsp                                                  
+001000e28e8: fd7bbfa9 stp       x29, x30, [sp, #-0x10]!                        
+001000e28ec: fd030091 mov       x29, sp                                        
+001000e28f0: 484500f0 adrp      x8, #0x10098d000                               
+001000e28f4: 1f2003d5 nop                                                      
+001000e28f8: 08714bb9 ldr       w8, [x8, #0xb70]                               ref 0x10098db70
+001000e28fc: 48010034 cbz       w8, #0x1000e2924                               
+001000e2900: 600100b4 cbz       x0, #0x1000e292c                               
+001000e2904: 48004039 ldrb      w8, [x2]                                       
+001000e2908: 48011836 tbz       w8, #3, #0x1000e2930                           
+001000e290c: fd7bc1a8 ldp       x29, x30, [sp], #0x10                          
+001000e2910: ff2303d5 autibsp                                                  
+001000e2914: d0071eca eor       x16, x30, x30, lsl #1                          
+001000e2918: 5000f0b6 tbz       x16, #0x3e, #0x1000e2920                       
+001000e291c: 208e38d4 brk       #0xc471                                        
+001000e2920: 18ebff17 b         #0x1000dd580                                   ref 0x1000dd580
+001000e2924: 00338052 mov       w0, #0x198                                     
+001000e2928: 03000014 b         #0x1000e2934                                   ref 0x1000e2934
+001000e292c: 604f0494 bl        #0x1001f66ac                                   ref 0x1001f66ac
+001000e2930: a00c8052 mov       w0, #0x65                                      
+001000e2934: fd7bc1a8 ldp       x29, x30, [sp], #0x10                          
+001000e2938: ff0f5fd6 retab                                                    
+
+IDENTIFICATION: Common AV/C serializer and AVCTP send LC_FUNCTION_STARTS: 0x1000dd580 .. 0x1000dd79c
+Direct branch/call sites: 0x100093f6c, 0x1000e2024, 0x1000e20e4, 0x1000e2154, 0x1000e28c0, 0x1000e2920
+Chained-fixup pointers: 
+FUNCTION 0x1000dd5a8  end 0x1000dd5e8
+001000dd5a8: f60302aa mov       x22, x2                                        
+001000dd5ac: 820200b4 cbz       x2, #0x1000dd5fc                               
+001000dd5b0: c8024039 ldrb      w8, [x22]                                      
+001000dd5b4: 1f3d0071 cmp       w8, #0xf                                       
+001000dd5b8: 48020054 b.hi      #0x1000dd600                                   
+001000dd5bc: f30301aa mov       x19, x1                                        
+001000dd5c0: f40300aa mov       x20, x0                                        
+001000dd5c4: d7224079 ldrh      w23, [x22, #0x10]                              
+001000dd5c8: 77000034 cbz       w23, #0x1000dd5d4                              
+001000dd5cc: c80640f9 ldr       x8, [x22, #8]                                  
+001000dd5d0: 880100b4 cbz       x8, #0x1000dd600                               
+001000dd5d4: c8064039 ldrb      w8, [x22, #1]                                  
+001000dd5d8: 1f790071 cmp       w8, #0x1e                                      
+001000dd5dc: 80000054 b.eq      #0x1000dd5ec                                   
+001000dd5e0: c80a4039 ldrb      w8, [x22, #2]                                  
+001000dd5e4: 1f150071 cmp       w8, #5                                         
+FUNCTION 0x1000dd61c  end 0x1000dd6e4
+001000dd61c: f80e0011 add       w24, w23, #3                                   
+001000dd620: 003f4092 and       x0, x24, #0xffff                               
+001000dd624: 9e32ff97 bl        #0x1000aa09c                                   ref 0x1000aa09c
+001000dd628: e00700b4 cbz       x0, #0x1000dd724                               
+001000dd62c: 083f0072 ands      w8, w24, #0xffff                               
+001000dd630: 60080054 b.eq      #0x1000dd73c                                   
+001000dd634: f50300aa mov       x21, x0                                        
+001000dd638: c9024039 ldrb      w9, [x22]                                      
+001000dd63c: 09000039 strb      w9, [x0]                                       
+001000dd640: c9064039 ldrb      w9, [x22, #1]                                  
+001000dd644: 0a044039 ldrb      w10, [x0, #1]                                  
+001000dd648: 490d092a orr       w9, w10, w9, lsl #3                            
+001000dd64c: 09040039 strb      w9, [x0, #1]                                   
+001000dd650: ca0a4039 ldrb      w10, [x22, #2]                                 
+001000dd654: 4a090012 and       w10, w10, #7                                   
+001000dd658: 4901092a orr       w9, w10, w9                                    
+001000dd65c: 09040039 strb      w9, [x0, #1]                                   
+001000dd660: 093f0012 and       w9, w24, #0xffff                               
+001000dd664: 3f050071 cmp       w9, #1                                         
+001000dd668: 60070054 b.eq      #0x1000dd754                                   
+001000dd66c: a9ff9f52 mov       w9, #0xfffd                                    
+001000dd670: ff02096b cmp       w23, w9                                        
+001000dd674: c2070054 b.hs      #0x1000dd76c                                   
+001000dd678: c90e4039 ldrb      w9, [x22, #3]                                  
+001000dd67c: a90a0039 strb      w9, [x21, #2]                                  
+001000dd680: 170d0051 sub       w23, w8, #3                                    
+001000dd684: c8224079 ldrh      w8, [x22, #0x10]                               
+001000dd688: ff02086b cmp       w23, w8                                        
+001000dd68c: 62000054 b.hs      #0x1000dd698                                   
+001000dd690: 07640494 bl        #0x1001f66ac                                   ref 0x1001f66ac
+001000dd694: c8224079 ldrh      w8, [x22, #0x10]                               
+001000dd698: ff02086b cmp       w23, w8                                        
+001000dd69c: 4b070054 b.lt      #0x1000dd784                                   
+001000dd6a0: c10640f9 ldr       x1, [x22, #8]                                  
+001000dd6a4: a00e0091 add       x0, x21, #3                                    
+001000dd6a8: e203082a mov       w2, w8                                         
+001000dd6ac: 25fa1994 bl        #0x10075bf40                                   _memmove
+001000dd6b0: c8024039 ldrb      w8, [x22]                                      
+001000dd6b4: 1f011d72 tst       w8, #8                                         
+001000dd6b8: 28008052 mov       w8, #1                                         
+001000dd6bc: 1705881a cinc      w23, w8, ne                                    
+001000dd6c0: 053f0012 and       w5, w24, #0xffff                               
+001000dd6c4: e00314aa mov       x0, x20                                        
+001000dd6c8: c1218252 mov       w1, #0x110e                                    
+001000dd6cc: e20313aa mov       x2, x19                                        
+001000dd6d0: e30317aa mov       x3, x23                                        
+001000dd6d4: e40315aa mov       x4, x21                                        
+001000dd6d8: 87baff97 bl        #0x1000cc0f4                                   ref 0x1000cc0f4
+001000dd6dc: f60300aa mov       x22, x0                                        
+001000dd6e0: 20f9ff34 cbz       w0, #0x1000dd604                               
+FUNCTION 0x1000dd6ec  end 0x1000dd738
+001000dd6ec: 00048052 mov       w0, #0x20                                      
+001000dd6f0: 6132ff97 bl        #0x1000aa074                                   ref 0x1000aa074
+001000dd6f4: c00100b4 cbz       x0, #0x1000dd72c                               
+001000dd6f8: 880240b9 ldr       w8, [x20]                                      
+001000dd6fc: 890a4079 ldrh      w9, [x20, #4]                                  
+001000dd700: 09080079 strh      w9, [x0, #4]                                   
+001000dd704: 080000b9 str       w8, [x0]                                       
+001000dd708: 13180039 strb      w19, [x0, #6]                                  
+001000dd70c: 171c0039 strb      w23, [x0, #7]                                  
+001000dd710: 150400f9 str       x21, [x0, #8]                                  
+001000dd714: 18200079 strh      w24, [x0, #0x10]                               
+001000dd718: 29000094 bl        #0x1000dd7bc                                   ref 0x1000dd7bc
+001000dd71c: 16008052 mov       w22, #0                                        
+001000dd720: b9ffff17 b         #0x1000dd604                                   ref 0x1000dd604
+001000dd724: 560d8052 mov       w22, #0x6a                                     
+001000dd728: b7ffff17 b         #0x1000dd604                                   ref 0x1000dd604
+001000dd72c: 560d8052 mov       w22, #0x6a                                     
+001000dd730: e00315aa mov       x0, x21                                        
+001000dd734: 6532ff97 bl        #0x1000aa0c8                                   ref 0x1000aa0c8
+
+IDENTIFICATION: Controller SetAbsoluteVolume command builder LC_FUNCTION_STARTS: 0x100093fe0 .. 0x100094094
+Direct branch/call sites: 0x10055a260
+Chained-fixup pointers: 
+FUNCTION 0x100093fe0  end 0x100094094
+00100093fe0: 7f2303d5 pacibsp                                                  
+00100093fe4: ff0301d1 sub       sp, sp, #0x40                                  
+00100093fe8: fd7b03a9 stp       x29, x30, [sp, #0x30]                          
+00100093fec: fdc30091 add       x29, sp, #0x30                                 
+00100093ff0: 084400f0 adrp      x8, #0x100916000                               
+00100093ff4: 089541f9 ldr       x8, [x8, #0x328]                               ___stack_chk_guard
+00100093ff8: 080140f9 ldr       x8, [x8]                                       
+00100093ffc: a8831ff8 stur      x8, [x29, #-8]                                 
+00100094000: ffff00a9 stp       xzr, xzr, [sp, #8]                             
+00100094004: ff0f00f9 str       xzr, [sp, #0x18]                               
+00100094008: ff1f0039 strb      wzr, [sp, #7]                                  
+0010009400c: 082083d2 mov       x8, #0x1900                                    
+00100094010: 080baaf2 movk      x8, #0x5058, lsl #16                           
+00100094014: 2800e0f2 movk      x8, #1, lsl #48                                
+00100094018: a8031ff8 stur      x8, [x29, #-0x10]                              
+0010009401c: a1731f38 sturb     w1, [x29, #-9]                                 
+00100094020: c84700b0 adrp      x8, #0x10098d000                               
+00100094024: 1f2003d5 nop                                                      
+00100094028: 08714bb9 ldr       w8, [x8, #0xb70]                               ref 0x10098db70
+0010009402c: 88010034 cbz       w8, #0x10009405c                               
+00100094030: a00100b4 cbz       x0, #0x100094064                               
+00100094034: 08208152 mov       w8, #0x900                                     
+00100094038: e80b00b9 str       w8, [sp, #8]                                   
+0010009403c: a84300d1 sub       x8, x29, #0x10                                 
+00100094040: e80b00f9 str       x8, [sp, #0x10]                                
+00100094044: 08018052 mov       w8, #8                                         
+00100094048: e8330079 strh      w8, [sp, #0x18]                                
+0010009404c: e11f0091 add       x1, sp, #7                                     
+00100094050: e2230091 add       x2, sp, #8                                     
+00100094054: 77ffff97 bl        #0x100093e30                                   ref 0x100093e30
+00100094058: 05000014 b         #0x10009406c                                   ref 0x10009406c
+0010009405c: 00338052 mov       w0, #0x198                                     
+00100094060: 03000014 b         #0x10009406c                                   ref 0x10009406c
+00100094064: 92890594 bl        #0x1001f66ac                                   ref 0x1001f66ac
+00100094068: a00c8052 mov       w0, #0x65                                      
+0010009406c: a8835ff8 ldur      x8, [x29, #-8]                                 
+00100094070: 094400d0 adrp      x9, #0x100916000                               
+00100094074: 299541f9 ldr       x9, [x9, #0x328]                               ___stack_chk_guard
+00100094078: 290140f9 ldr       x9, [x9]                                       
+0010009407c: 3f0108eb cmp       x9, x8                                         
+00100094080: 81000054 b.ne      #0x100094090                                   
+00100094084: fd7b43a9 ldp       x29, x30, [sp, #0x30]                          
+00100094088: ff030191 add       sp, sp, #0x40                                  
+0010009408c: ff0f5fd6 retab                                                    
+00100094090: e01c1b94 bl        #0x10075b410                                   ___stack_chk_fail
+
+IDENTIFICATION: Controller scalar-to-wire-volume setter LC_FUNCTION_STARTS: 0x100559fcc .. 0x10055a3d8
+Direct branch/call sites: 0x1003811b0
+Chained-fixup pointers: 
+FUNCTION 0x10055a1a0  end 0x10055a1b0
+0010055a1a0: c85fa852 mov       w8, #0x42fe0000                                
+0010055a1a4: 0001271e fmov      s0, w8                                         
+0010055a1a8: 0009201e fmul      s0, s8, s0                                     
+0010055a1ac: 1500381e fcvtzs    w21, s0                                        
+FUNCTION 0x10055a24c  end 0x10055a270
+0010055a24c: bf031938 sturb     wzr, [x29, #-0x70]                             
+0010055a250: a0c301d1 sub       x0, x29, #0x70                                 
+0010055a254: 6fb6f397 bl        #0x100247c10                                   ref 0x100247c10
+0010055a258: 60020291 add       x0, x19, #0x80                                 
+0010055a25c: a11e0012 and       w1, w21, #0xff                                 
+0010055a260: 60e7ec97 bl        #0x100093fe0                                   ref 0x100093fe0
+0010055a264: f40300aa mov       x20, x0                                        
+0010055a268: a0c301d1 sub       x0, x29, #0x70                                 
+0010055a26c: 77b6f397 bl        #0x100247c48                                   ref 0x100247c48
+
+IDENTIFICATION: Controller RegisterNotification command builder LC_FUNCTION_STARTS: 0x1000ddc64 .. 0x1000ddcb0
+Direct branch/call sites: 0x100559c18, 0x100559d10
+Chained-fixup pointers: 
+FUNCTION 0x1000ddc64  end 0x1000ddcb0
+001000ddc64: 7f2303d5 pacibsp                                                  
+001000ddc68: ffc300d1 sub       sp, sp, #0x30                                  
+001000ddc6c: fd7b02a9 stp       x29, x30, [sp, #0x20]                          
+001000ddc70: fd830091 add       x29, sp, #0x20                                 
+001000ddc74: 00e4006f movi      v0.2d, #0000000000000000                       
+001000ddc78: e00300ad stp       q0, q0, [sp]                                   
+001000ddc7c: 000100b4 cbz       x0, #0x1000ddc9c                               
+001000ddc80: e10000b4 cbz       x1, #0x1000ddc9c                               
+001000ddc84: 28668052 mov       w8, #0x331                                     
+001000ddc88: e8030079 strh      w8, [sp]                                       
+001000ddc8c: e2230039 strb      w2, [sp, #8]                                   
+001000ddc90: e2030091 mov       x2, sp                                         
+001000ddc94: f3feff97 bl        #0x1000dd860                                   ref 0x1000dd860
+001000ddc98: 03000014 b         #0x1000ddca4                                   ref 0x1000ddca4
+001000ddc9c: 84620494 bl        #0x1001f66ac                                   ref 0x1001f66ac
+001000ddca0: a00c8052 mov       w0, #0x65                                      
+001000ddca4: fd7b42a9 ldp       x29, x30, [sp, #0x20]                          
+001000ddca8: ffc30091 add       sp, sp, #0x30                                  
+001000ddcac: ff0f5fd6 retab                                                    
+
+IDENTIFICATION: OI_AVRCPController_UnmarshalMetaResponse (assertion identification) LC_FUNCTION_STARTS: 0x1000ddef8 .. 0x1000dec34
+Direct branch/call sites: 0x1005594b8
+Chained-fixup pointers: 
+FUNCTION 0x1000ddf78  end 0x1000ddf94
+001000ddf78: 60380090 adrp      x0, #0x1007e9000                               
+001000ddf7c: 00402c91 add       x0, x0, #0xb10                                 '/Library/Caches/com.apple.xbs/Sources/MobileBluetooth_base/Stack/profiles/av/avrcp/avrcp_metadata.c'
+001000ddf80: 62380090 adrp      x2, #0x1007e9000                               
+001000ddf84: 42d02d91 add       x2, x2, #0xb74                                 'OI_STATUS OI_AVRCPController_UnmarshalMetaResponse(OI_AVRCP_FRAME *, uint8_t, OI_AVRCP_RESPONSE *, OI_AVRCP_RESPONSE_DATA *)'
+001000ddf88: 61508052 mov       w1, #0x283                                     
+001000ddf8c: 3c5d0494 bl        #0x1001f547c                                   ref 0x1001f547c
+001000ddf90: c0108052 mov       w0, #0x86                                      
+FUNCTION 0x1000de038  end 0x1000de070
+001000de038: 3fc00071 cmp       w1, #0x30                                      
+001000de03c: 401b0054 b.eq      #0x1000de3a4                                   
+001000de040: 3fc40071 cmp       w1, #0x31                                      
+001000de044: a01d0054 b.eq      #0x1000de3f8                                   
+001000de048: 3f400171 cmp       w1, #0x50                                      
+001000de04c: 41faff54 b.ne      #0x1000ddf94                                   
+001000de050: 1f050071 cmp       w8, #1                                         
+001000de054: 6d3f0054 b.le      #0x1000de840                                   
+001000de058: 3f03166b cmp       w25, w22                                       
+001000de05c: e93f0054 b.ls      #0x1000de858                                   
+001000de060: 0d008052 mov       w13, #0                                        
+001000de064: e84a7638 ldrb      w8, [x23, w22, uxtw]                           
+001000de068: 08190012 and       w8, w8, #0x7f                                  
+001000de06c: fd010014 b         #0x1000de860                                   ref 0x1000de860
+
+IDENTIFICATION: Controller metadata response handler LC_FUNCTION_STARTS: 0x1005593e4 .. 0x100559e80
+Direct branch/call sites: 0x10055c168
+Chained-fixup pointers: 
+FUNCTION 0x100559584  end 0x100559600
+00100559584: df420171 cmp       w22, #0x50                                     
+00100559588: 20150054 b.eq      #0x10055982c                                   
+0010055958c: dfc60071 cmp       w22, #0x31                                     
+00100559590: 60020054 b.eq      #0x1005595dc                                   
+00100559594: df420071 cmp       w22, #0x10                                     
+00100559598: e1180054 b.ne      #0x1005598b4                                   
+0010055959c: 88024039 ldrb      w8, [x20]                                      
+001005595a0: 1f310071 cmp       w8, #0xc                                       
+001005595a4: 411f0054 b.ne      #0x10055998c                                   
+001005595a8: e8a34239 ldrb      w8, [sp, #0xa8]                                
+001005595ac: 1f0d0071 cmp       w8, #3                                         
+001005595b0: e11e0054 b.ne      #0x10055998c                                   
+001005595b4: e8a74239 ldrb      w8, [sp, #0xa9]                                
+001005595b8: a8fcffb4 cbz       x8, #0x10055954c                               
+001005595bc: e95b40f9 ldr       x9, [sp, #0xb0]                                
+001005595c0: 2a014039 ldrb      w10, [x9]                                      
+001005595c4: 5f350071 cmp       w10, #0xd                                      
+001005595c8: a0350054 b.eq      #0x100559c7c                                   
+001005595cc: 29050091 add       x9, x9, #1                                     
+001005595d0: 080500f1 subs      x8, x8, #1                                     
+001005595d4: 61ffff54 b.ne      #0x1005595c0                                   
+001005595d8: ddffff17 b         #0x10055954c                                   ref 0x10055954c
+001005595dc: e85740f9 ldr       x8, [sp, #0xa8]                                
+001005595e0: 16014039 ldrb      w22, [x8]                                      
+001005595e4: df360071 cmp       w22, #0xd                                      
+001005595e8: c1190054 b.ne      #0x100559920                                   
+001005595ec: 89024039 ldrb      w9, [x20]                                      
+001005595f0: 29011f32 orr       w9, w9, #2                                     
+001005595f4: 3f3d0071 cmp       w9, #0xf                                       
+001005595f8: 012a0054 b.ne      #0x100559b38                                   
+001005595fc: 18214039 ldrb      w24, [x8, #8]                                  
+FUNCTION 0x100559884  end 0x1005598ac
+00100559884: a82000d0 adrp      x8, #0x10096f000                               
+00100559888: 00b545f9 ldr       x0, [x8, #0xb68]                               ref 0x10096fb68
+0010055988c: e15f40f9 ldr       x1, [sp, #0xb8]                                
+00100559890: e0a3423d ldr       b0, [sp, #0xa8]                                
+00100559894: 00d8217e ucvtf     s0, s0                                         
+00100559898: c85fa852 mov       w8, #0x42fe0000                                
+0010055989c: 0101271e fmov      s1, w8                                         
+001005598a0: 82024039 ldrb      w2, [x20]                                      
+001005598a4: 0018211e fdiv      s0, s0, s1                                     
+001005598a8: fc94f897 bl        #0x10037ec98                                   ref 0x10037ec98
+FUNCTION 0x100559bf8  end 0x100559c20
+00100559bf8: 88024039 ldrb      w8, [x20]                                      
+00100559bfc: 1f350071 cmp       w8, #0xd                                       
+00100559c00: c1010054 b.ne      #0x100559c38                                   
+00100559c04: ffdf0039 strb      wzr, [sp, #0x37]                               
+00100559c08: e1df0091 add       x1, sp, #0x37                                  
+00100559c0c: e00313aa mov       x0, x19                                        
+00100559c10: a2018052 mov       w2, #0xd                                       
+00100559c14: a3008052 mov       w3, #5                                         
+00100559c18: 1310ee97 bl        #0x1000ddc64                                   ref 0x1000ddc64
+00100559c1c: f30300aa mov       x19, x0                                        
+FUNCTION 0x100559cfc  end 0x100559d14
+00100559cfc: ffa30139 strb      wzr, [sp, #0x68]                               
+00100559d00: e1a30191 add       x1, sp, #0x68                                  
+00100559d04: e00313aa mov       x0, x19                                        
+00100559d08: a2018052 mov       w2, #0xd                                       
+00100559d0c: a3008052 mov       w3, #5                                         
+00100559d10: d50fee97 bl        #0x1000ddc64                                   ref 0x1000ddc64
+
+IDENTIFICATION: Remote-volume bridge toward native audio device LC_FUNCTION_STARTS: 0x10037ec98 .. 0x10037edac
+Direct branch/call sites: 0x1005598a8, 0x100559f48
+Chained-fixup pointers: 
+FUNCTION 0x10037ed34  end 0x10037ed74
+0010037ed34: e00315aa mov       x0, x21                                        
+0010037ed38: e10314aa mov       x1, x20                                        
+0010037ed3c: d6d4ff97 bl        #0x100374094                                   ref 0x100374094
+0010037ed40: e10300aa mov       x1, x0                                         
+0010037ed44: e00315aa mov       x0, x21                                        
+0010037ed48: aad6ff97 bl        #0x1003747f0                                   ref 0x1003747f0
+0010037ed4c: 400100b4 cbz       x0, #0x10037ed74                               
+0010037ed50: f50300aa mov       x21, x0                                        
+0010037ed54: e10314aa mov       x1, x20                                        
+0010037ed58: 0041201e fmov      s0, s8                                         
+0010037ed5c: e20313aa mov       x2, x19                                        
+0010037ed60: 79ffff97 bl        #0x10037eb44                                   ref 0x10037eb44
+0010037ed64: 80000034 cbz       w0, #0x10037ed74                               
+0010037ed68: e00315aa mov       x0, x21                                        
+0010037ed6c: 0041201e fmov      s0, s8                                         
+0010037ed70: 12c1fb97 bl        #0x10026f1b8                                   ref 0x10026f1b8
+
+IDENTIFICATION: Audio volumeDidUpdate schedules controller send LC_FUNCTION_STARTS: 0x100380fe8 .. 0x1003810dc
+Direct branch/call sites: 0x10038121c
+Chained-fixup pointers: 0x10092a0a8
+FUNCTION 0x100380fe8  end 0x100381080
+00100380fe8: 7f2303d5 pacibsp                                                  
+00100380fec: ffc301d1 sub       sp, sp, #0x70                                  
+00100380ff0: e923046d stp       d9, d8, [sp, #0x40]                            
+00100380ff4: f44f05a9 stp       x20, x19, [sp, #0x50]                          
+00100380ff8: fd7b06a9 stp       x29, x30, [sp, #0x60]                          
+00100380ffc: fd830191 add       x29, sp, #0x60                                 
+00100381000: 0840201e fmov      s8, s0                                         
+00100381004: f40301aa mov       x20, x1                                        
+00100381008: f30300aa mov       x19, x0                                        
+0010038100c: e00301aa mov       x0, x1                                         
+00100381010: c9befb97 bl        #0x100270b34                                   ref 0x100270b34
+00100381014: 80030036 tbz       w0, #0, #0x100381084                           
+00100381018: e00314aa mov       x0, x20                                        
+0010038101c: a2460894 bl        #0x100592aa4                                   ref 0x100592aa4
+00100381020: f40300aa mov       x20, x0                                        
+00100381024: a85e0294 bl        #0x100418ac4                                   ref 0x100418ac4
+00100381028: e8030091 mov       x8, sp                                         
+0010038102c: b02c00b0 adrp      x16, #0x100916000                              
+00100381030: 105641f9 ldr       x16, [x16, #0x2a8]                             __NSConcreteStackBlock
+00100381034: f10308aa mov       x17, x8                                        
+00100381038: 315cedf2 movk      x17, #0x6ae1, lsl #48                          
+0010038103c: 300ac1da pacda     x16, x17                                       
+00100381040: f00300f9 str       x16, [sp]                                      
+00100381044: 891f0090 adrp      x9, #0x100771000                               
+00100381048: 204146fd ldr       d0, [x9, #0xc80]                               ref 0x100771c80
+0010038104c: e00700fd str       d0, [sp, #8]                                   
+00100381050: 08410091 add       x8, x8, #0x10                                  
+00100381054: 50040010 adr       x16, #0x1003810dc                              ref 0x1003810dc
+00100381058: 1f2003d5 nop                                                      
+0010038105c: 1001c1da pacia     x16, x8                                        
+00100381060: c82d00f0 adrp      x8, #0x10093c000                               
+00100381064: 08810591 add       x8, x8, #0x160                                 ref 0x10093c160
+00100381068: f02301a9 stp       x16, x8, [sp, #0x10]                           
+0010038106c: f31300f9 str       x19, [sp, #0x20]                               
+00100381070: f45b0079 strh      w20, [sp, #0x2c]                               
+00100381074: e82b00bd str       s8, [sp, #0x28]                                
+00100381078: e1030091 mov       x1, sp                                         
+0010038107c: 9b5f0294 bl        #0x100418ee8                                   ref 0x100418ee8
+
+IDENTIFICATION: Scheduled audio-volume send block LC_FUNCTION_STARTS: 0x1003810dc .. 0x100381218
+Direct branch/call sites: 
+Chained-fixup pointers: 
+FUNCTION 0x1003810dc  end 0x100381218
+001003810dc: 7f2303d5 pacibsp                                                  
+001003810e0: ff4301d1 sub       sp, sp, #0x50                                  
+001003810e4: f65702a9 stp       x22, x21, [sp, #0x20]                          
+001003810e8: f44f03a9 stp       x20, x19, [sp, #0x30]                          
+001003810ec: fd7b04a9 stp       x29, x30, [sp, #0x40]                          
+001003810f0: fd030191 add       x29, sp, #0x40                                 
+001003810f4: f30300aa mov       x19, x0                                        
+001003810f8: a82c00b0 adrp      x8, #0x100916000                               
+001003810fc: 089541f9 ldr       x8, [x8, #0x328]                               ___stack_chk_guard
+00100381100: 080140f9 ldr       x8, [x8]                                       
+00100381104: e80f00f9 str       x8, [sp, #0x18]                                
+00100381108: 141040f9 ldr       x20, [x0, #0x20]                               
+0010038110c: ff7f00a9 stp       xzr, xzr, [sp]                                 
+00100381110: 81a20891 add       x1, x20, #0x228                                
+00100381114: e0030091 mov       x0, sp                                         
+00100381118: 661bfb97 bl        #0x100247eb0                                   ref 0x100247eb0
+0010038111c: 615a4079 ldrh      w1, [x19, #0x2c]                               
+00100381120: e00314aa mov       x0, x20                                        
+00100381124: f1c7ff97 bl        #0x1003730e8                                   ref 0x1003730e8
+00100381128: f40300aa mov       x20, x0                                        
+0010038112c: 400400b4 cbz       x0, #0x1003811b4                               
+00100381130: 683000b0 adrp      x8, #0x10098e000                               
+00100381134: 1f2003d5 nop                                                      
+00100381138: 15ed40f9 ldr       x21, [x8, #0x1d8]                              ref 0x10098e1d8
+0010038113c: e00315aa mov       x0, x21                                        
+00100381140: 21008052 mov       w1, #1                                         
+00100381144: 336d0f94 bl        #0x10075c610                                   _os_log_type_enabled
+00100381148: 40020034 cbz       w0, #0x100381190                               
+0010038114c: 602a40bd ldr       s0, [x19, #0x28]                               
+00100381150: 0859a852 mov       w8, #0x42c80000                                
+00100381154: 0101271e fmov      s1, w8                                         
+00100381158: 0008211e fmul      s0, s0, s1                                     
+0010038115c: 0800381e fcvtzs    w8, s0                                         
+00100381160: 09208052 mov       w9, #0x100                                     
+00100381164: 0980a072 movk      w9, #0x400, lsl #16                            
+00100381168: e9230229 stp       w9, w8, [sp, #0x10]                            
+0010038116c: e0e3fff0 adrp      x0, #0x100000000                               
+00100381170: 00000091 add       x0, x0, #0                                     ref 0x100000000
+00100381174: 832800f0 adrp      x3, #0x100894000                               
+00100381178: 63181991 add       x3, x3, #0x646                                 'Sending volume %d'
+0010038117c: e4430091 add       x4, sp, #0x10                                  
+00100381180: e10315aa mov       x1, x21                                        
+00100381184: 22008052 mov       w2, #1                                         
+00100381188: 05018052 mov       w5, #8                                         
+0010038118c: d1680f94 bl        #0x10075b4d0                                   __os_log_impl
+00100381190: 682f00d0 adrp      x8, #0x10096f000                               
+00100381194: 08e547f9 ldr       x8, [x8, #0xfc8]                               ref 0x10096ffc8
+00100381198: 1f0500b1 cmn       x8, #1                                         
+0010038119c: 61020054 b.ne      #0x1003811e8                                   
+001003811a0: 682f00d0 adrp      x8, #0x10096f000                               
+001003811a4: 00e147f9 ldr       x0, [x8, #0xfc0]                               ref 0x10096ffc0
+001003811a8: 602a40bd ldr       s0, [x19, #0x28]                               
+001003811ac: e10314aa mov       x1, x20                                        
+001003811b0: 87630794 bl        #0x100559fcc                                   ref 0x100559fcc
+001003811b4: e0030091 mov       x0, sp                                         
+001003811b8: 611bfb97 bl        #0x100247f3c                                   ref 0x100247f3c
+001003811bc: e80f40f9 ldr       x8, [sp, #0x18]                                
+001003811c0: a92c00b0 adrp      x9, #0x100916000                               
+001003811c4: 299541f9 ldr       x9, [x9, #0x328]                               ___stack_chk_guard
+001003811c8: 290140f9 ldr       x9, [x9]                                       
+001003811cc: 3f0108eb cmp       x9, x8                                         
+001003811d0: 81010054 b.ne      #0x100381200                                   
+001003811d4: fd7b44a9 ldp       x29, x30, [sp, #0x40]                          
+001003811d8: f44f43a9 ldp       x20, x19, [sp, #0x30]                          
+001003811dc: f65742a9 ldp       x22, x21, [sp, #0x20]                          
+001003811e0: ff430191 add       sp, sp, #0x50                                  
+001003811e4: ff0f5fd6 retab                                                    
+001003811e8: 602f00d0 adrp      x0, #0x10096f000                               
+001003811ec: 00203f91 add       x0, x0, #0xfc8                                 ref 0x10096ffc8
+001003811f0: 412d00b0 adrp      x1, #0x10092a000                               
+001003811f4: 21202991 add       x1, x1, #0xa48                                 __NSConcreteGlobalBlock
+001003811f8: fa690f94 bl        #0x10075b9e0                                   _dispatch_once
+001003811fc: e9ffff17 b         #0x1003811a0                                   ref 0x1003811a0
+00100381200: 84680f94 bl        #0x10075b410                                   ___stack_chk_fail
+00100381204: f30300aa mov       x19, x0                                        
+00100381208: e0030091 mov       x0, sp                                         
+0010038120c: 4c1bfb97 bl        #0x100247f3c                                   ref 0x100247f3c
+00100381210: e00313aa mov       x0, x19                                        
+00100381214: 27670f94 bl        #0x10075aeb0                                   __Unwind_Resume
+
+IDENTIFICATION: Native audio volume-property wrapper LC_FUNCTION_STARTS: 0x10026f1b8 .. 0x10026f1c4
+Direct branch/call sites: 0x10037716c, 0x10037ed70, 0x10047c540, 0x100484f14, 0x10049284c, 0x1004e1d38
+Chained-fixup pointers: 
+FUNCTION 0x10026f1b8  end 0x10026f1c4
+0010026f1b8: 812d00f0 adrp      x1, #0x100822000                               
+0010026f1bc: 21b42d91 add       x1, x1, #0xb6d                                 'kBTAudioMsgPropertyVolumeScalar'
+0010026f1c0: b9020014 b         #0x10026fca4                                   ref 0x10026fca4
+
+IDENTIFICATION: Native float property conversion and notification LC_FUNCTION_STARTS: 0x10026fca4 .. 0x10026fd20
+Direct branch/call sites: 0x10026ee68, 0x10026f1c0, 0x10026fd28
+Chained-fixup pointers: 
+FUNCTION 0x10026fca4  end 0x10026fd20
+0010026fca4: 7f2303d5 pacibsp                                                  
+0010026fca8: ff0301d1 sub       sp, sp, #0x40                                  
+0010026fcac: f65701a9 stp       x22, x21, [sp, #0x10]                          
+0010026fcb0: f44f02a9 stp       x20, x19, [sp, #0x20]                          
+0010026fcb4: fd7b03a9 stp       x29, x30, [sp, #0x30]                          
+0010026fcb8: fdc30091 add       x29, sp, #0x30                                 
+0010026fcbc: f30301aa mov       x19, x1                                        
+0010026fcc0: f40300aa mov       x20, x0                                        
+0010026fcc4: e00f00bd str       s0, [sp, #0xc]                                 
+0010026fcc8: 283500f0 adrp      x8, #0x100916000                               
+0010026fccc: 087d42f9 ldr       x8, [x8, #0x4f8]                               _kCFAllocatorDefault
+0010026fcd0: 000140f9 ldr       x0, [x8]                                       
+0010026fcd4: e2330091 add       x2, sp, #0xc                                   
+0010026fcd8: 81018052 mov       w1, #0xc                                       
+0010026fcdc: 6da71394 bl        #0x100759a90                                   _CFNumberCreate
+0010026fce0: f50300aa mov       x21, x0                                        
+0010026fce4: e00314aa mov       x0, x20                                        
+0010026fce8: e10313aa mov       x1, x19                                        
+0010026fcec: e20315aa mov       x2, x21                                        
+0010026fcf0: ccfcff97 bl        #0x10026f020                                   ref 0x10026f020
+0010026fcf4: 80820391 add       x0, x20, #0xe0                                 
+0010026fcf8: e10313aa mov       x1, x19                                        
+0010026fcfc: e20315aa mov       x2, x21                                        
+0010026fd00: d0aa0094 bl        #0x10029a840                                   ref 0x10029a840
+0010026fd04: e00315aa mov       x0, x21                                        
+0010026fd08: b6a71394 bl        #0x100759be0                                   _CFRelease
+0010026fd0c: fd7b43a9 ldp       x29, x30, [sp, #0x30]                          
+0010026fd10: f44f42a9 ldp       x20, x19, [sp, #0x20]                          
+0010026fd14: f65741a9 ldp       x22, x21, [sp, #0x10]                          
+0010026fd18: ff030191 add       sp, sp, #0x40                                  
+0010026fd1c: ff0f5fd6 retab                                                    
+
+IDENTIFICATION: Connection teardown callback thunk (ABI candidate) LC_FUNCTION_STARTS: 0x10055b2f4 .. 0x10055b360
+Direct branch/call sites: 
+Chained-fixup pointers: 0x1009369b8
+FUNCTION 0x10055b2f4  end 0x10055b360
+0010055b2f4: 7f2303d5 pacibsp                                                  
+0010055b2f8: f44fbea9 stp       x20, x19, [sp, #-0x20]!                        
+0010055b2fc: fd7b01a9 stp       x29, x30, [sp, #0x10]                          
+0010055b300: fd430091 add       x29, sp, #0x10                                 
+0010055b304: f30301aa mov       x19, x1                                        
+0010055b308: f40300aa mov       x20, x0                                        
+0010055b30c: a8200090 adrp      x8, #0x10096f000                               
+0010055b310: 08e547f9 ldr       x8, [x8, #0xfc8]                               ref 0x10096ffc8
+0010055b314: 1f0500b1 cmn       x8, #1                                         
+0010055b318: 81010054 b.ne      #0x10055b348                                   
+0010055b31c: a8200090 adrp      x8, #0x10096f000                               
+0010055b320: 00e147f9 ldr       x0, [x8, #0xfc0]                               ref 0x10096ffc0
+0010055b324: e10314aa mov       x1, x20                                        
+0010055b328: e20313aa mov       x2, x19                                        
+0010055b32c: fd7b41a9 ldp       x29, x30, [sp, #0x10]                          
+0010055b330: f44fc2a8 ldp       x20, x19, [sp], #0x20                          
+0010055b334: ff2303d5 autibsp                                                  
+0010055b338: d0071eca eor       x16, x30, x30, lsl #1                          
+0010055b33c: 5000f0b6 tbz       x16, #0x3e, #0x10055b344                       
+0010055b340: 208e38d4 brk       #0xc471                                        
+0010055b344: dbd6ff17 b         #0x100550eb0                                   ref 0x100550eb0
+0010055b348: a0200090 adrp      x0, #0x10096f000                               
+0010055b34c: 00203f91 add       x0, x0, #0xfc8                                 ref 0x10096ffc8
+0010055b350: c11e00f0 adrp      x1, #0x100936000                               
+0010055b354: 21603591 add       x1, x1, #0xd58                                 __NSConcreteGlobalBlock
+0010055b358: a2010894 bl        #0x10075b9e0                                   _dispatch_once
+0010055b35c: f0ffff17 b         #0x10055b31c                                   ref 0x10055b31c
+
+IDENTIFICATION: Connection teardown removes registered per-peer state LC_FUNCTION_STARTS: 0x100550eb0 .. 0x100551148
+Direct branch/call sites: 0x10055b344
+Chained-fixup pointers: 
+FUNCTION 0x100550f7c  end 0x1005510ec
+00100550f7c: ffff01a9 stp       xzr, xzr, [sp, #0x18]                          
+00100550f80: 81620491 add       x1, x20, #0x118                                
+00100550f84: e0630091 add       x0, sp, #0x18                                  
+00100550f88: cadbf397 bl        #0x100247eb0                                   ref 0x100247eb0
+00100550f8c: e1a30091 add       x1, sp, #0x28                                  
+00100550f90: e00315aa mov       x0, x21                                        
+00100550f94: 6d000094 bl        #0x100551148                                   ref 0x100551148
+00100550f98: 000040f9 ldr       x0, [x0]                                       
+00100550f9c: 400100b4 cbz       x0, #0x100550fc4                               
+00100550fa0: 100040f9 ldr       x16, [x0]                                      
+00100550fa4: f10300aa mov       x17, x0                                        
+00100550fa8: f186e3f2 movk      x17, #0x1c37, lsl #48                          
+00100550fac: 301ac1da autda     x16, x17                                       
+00100550fb0: 080e44f8 ldr       x8, [x16, #0x40]!                              
+00100550fb4: e90310aa mov       x9, x16                                        
+00100550fb8: f10309aa mov       x17, x9                                        
+00100550fbc: d1e9fcf2 movk      x17, #0xe74e, lsl #48                          
+00100550fc0: 11093fd7 blraa     x8, x17                                        
+00100550fc4: e1a30091 add       x1, sp, #0x28                                  
+00100550fc8: e00315aa mov       x0, x21                                        
+00100550fcc: da2e0094 bl        #0x10055cb34                                   ref 0x10055cb34
+00100550fd0: 80e20791 add       x0, x20, #0x1f8                                
+00100550fd4: e1a30091 add       x1, sp, #0x28                                  
+00100550fd8: 132f0094 bl        #0x10055cc24                                   ref 0x10055cc24
+00100550fdc: e0630091 add       x0, sp, #0x18                                  
+00100550fe0: c0dbf397 bl        #0x100247ee0                                   ref 0x100247ee0
+00100550fe4: ffff00a9 stp       xzr, xzr, [sp, #8]                             
+00100550fe8: 81220691 add       x1, x20, #0x188                                
+00100550fec: e0230091 add       x0, sp, #8                                     
+00100550ff0: b0dbf397 bl        #0x100247eb0                                   ref 0x100247eb0
+00100550ff4: 80220791 add       x0, x20, #0x1c8                                
+00100550ff8: e1a30091 add       x1, sp, #0x28                                  
+00100550ffc: 6b78fc97 bl        #0x10046f1a8                                   ref 0x10046f1a8
+00100551000: e0230091 add       x0, sp, #8                                     
+00100551004: b7dbf397 bl        #0x100247ee0                                   ref 0x100247ee0
+00100551008: 88f640f9 ldr       x8, [x20, #0x1e8]                              
+0010055100c: 680500b4 cbz       x8, #0x1005510b8                               
+00100551010: 95820791 add       x21, x20, #0x1e0                               
+00100551014: 8aa20791 add       x10, x20, #0x1e8                               
+00100551018: e91740f9 ldr       x9, [sp, #0x28]                                
+0010055101c: f6030aaa mov       x22, x10                                       
+00100551020: 0b1140f9 ldr       x11, [x8, #0x20]                               
+00100551024: 0c210091 add       x12, x8, #8                                    
+00100551028: 7f0109eb cmp       x11, x9                                        
+0010055102c: 8b31889a csel      x11, x12, x8, lo                               
+00100551030: d632889a csel      x22, x22, x8, lo                               
+00100551034: 680140f9 ldr       x8, [x11]                                      
+00100551038: 48ffffb5 cbnz      x8, #0x100551020                               
+0010055103c: df020aeb cmp       x22, x10                                       
+00100551040: c0030054 b.eq      #0x1005510b8                                   
+00100551044: c81240f9 ldr       x8, [x22, #0x20]                               
+00100551048: 3f0108eb cmp       x9, x8                                         
+0010055104c: 63030054 b.lo      #0x1005510b8                                   
+00100551050: d81640f9 ldr       x24, [x22, #0x28]                              
+00100551054: d7c20091 add       x23, x22, #0x30                                
+00100551058: 1f0317eb cmp       x24, x23                                       
+0010055105c: 80020054 b.eq      #0x1005510ac                                   
+00100551060: 08874039 ldrb      w8, [x24, #0x21]                               
+00100551064: 1f810071 cmp       w8, #0x20                                      
+00100551068: 61000054 b.ne      #0x100551074                                   
+0010055106c: 011740f9 ldr       x1, [x24, #0x28]                               
+00100551070: 4a000094 bl        #0x100551198                                   ref 0x100551198
+00100551074: 090740f9 ldr       x9, [x24, #8]                                  
+00100551078: a90000b4 cbz       x9, #0x10055108c                               
+0010055107c: e80309aa mov       x8, x9                                         
+00100551080: 290140f9 ldr       x9, [x9]                                       
+00100551084: c9ffffb5 cbnz      x9, #0x10055107c                               
+00100551088: 06000014 b         #0x1005510a0                                   ref 0x1005510a0
+0010055108c: 080b40f9 ldr       x8, [x24, #0x10]                               
+00100551090: 090140f9 ldr       x9, [x8]                                       
+00100551094: 3f0118eb cmp       x9, x24                                        
+00100551098: f80308aa mov       x24, x8                                        
+0010055109c: 81ffff54 b.ne      #0x10055108c                                   
+001005510a0: f80308aa mov       x24, x8                                        
+001005510a4: 1f0117eb cmp       x8, x23                                        
+001005510a8: c1fdff54 b.ne      #0x100551060                                   
+001005510ac: e00315aa mov       x0, x21                                        
+001005510b0: e10316aa mov       x1, x22                                        
+001005510b4: 182f0094 bl        #0x10055cd14                                   ref 0x10055cd14
+001005510b8: e11740f9 ldr       x1, [sp, #0x28]                                
+001005510bc: 881641f9 ldr       x8, [x20, #0x228]                              
+001005510c0: 3f0008eb cmp       x1, x8                                         
+001005510c4: 41000054 b.ne      #0x1005510cc                                   
+001005510c8: 9f1601f9 str       xzr, [x20, #0x228]                             
+001005510cc: e00314aa mov       x0, x20                                        
+001005510d0: 02008052 mov       w2, #0                                         
+001005510d4: e30313aa mov       x3, x19                                        
+001005510d8: 8c5ffb97 bl        #0x100428f08                                   ref 0x100428f08
+001005510dc: e0230091 add       x0, sp, #8                                     
+001005510e0: 97dbf397 bl        #0x100247f3c                                   ref 0x100247f3c
+001005510e4: e0630091 add       x0, sp, #0x18                                  
+001005510e8: 95dbf397 bl        #0x100247f3c                                   ref 0x100247f3c
+
+IDENTIFICATION: Native stack mutex lock LC_FUNCTION_STARTS: 0x1000a042c .. 0x1000a0528
+Direct branch/call sites: 0x100072930, 0x100073a34, 0x100073da4, 0x1000748b8, 0x10007acbc, 0x10007ad58, 0x10007af94, 0x10007c520, 0x10007d6b8, 0x10007d794, 0x10007d7bc, 0x1000a0630, 0x1000a0a20, 0x1000a0be8, 0x1000a0f34, 0x1000a2314, 0x1000a25dc, 0x1000a4c18, 0x1000a51f4, 0x1000a5388, 0x1000e7b8c, 0x1000e7bbc, 0x10011026c, 0x1001102e0, 0x100190040, 0x1001f67b4, 0x100247c0c, 0x100247c2c, 0x1002d3678, 0x1002d370c, 0x1002d3a7c, 0x1002d3b10, 0x1002d3ba4, 0x1002d3c38, 0x1002d3d14, 0x1002d3e10, 0x1002d44cc, 0x1002f222c, 0x100523c94, 0x100525b18, 0x100525c54, 0x1005a66ac, 0x1005a73c0, 0x1005a7590, 0x1005a76fc, 0x1005a78cc, 0x1005a7abc, 0x1005abbb8, 0x1005abf74, 0x1005ac020, 0x1005ac1f8, 0x1005ac33c, 0x1005ac5c0, 0x1005ac6ac, 0x1005adf18, 0x1005aeaa0, 0x1005aeab0, 0x1005afc38
+Chained-fixup pointers: 
+FUNCTION 0x1000a042c  end 0x1000a0528
+001000a042c: 7f2303d5 pacibsp                                                  
+001000a0430: f44fbea9 stp       x20, x19, [sp, #-0x20]!                        
+001000a0434: fd7b01a9 stp       x29, x30, [sp, #0x10]                          
+001000a0438: fd430091 add       x29, sp, #0x10                                 
+001000a043c: a0460090 adrp      x0, #0x100974000                               
+001000a0440: 00002791 add       x0, x0, #0x9c0                                 ref 0x1009749c0
+001000a0444: 2ff11a94 bl        #0x10075c900                                   _pthread_mutex_lock
+001000a0448: 46f11a94 bl        #0x10075c960                                   _pthread_self
+001000a044c: b3460090 adrp      x19, #0x100974000                              
+001000a0450: 73022891 add       x19, x19, #0xa00                               ref 0x100974a00
+001000a0454: e10313aa mov       x1, x19                                        
+001000a0458: 02088052 mov       w2, #0x40                                      
+001000a045c: 15f11a94 bl        #0x10075c8b0                                   _pthread_getname_np
+001000a0460: 68024039 ldrb      w8, [x19]                                      ref 0x100974a00
+001000a0464: c8010035 cbnz      w8, #0x1000a049c                               
+001000a0468: 000080d2 mov       x0, #0                                         
+001000a046c: 75ed1a94 bl        #0x10075ba40                                   _dispatch_queue_get_label
+001000a0470: e10300aa mov       x1, x0                                         
+001000a0474: b3460090 adrp      x19, #0x100974000                              
+001000a0478: 73022891 add       x19, x19, #0xa00                               ref 0x100974a00
+001000a047c: e00313aa mov       x0, x19                                        
+001000a0480: 02088052 mov       w2, #0x40                                      
+001000a0484: 03088052 mov       w3, #0x40                                      
+001000a0488: eeeb1a94 bl        #0x10075b440                                   ___strlcpy_chk
+001000a048c: 413d00d0 adrp      x1, #0x10084a000                               
+001000a0490: 21f81c91 add       x1, x1, #0x73e                                 '-'
+001000a0494: e00313aa mov       x0, x19                                        
+001000a0498: 2af21a94 bl        #0x10075cd40                                   _strtok
+001000a049c: a8460090 adrp      x8, #0x100974000                               
+001000a04a0: 08312c91 add       x8, x8, #0xb0c                                 ref 0x100974b0c
+001000a04a4: 29008052 mov       w9, #1                                         
+001000a04a8: 080129b8 ldadd     w9, w8, [x8]                                   
+001000a04ac: 88000034 cbz       w8, #0x1000a04bc                               
+001000a04b0: fd7b41a9 ldp       x29, x30, [sp, #0x10]                          
+001000a04b4: f44fc2a8 ldp       x20, x19, [sp], #0x20                          
+001000a04b8: ff0f5fd6 retab                                                    
+001000a04bc: b4460090 adrp      x20, #0x100974000                              
+001000a04c0: 938a45f9 ldr       x19, [x20, #0xb10]                             ref 0x100974b10
+001000a04c4: 000080d2 mov       x0, #0                                         
+001000a04c8: 01809cd2 mov       x1, #0xe400                                    
+001000a04cc: 6181aaf2 movk      x1, #0x540b, lsl #16                           
+001000a04d0: 4100c0f2 movk      x1, #2, lsl #32                                
+001000a04d4: a7ed1a94 bl        #0x10075bb70                                   _dispatch_time
+001000a04d8: e10300aa mov       x1, x0                                         
+001000a04dc: e00313aa mov       x0, x19                                        
+001000a04e0: 02809cd2 mov       x2, #0xe400                                    
+001000a04e4: 6281aaf2 movk      x2, #0x540b, lsl #16                           
+001000a04e8: 4200c0f2 movk      x2, #2, lsl #32                                
+001000a04ec: 03409952 mov       w3, #0xca00                                    
+001000a04f0: 4373a772 movk      w3, #0x3b9a, lsl #16                           
+001000a04f4: 93ed1a94 bl        #0x10075bb40                                   _dispatch_source_set_timer
+001000a04f8: 938a45f9 ldr       x19, [x20, #0xb10]                             ref 0x100974b10
+001000a04fc: e00313aa mov       x0, x19                                        
+001000a0500: 1ced1a94 bl        #0x10075b970                                   _dispatch_get_context
+001000a0504: 1f0000f9 str       xzr, [x0]                                      
+001000a0508: e00313aa mov       x0, x19                                        
+001000a050c: fd7b41a9 ldp       x29, x30, [sp, #0x10]                          
+001000a0510: f44fc2a8 ldp       x20, x19, [sp], #0x20                          
+001000a0514: ff2303d5 autibsp                                                  
+001000a0518: d0071eca eor       x16, x30, x30, lsl #1                          
+001000a051c: 5000f0b6 tbz       x16, #0x3e, #0x1000a0524                       
+001000a0520: 208e38d4 brk       #0xc471                                        
+001000a0524: 53ed1a14 b         #0x10075ba70                                   _dispatch_resume
+
+IDENTIFICATION: Native stack mutex unlock LC_FUNCTION_STARTS: 0x1000a0528 .. 0x1000a0578
+Direct branch/call sites: 0x100072a04, 0x100072aac, 0x100073a64, 0x100073d98, 0x100074824, 0x10007acc8, 0x10007b330, 0x10007b594, 0x10007c508, 0x10007d748, 0x10007d7a8, 0x10007d7d8, 0x1000a06f4, 0x1000a0a28, 0x1000a0c20, 0x1000a0f7c, 0x1000a0f94, 0x1000a2320, 0x1000a25e8, 0x1000a4bf8, 0x1000a5200, 0x1000a5394, 0x1000e7ba0, 0x1000e7bd8, 0x100110260, 0x1001102d4, 0x100190070, 0x1001f68a8, 0x100247c44, 0x100247c68, 0x1002d3698, 0x1002d372c, 0x1002d3a9c, 0x1002d3b30, 0x1002d3bc4, 0x1002d3c58, 0x1002d3d34, 0x1002d3e30, 0x1002d44f4, 0x1002f2298, 0x1002f22c0, 0x100523cb0, 0x100525b34, 0x100525c70, 0x1005a66d0, 0x1005a73e0, 0x1005a75b8, 0x1005a771c, 0x1005a78f4, 0x1005a7ae8, 0x1005abbd8, 0x1005abf94, 0x1005ac030, 0x1005ac254, 0x1005ac354, 0x1005ac5e0, 0x1005ac6bc, 0x1005adf34, 0x1005aeac0, 0x1005afc98
+Chained-fixup pointers: 
+FUNCTION 0x1000a0528  end 0x1000a0578
+001000a0528: 7f2303d5 pacibsp                                                  
+001000a052c: f44fbea9 stp       x20, x19, [sp, #-0x20]!                        
+001000a0530: fd7b01a9 stp       x29, x30, [sp, #0x10]                          
+001000a0534: fd430091 add       x29, sp, #0x10                                 
+001000a0538: 67be0394 bl        #0x10018fed4                                   ref 0x10018fed4
+001000a053c: f30300aa mov       x19, x0                                        
+001000a0540: a0460090 adrp      x0, #0x100974000                               
+001000a0544: 00002791 add       x0, x0, #0x9c0                                 ref 0x1009749c0
+001000a0548: f6f01a94 bl        #0x10075c920                                   _pthread_mutex_unlock
+001000a054c: 13010034 cbz       w19, #0x1000a056c                              
+001000a0550: fd7b41a9 ldp       x29, x30, [sp, #0x10]                          
+001000a0554: f44fc2a8 ldp       x20, x19, [sp], #0x20                          
+001000a0558: ff2303d5 autibsp                                                  
+001000a055c: d0071eca eor       x16, x30, x30, lsl #1                          
+001000a0560: 5000f0b6 tbz       x16, #0x3e, #0x1000a0568                       
+001000a0564: 208e38d4 brk       #0xc471                                        
+001000a0568: 60be0314 b         #0x10018fee8                                   ref 0x10018fee8
+001000a056c: fd7b41a9 ldp       x29, x30, [sp, #0x10]                          
+001000a0570: f44fc2a8 ldp       x20, x19, [sp], #0x20                          
+001000a0574: ff0f5fd6 retab                                                    
+
+IDENTIFICATION: Stack lock RAII constructor LC_FUNCTION_STARTS: 0x100247c10 .. 0x100247c40
+Direct branch/call sites: 0x100027c28, 0x100062778, 0x100062790, 0x100063170, 0x1000684d0, 0x100068824, 0x100068894, 0x100068a5c, 0x100068aa8, 0x100212cd4, 0x100213264, 0x100213418, 0x100213d18, 0x1002163a4, 0x1002168a4, 0x100216f64, 0x1002172b0, 0x1002181e0, 0x100219a68, 0x10021a34c, 0x10021a4f4, 0x10021ad38, 0x10021de40, 0x10021df14, 0x10021e230, 0x100222274, 0x100224d38, 0x1002252dc, 0x100225840, 0x100227b5c, 0x100227d40, 0x100227f38, 0x100228130, 0x100228360, 0x1002290b4, 0x1002297d4, 0x10022a0dc, 0x1002357dc, 0x100235fb4, 0x10023668c, 0x100236ab4, 0x10023af1c, 0x10023d0f0, 0x10023d3c8, 0x10023d578, 0x10023d7f0, 0x10023d99c, 0x10023db3c, 0x10023dce8, 0x10023de98, 0x10023e040, 0x10023e20c, 0x10023e3d0, 0x10023e59c, 0x10023e788, 0x10023e964, 0x10023eb34, 0x10023ecd8, 0x10023ee0c, 0x10023f05c, 0x10023f428, 0x10023f5b8, 0x100240630, 0x1002492f0, 0x10024a610, 0x10024b118, 0x10024b394, 0x10024bd20, 0x10024c98c, 0x10024ccc8, 0x10024e5e4, 0x10024e938, 0x10024ee5c, 0x100250760, 0x100250a04, 0x1002522ac, 0x1002526b8, 0x1002575e0, 0x100258770, 0x100258f04, 0x1002598b0, 0x10025a2e8, 0x10025a4e8, 0x10025a684, 0x10025a884, 0x10025a900, 0x10025aa50, 0x10025aec0, 0x10027a0f4, 0x10027a260, 0x10027a6a8, 0x10028e3d4, 0x10029f490, 0x1002a0ae4, 0x1002a41e4, 0x1002a4558, 0x1002a4700, 0x1002a53c0, 0x1002a8a74, 0x1002a9214, 0x1002ae310, 0x1002b0de0, 0x1002b2d84, 0x1002b3314, 0x1002b56b8, 0x1002b64ac, 0x1002bba98, 0x1002d970c, 0x1002d9e50, 0x1003080b4, 0x10035ac98, 0x10035ad58, 0x10035ae30, 0x10035b06c, 0x10035d650, 0x10035d85c, 0x10035dd4c, 0x10035f944, 0x10035f9b4, 0x10035fb2c, 0x1003600f0, 0x1003677c4, 0x1003679e4, 0x100367c1c, 0x10036a460, 0x10036a9ac, 0x10036b0bc, 0x10036bea0, 0x10036bf8c, 0x10036c870, 0x10036d8a8, 0x10036e1a0, 0x10036e9d4, 0x10036ea0c, 0x10036ea3c, 0x10036fbf4, 0x10037019c, 0x1003701e4, 0x100370f88, 0x100372df0, 0x100372f08, 0x100373f14, 0x100374364, 0x100374414, 0x1003757d8, 0x100375bb0, 0x100375e6c, 0x100376134, 0x1003765c4, 0x100376624, 0x10037697c, 0x100378348, 0x100378550, 0x100378804, 0x100378b20, 0x100378e74, 0x1003793a4, 0x100379e00, 0x10037a6a8, 0x10037aa10, 0x10037ac5c, 0x10037aca8, 0x10037afb8, 0x10037b440, 0x10037b768, 0x10037b9d0, 0x10037c3d4, 0x10037c4b4, 0x10037c75c, 0x10037cf64, 0x10037d538, 0x10037d638, 0x10037d828, 0x10037da58, 0x10037de24, 0x10037e174, 0x10037e3a4, 0x10037e578, 0x1003809e4, 0x100380dd0, 0x100382e10, 0x100383a40, 0x100383ab8, 0x100383f20, 0x100384610, 0x100384d1c, 0x100387e08, 0x10038b710, 0x10038c558, 0x10038d9f0, 0x10038e72c, 0x10038e8e0, 0x10038f4ac, 0x10038f810, 0x10038f830, 0x10039053c, 0x100390cf0, 0x10039172c, 0x100391d0c, 0x100392638, 0x100392cf0, 0x100392f1c, 0x1003ae348, 0x1003b0374, 0x1003b4078, 0x1003b414c, 0x1003b426c, 0x1003b5d40, 0x1003c4914, 0x1003cce58, 0x1003cd048, 0x1003cd2e0, 0x1003cd550, 0x1003cda74, 0x1003ce644, 0x1003ce824, 0x1003cee98, 0x1003cef38, 0x1003cf02c, 0x1003cf22c, 0x1003df5dc, 0x1003e612c, 0x1003e9bb4, 0x1003ebb04, 0x1003f5c58, 0x1003ff94c, 0x1003fff20, 0x10040018c, 0x100400658, 0x100400d8c, 0x100402844, 0x100403604, 0x1004039d0, 0x100404b08, 0x100405298, 0x1004073bc, 0x100407598, 0x10040ed38, 0x10040ede0, 0x100412dc0, 0x100416740, 0x100416828, 0x10041d600, 0x10041d6f4, 0x10041f08c, 0x10041f274, 0x1004203b8, 0x100427930, 0x10042a1fc, 0x10042c39c, 0x10042cd04, 0x10042e628, 0x100430328, 0x100430378, 0x100433120, 0x100433930, 0x1004415b4, 0x100443314, 0x100447690, 0x1004487b8, 0x100448864, 0x100448910, 0x100448944, 0x1004495c0, 0x1004498d4, 0x100449924, 0x100449ce4, 0x100449e78, 0x10044a424, 0x10044b628, 0x10044c14c, 0x10044c600, 0x10044c768, 0x10044dab4, 0x10044de74, 0x10044f12c, 0x10044f718, 0x10044fd4c, 0x100451a10, 0x1004522ac, 0x10045253c, 0x100452d10, 0x100452dd8, 0x100452e20, 0x100453040, 0x100453064, 0x100453270, 0x1004536d4, 0x100453878, 0x100453b88, 0x100453dc8, 0x100453edc, 0x100454318, 0x1004544bc, 0x10045477c, 0x100459374, 0x1004593c8, 0x10045b81c, 0x10045bd14, 0x10045bdc0, 0x10045bf94, 0x10045eb38, 0x10045f158, 0x10046361c, 0x100463b80, 0x100463d70, 0x100465200, 0x1004653b4, 0x10047009c, 0x100474910, 0x100476de4, 0x100476f54, 0x100479498, 0x10047969c, 0x100479810, 0x100479ae4, 0x100479ed8, 0x10047bad4, 0x10047dd78, 0x10047e5e0, 0x10047e7b4, 0x10047ea34, 0x10047eb78, 0x10047f4c8, 0x100480098, 0x100480484, 0x1004808b8, 0x100480d74, 0x100480e70, 0x100482540, 0x100482db8, 0x100482df4, 0x100482f84, 0x100483388, 0x100483aa0, 0x100483bbc, 0x100483c60, 0x1004840cc, 0x100484308, 0x100484f20, 0x100484fbc, 0x1004855a4, 0x100485614, 0x100485784, 0x1004858a0, 0x100485918, 0x100486a20, 0x100486b64, 0x100486de8, 0x100487630, 0x10048765c, 0x100487838, 0x100487b28, 0x100487c8c, 0x100487fb4, 0x100488ba8, 0x100489a50, 0x10048b294, 0x10048b674, 0x10048bcac, 0x10048c0d0, 0x10048c304, 0x10048d40c, 0x10048d4f0, 0x10048e3b8, 0x10048e7d8, 0x10048ea34, 0x10048ed10, 0x10048f068, 0x10048f8e4, 0x10048fb0c, 0x100491164, 0x100491754, 0x100491cdc, 0x100492130, 0x100492198, 0x1004921e0, 0x1004922d4, 0x100492338, 0x10049240c, 0x100493b30, 0x1004955cc, 0x100495bf0, 0x100495d1c, 0x1004960f0, 0x10049612c, 0x100496258, 0x100496558, 0x1004a46d8, 0x1004a4be0, 0x1004a4ffc, 0x1004a82cc, 0x1004a8370, 0x1004a8560, 0x1004a8974, 0x1004a8c94, 0x1004a9824, 0x1004a9aa8, 0x1004ab00c, 0x1004ac550, 0x1004acb3c, 0x1004addd8, 0x1004ae084, 0x1004ae450, 0x1004b2738, 0x1004c3998, 0x1004c3ed8, 0x1004c564c, 0x1004c95b0, 0x1004ca02c, 0x1004cd3c4, 0x1004cd518, 0x1004d35d8, 0x1004dc4f4, 0x1004dc578, 0x1004dcbe8, 0x1004dd384, 0x1004dd574, 0x1004ddc50, 0x1004ddfe4, 0x1004deddc, 0x1004def18, 0x1004deff8, 0x1004e0f24, 0x1004e1934, 0x1004e5b3c, 0x1004e6048, 0x1004e8c28, 0x1004e9428, 0x1004f6934, 0x1004fdb34, 0x1004fde18, 0x10050274c, 0x1005027fc, 0x100502bb4, 0x100502c00, 0x100502c8c, 0x10051dc14, 0x10051deac, 0x10051df54, 0x10051e068, 0x10051e398, 0x10051ea9c, 0x10051eda0, 0x10051fbe8, 0x10051fc40, 0x10052026c, 0x100520418, 0x100520768, 0x1005209f4, 0x100520c38, 0x100520d9c, 0x10052c794, 0x10052e99c, 0x10052ed88, 0x10052f270, 0x10052f51c, 0x10052f594, 0x10052f860, 0x10054c940, 0x10054d1dc, 0x10054d278, 0x10054d330, 0x10054d45c, 0x10054d898, 0x10054dbac, 0x10054dd00, 0x10054e328, 0x10054e820, 0x10054ee1c, 0x10054f5e0, 0x10054f7a0, 0x10054fac8, 0x10054fea0, 0x100551408, 0x1005527cc, 0x1005527e4, 0x100552810, 0x100553598, 0x100553820, 0x100553ac8, 0x100553d14, 0x100553f5c, 0x1005541c4, 0x100554424, 0x1005547a0, 0x100554ff0, 0x1005554c8, 0x100555908, 0x100556270, 0x1005569c4, 0x100556f5c, 0x1005573c4, 0x1005577f8, 0x100557cfc, 0x100558244, 0x1005586a4, 0x100559224, 0x100559254, 0x10055a138, 0x10055a254, 0x10055a760, 0x10055a7e8, 0x10055abe8, 0x10055ad38, 0x1005692c0, 0x1005693d4, 0x10056a650, 0x10056a734, 0x10056acdc, 0x10056b008, 0x10056b404, 0x10056b47c, 0x10056b4ac, 0x10056c82c, 0x10056d560, 0x10056dccc, 0x10056e950, 0x10056f438, 0x10056f96c, 0x100576358, 0x1005763e8, 0x100576540, 0x1005765a8, 0x100576708, 0x100576770, 0x100578e94, 0x10057d21c, 0x10057fadc, 0x10058007c, 0x10058058c, 0x100580b68, 0x100581204, 0x1005817d8, 0x100581fc0, 0x1005824b8, 0x100582870, 0x100582ba0, 0x100582e68, 0x100582f8c, 0x10058304c, 0x1005831b4, 0x100583338, 0x10058457c, 0x100586b5c, 0x10058f834, 0x10058fa3c, 0x10058fd20, 0x10058ff04, 0x100590568, 0x100591528, 0x100596440, 0x100596804, 0x10059992c, 0x1005a71e4, 0x1005b6038, 0x1005b68f0, 0x1005b874c, 0x1005b8918, 0x1005b8f18, 0x1005bcc3c, 0x1005bcfd0, 0x1005c0fec, 0x1005c1180, 0x1005c180c, 0x1005c1b1c, 0x1005c1f00, 0x1005c1fe8, 0x1005c20a4, 0x1005c69a8, 0x1005c6e94, 0x1005c7c38, 0x1005c8b20, 0x1005c8ea0, 0x1005c9a38, 0x1005c9c48, 0x1005ca49c, 0x1005ca574, 0x1005ca610, 0x1005ca6ac, 0x1005ca744, 0x1005ca958, 0x1005caa80, 0x1005cab64, 0x1005cac20, 0x1005cace4, 0x1005cafe0, 0x1005cc49c, 0x1005cc538, 0x1005cc9b8, 0x1005ccb04, 0x1005cd688, 0x1005ce748, 0x1005d7914, 0x1005d8608, 0x1005d9064, 0x1005d9b48, 0x1005db250, 0x1005db29c, 0x1005dd214, 0x1005e1e58, 0x1005e2108, 0x1005e29f8, 0x1005e2dd4, 0x1005e358c, 0x1005e36cc, 0x1005e3750, 0x1005e3bc0, 0x1005e3da0, 0x1005e3e5c, 0x1005e3f38, 0x1005e3fe8, 0x1005e4178, 0x1005e5720, 0x1005e5904, 0x1005e5bbc, 0x1005e5d04, 0x1005e5eb4, 0x1005e6190, 0x1005e6448, 0x1005e6750, 0x1005e6910, 0x1005e6b44, 0x1005e6c7c, 0x1005e6e04, 0x1005e73d0, 0x1005e831c, 0x1005ea38c, 0x1005ea53c, 0x1005ec890, 0x1005ecc20, 0x1005f4a00, 0x1005f8f04, 0x1005f9e34, 0x1005fa3f8, 0x1005fa730, 0x1005faa44, 0x1005ff3e4, 0x10060f1f0, 0x100628828, 0x10063174c, 0x100632c7c, 0x10063356c, 0x10063446c, 0x100635aa0, 0x100635fa8, 0x100637cc8, 0x10064268c, 0x100642884, 0x100643118, 0x1006655f8, 0x10066a220, 0x10066ac1c, 0x10066bf98, 0x10066c3a8, 0x10066c5f0, 0x10066e3b8, 0x10066e764, 0x10066eadc, 0x10066ebd0, 0x10066eeb4, 0x10066ef50, 0x10066f11c, 0x10066f338, 0x10066f6ec, 0x10066fb70, 0x10066fd7c, 0x100670520, 0x10067262c, 0x1006735c8, 0x1006737c0, 0x1006760f0, 0x10067667c, 0x1006768b4, 0x100677598, 0x100677898, 0x100677b00, 0x100677d40, 0x100678020, 0x10067b1d4, 0x10067b32c, 0x10068568c, 0x100685894, 0x100685b78, 0x100685d5c, 0x1006863b8, 0x1006a032c, 0x1006a0424, 0x1006a0584, 0x1006a2e08, 0x1006a3220
+Chained-fixup pointers: 
+FUNCTION 0x100247c10  end 0x100247c40
+00100247c10: 7f2303d5 pacibsp                                                  
+00100247c14: f44fbea9 stp       x20, x19, [sp, #-0x20]!                        
+00100247c18: fd7b01a9 stp       x29, x30, [sp, #0x10]                          
+00100247c1c: fd430091 add       x29, sp, #0x10                                 
+00100247c20: f30300aa mov       x19, x0                                        
+00100247c24: 28008052 mov       w8, #1                                         
+00100247c28: 08000039 strb      w8, [x0]                                       
+00100247c2c: 0062f997 bl        #0x1000a042c                                   ref 0x1000a042c
+00100247c30: e00313aa mov       x0, x19                                        
+00100247c34: fd7b41a9 ldp       x29, x30, [sp, #0x10]                          
+00100247c38: f44fc2a8 ldp       x20, x19, [sp], #0x20                          
+00100247c3c: ff0f5fd6 retab                                                    
+
+IDENTIFICATION: Stack lock RAII destructor LC_FUNCTION_STARTS: 0x100247c48 .. 0x100247c7c
+Direct branch/call sites: 0x100027c6c, 0x100029290, 0x100062908, 0x100063228, 0x1000633cc, 0x1000684fc, 0x100068864, 0x10006890c, 0x100068a90, 0x100068b10, 0x100068fc0, 0x1000690f4, 0x100212d0c, 0x100212ff4, 0x10021307c, 0x100213364, 0x100213434, 0x100213504, 0x10021352c, 0x100213da8, 0x100213df8, 0x1002163f0, 0x1002164f4, 0x1002168f0, 0x100216978, 0x100216f98, 0x100217018, 0x100217888, 0x100217a30, 0x1002182fc, 0x100218360, 0x100219a7c, 0x100219b34, 0x10021a3b0, 0x10021a430, 0x10021a534, 0x10021a58c, 0x10021ae04, 0x10021ae8c, 0x10021def0, 0x10021df80, 0x10021e06c, 0x10021e294, 0x10021e36c, 0x100222900, 0x100222a84, 0x100224fe0, 0x10022509c, 0x100225300, 0x1002253d0, 0x100225bb4, 0x100225f04, 0x100227bc0, 0x100227c50, 0x100227da4, 0x100227e34, 0x100227f98, 0x100228028, 0x1002281ec, 0x100228248, 0x1002283cc, 0x100228438, 0x10022910c, 0x1002292a0, 0x1002292bc, 0x100229874, 0x100229c64, 0x10022a198, 0x10022a1fc, 0x1002358a0, 0x1002358f4, 0x100235ffc, 0x1002361ac, 0x1002366ac, 0x1002366d0, 0x100236b28, 0x100236b74, 0x10023b014, 0x10023b1a8, 0x10023d260, 0x10023d2dc, 0x10023d414, 0x10023d490, 0x10023d670, 0x10023d704, 0x10023d83c, 0x10023d8b8, 0x10023d9e4, 0x10023da5c, 0x10023db80, 0x10023dbf8, 0x10023dd38, 0x10023ddb4, 0x10023dee0, 0x10023df58, 0x10023e0a0, 0x10023e12c, 0x10023e268, 0x10023e2f0, 0x10023e42c, 0x10023e4b4, 0x10023e5fc, 0x10023e688, 0x10023e7ec, 0x10023e878, 0x10023e9c0, 0x10023ea4c, 0x10023eb8c, 0x10023ec18, 0x10023ed34, 0x10023ed9c, 0x10023ef7c, 0x10023eff8, 0x10023f0d0, 0x10023f140, 0x10023f51c, 0x10023f5e8, 0x10023f638, 0x100240644, 0x100240670, 0x100249c78, 0x100249ea0, 0x10024a90c, 0x10024a984, 0x10024b1b4, 0x10024b25c, 0x10024b3a0, 0x10024b3e8, 0x10024bdc4, 0x10024bdd0, 0x10024c008, 0x10024c9ac, 0x10024ca54, 0x10024cd38, 0x10024cdb4, 0x10024e66c, 0x10024e708, 0x10024ea28, 0x10024eae8, 0x10024ee70, 0x10024eec8, 0x1002508f4, 0x100250948, 0x100250d74, 0x100250dd8, 0x1002522cc, 0x100252644, 0x100252708, 0x100257694, 0x1002577b0, 0x1002587b0, 0x1002587e4, 0x100258f24, 0x100258f68, 0x1002598d0, 0x1002598ec, 0x10025a49c, 0x10025a534, 0x10025a74c, 0x10025a810, 0x10025a89c, 0x10025a918, 0x10025a9f4, 0x10025aad0, 0x10025ab08, 0x10025ab50, 0x10025aec8, 0x10027a164, 0x10027a324, 0x10027a734, 0x10027a7a4, 0x10027ac0c, 0x10027ac5c, 0x10028e4ac, 0x10028e51c, 0x10029f4b4, 0x10029f604, 0x1002a0b08, 0x1002a0c64, 0x1002a4258, 0x1002a4374, 0x1002a4764, 0x1002a4864, 0x1002a48d8, 0x1002a5458, 0x1002a54dc, 0x1002a8b24, 0x1002a8bac, 0x1002a9358, 0x1002a93d4, 0x1002ae504, 0x1002ae5c0, 0x1002b14d8, 0x1002b1660, 0x1002b2e44, 0x1002b2ee4, 0x1002b3430, 0x1002b34f4, 0x1002b5830, 0x1002b5900, 0x1002b651c, 0x1002b6658, 0x1002bbc40, 0x1002bbcb8, 0x1002d97a4, 0x1002d983c, 0x1002d9e64, 0x1002d9e98, 0x1003080e0, 0x100308d60, 0x10035acd4, 0x10035ad94, 0x10035afc8, 0x10035b0f0, 0x10035b24c, 0x10035d68c, 0x10035d728, 0x10035d894, 0x10035d930, 0x10035de38, 0x10035e05c, 0x10035f9f8, 0x10035fbb0, 0x100360178, 0x100360550, 0x100367804, 0x1003678d0, 0x100367a38, 0x100367ac4, 0x100367c78, 0x100367d28, 0x10036a4f4, 0x10036a5b4, 0x10036a604, 0x10036ac14, 0x10036ac64, 0x10036b51c, 0x10036ba58, 0x10036bee4, 0x10036c010, 0x10036c0ac, 0x10036cbb4, 0x10036ced4, 0x10036d8d8, 0x10036d9d8, 0x10036e47c, 0x10036e560, 0x10036ea1c, 0x10036ea7c, 0x10036ea9c, 0x10036ed04, 0x10036fd58, 0x10036fdf8, 0x1003701f4, 0x100370230, 0x10037044c, 0x100370fd8, 0x100372e58, 0x100372ed4, 0x100372f4c, 0x100372f7c, 0x100373f4c, 0x100373fb0, 0x10037439c, 0x100374474, 0x100374548, 0x1003757f4, 0x1003759fc, 0x100375be8, 0x100375c24, 0x100375f78, 0x100375fd4, 0x100376178, 0x1003761b8, 0x100376618, 0x100376678, 0x1003766d0, 0x10037673c, 0x100376a98, 0x100376b28, 0x100378380, 0x1003786d0, 0x1003787a8, 0x100378844, 0x10037887c, 0x100378c0c, 0x100378ca0, 0x100378f80, 0x100379018, 0x1003796f4, 0x100379820, 0x100379e38, 0x100379e58, 0x10037a738, 0x10037a7ec, 0x10037aa4c, 0x10037aaf8, 0x10037adb0, 0x10037ae54, 0x10037afdc, 0x10037b1b0, 0x10037b478, 0x10037b528, 0x10037b7a0, 0x10037b850, 0x10037ba14, 0x10037ba8c, 0x10037c420, 0x10037c464, 0x10037c4f8, 0x10037c538, 0x10037c880, 0x10037c914, 0x10037cf8c, 0x10037d00c, 0x10037d578, 0x10037d5e8, 0x10037d67c, 0x10037d6bc, 0x10037d848, 0x10037d8a8, 0x10037da8c, 0x10037db18, 0x10037de60, 0x10037df0c, 0x10037e198, 0x10037e20c, 0x10037e5b0, 0x10037e644, 0x100380a40, 0x100380abc, 0x100380e2c, 0x100380e74, 0x100382e6c, 0x100382ee8, 0x100383cd0, 0x100383e6c, 0x100384404, 0x1003844e4, 0x1003846d4, 0x10038474c, 0x100384d38, 0x100384e0c, 0x100387e7c, 0x100387eb0, 0x10038bdd8, 0x10038bf38, 0x10038c5d8, 0x10038d178, 0x10038d448, 0x10038dbfc, 0x10038dc34, 0x10038e764, 0x10038e8f0, 0x10038eca0, 0x10038f5e0, 0x10038f67c, 0x10038f878, 0x10038f8e0, 0x100390718, 0x100390a3c, 0x100390ac8, 0x100390d04, 0x100390d58, 0x100391744, 0x1003917a4, 0x100391d34, 0x100392528, 0x100392654, 0x100392b0c, 0x100392d0c, 0x100392db8, 0x100392f38, 0x1003933d0, 0x1003ae370, 0x1003ae3e8, 0x1003b038c, 0x1003b03a8, 0x1003b40b4, 0x1003b411c, 0x1003b4204, 0x1003b423c, 0x1003b42fc, 0x1003b4344, 0x1003b5dc8, 0x1003b5df4, 0x1003c4bd8, 0x1003c4cb4, 0x1003ccf3c, 0x1003ccf58, 0x1003ccf7c, 0x1003cd084, 0x1003cd094, 0x1003cd0c4, 0x1003cd3c0, 0x1003cd408, 0x1003cd58c, 0x1003cd5bc, 0x1003cdad0, 0x1003cdb04, 0x1003ce6a4, 0x1003ce718, 0x1003ce8b0, 0x1003ce8f4, 0x1003ceeac, 0x1003ceecc, 0x1003cef44, 0x1003cef64, 0x1003cf0a4, 0x1003cf110, 0x1003cf288, 0x1003cf2fc, 0x1003df65c, 0x1003df69c, 0x1003e6150, 0x1003e6174, 0x1003e9efc, 0x1003e9fc4, 0x1003eccc4, 0x1003eceb4, 0x1003f5c6c, 0x1003f5c8c, 0x1003ffc70, 0x1003ffcf0, 0x100400034, 0x10040019c, 0x100400284, 0x1004006a8, 0x1004006d8, 0x100401058, 0x100401354, 0x100402854, 0x100402880, 0x100403614, 0x100403690, 0x1004039ec, 0x100403ab4, 0x100404b18, 0x100404ba4, 0x100405338, 0x10040542c, 0x1004074cc, 0x1004075a8, 0x100407ac0, 0x10040ed6c, 0x10040edf0, 0x10040f36c, 0x10040f3c8, 0x100412fbc, 0x100413120, 0x100416778, 0x1004167a4, 0x10041695c, 0x1004169ac, 0x10041d650, 0x10041d69c, 0x10041d768, 0x10041d7ac, 0x10041f124, 0x10041f174, 0x10041f330, 0x10041f388, 0x100420418, 0x100420438, 0x100427970, 0x100427b64, 0x10042a360, 0x10042a414, 0x10042c3dc, 0x10042c468, 0x10042cd40, 0x10042ce3c, 0x10042e634, 0x10042e674, 0x100430334, 0x100430350, 0x100430384, 0x1004303a0, 0x100433368, 0x100433420, 0x100433aa8, 0x100433b4c, 0x10044167c, 0x1004416d0, 0x100443344, 0x100443370, 0x1004476c4, 0x100447770, 0x1004487c8, 0x100448874, 0x100448920, 0x100448e94, 0x100449380, 0x1004496b8, 0x100449700, 0x10044993c, 0x100449978, 0x100449cf4, 0x100449ef0, 0x10044a43c, 0x10044b060, 0x10044b6e4, 0x10044b7d4, 0x10044c314, 0x10044c370, 0x10044c618, 0x10044c888, 0x10044c92c, 0x10044db44, 0x10044dbc4, 0x10044dec0, 0x10044def4, 0x10044f1b0, 0x10044f230, 0x10044f824, 0x10044fd88, 0x10044fe48, 0x100451a2c, 0x1004520cc, 0x1004523f4, 0x100452458, 0x1004525d0, 0x1004525fc, 0x100452620, 0x100452d20, 0x100452d40, 0x100452df0, 0x100452ec4, 0x100452f04, 0x100453058, 0x10045316c, 0x1004531bc, 0x100453288, 0x1004532e4, 0x100453700, 0x100453760, 0x10045392c, 0x1004539f0, 0x100453c3c, 0x100453cec, 0x100453dfc, 0x100453e2c, 0x10045404c, 0x1004541d8, 0x100454374, 0x1004543d8, 0x100454510, 0x100454570, 0x1004547c0, 0x100454858, 0x1004593ac, 0x100459400, 0x100459478, 0x10045b874, 0x10045b89c, 0x10045bdd8, 0x10045be40, 0x10045bfe4, 0x10045c020, 0x10045ee1c, 0x10045eea0, 0x10045f1b4, 0x10045f590, 0x10046364c, 0x100463678, 0x100463ba8, 0x100463c10, 0x100463e00, 0x100463e4c, 0x10046521c, 0x100465240, 0x100465414, 0x100465440, 0x1004700fc, 0x1004701b4, 0x100474944, 0x100474b24, 0x100476e14, 0x100476e74, 0x100476f6c, 0x100476fb8, 0x100479518, 0x100479544, 0x1004796f8, 0x100479728, 0x100479a10, 0x100479aa8, 0x100479b88, 0x100479bb8, 0x100479ef0, 0x100479f10, 0x10047bff0, 0x10047c0c8, 0x10047e2e8, 0x10047e350, 0x10047e6d0, 0x10047e750, 0x10047e7cc, 0x10047e810, 0x10047e824, 0x10047eca8, 0x10047ed60, 0x10047f4d8, 0x10047f500, 0x1004800e0, 0x10048060c, 0x100480720, 0x1004808ec, 0x10048091c, 0x100480dc4, 0x100480e18, 0x100480eb4, 0x100480ef4, 0x1004827e4, 0x100482ac8, 0x100482e44, 0x100483088, 0x100483adc, 0x100483e3c, 0x100484914, 0x100485634, 0x100485948, 0x100485dec, 0x100485e5c, 0x100486a38, 0x100486a4c, 0x100486bd0, 0x100486be0, 0x100486c74, 0x100486e48, 0x100486eac, 0x10048767c, 0x1004876d0, 0x10048791c, 0x100487944, 0x100487b50, 0x100487e28, 0x100487f60, 0x100488218, 0x1004882c4, 0x100488be0, 0x100488cd0, 0x100489b94, 0x100489bcc, 0x100489cfc, 0x10048b510, 0x10048b57c, 0x10048b6b4, 0x10048b6dc, 0x10048bce4, 0x10048bd34, 0x10048c0f4, 0x10048c110, 0x10048c430, 0x10048c484, 0x10048d424, 0x10048d508, 0x10048d5a4, 0x10048e43c, 0x10048e5a0, 0x10048e870, 0x10048e968, 0x10048ea44, 0x10048ea9c, 0x10048ed38, 0x10048edd4, 0x10048f100, 0x10048f1a0, 0x10048f90c, 0x10048f964, 0x10048fb34, 0x10048fb8c, 0x100491480, 0x1004914f0, 0x10049191c, 0x100491974, 0x100491cf4, 0x100491d14, 0x1004922f4, 0x100492438, 0x1004924c8, 0x100492554, 0x100493b44, 0x100493bd8, 0x100495604, 0x100495670, 0x100495da4, 0x100495e74, 0x100496120, 0x1004962e0, 0x1004963c4, 0x100496590, 0x100496614, 0x1004a46e8, 0x1004a475c, 0x1004a4cfc, 0x1004a4d84, 0x1004a500c, 0x1004a5098, 0x1004a8318, 0x1004a8348, 0x1004a83a4, 0x1004a83d4, 0x1004a8658, 0x1004a86c4, 0x1004a8a98, 0x1004a8c48, 0x1004a8de0, 0x1004a8e48, 0x1004a98b8, 0x1004a98f4, 0x1004a9b20, 0x1004a9b40, 0x1004ab024, 0x1004ab040, 0x1004ac564, 0x1004ac580, 0x1004acce0, 0x1004acd84, 0x1004adefc, 0x1004ae020, 0x1004ae200, 0x1004ae3d0, 0x1004ae474, 0x1004ae494, 0x1004b2764, 0x1004b279c, 0x1004c39f0, 0x1004c3a70, 0x1004c4154, 0x1004c41a4, 0x1004c586c, 0x1004c58e0, 0x1004c95f0, 0x1004c961c, 0x1004ca120, 0x1004ca24c, 0x1004cd3f4, 0x1004cd458, 0x1004cd534, 0x1004cd5ac, 0x1004d3ba0, 0x1004d3bf4, 0x1004dc530, 0x1004dc550, 0x1004dc5a4, 0x1004dc5c8, 0x1004dcc48, 0x1004dcd30, 0x1004dd3b0, 0x1004dd3dc, 0x1004dd78c, 0x1004dd820, 0x1004ddcdc, 0x1004ddd34, 0x1004de1b4, 0x1004de220, 0x1004dee00, 0x1004dee3c, 0x1004def58, 0x1004defa4, 0x1004df010, 0x1004df044, 0x1004e0f58, 0x1004e10bc, 0x1004e1968, 0x1004e19ec, 0x1004e5b5c, 0x1004e5be4, 0x1004e6160, 0x1004e61b4, 0x1004e8d2c, 0x1004e8de4, 0x1004e9590, 0x1004e964c, 0x1004f6978, 0x1004f6a68, 0x1004fdb98, 0x1004fdc68, 0x1004fdd48, 0x1004fde7c, 0x1004fdf4c, 0x1004fe02c, 0x10050279c, 0x10050283c, 0x100502bec, 0x100502c50, 0x100502ce4, 0x100502d7c, 0x10051dc8c, 0x10051dd10, 0x10051defc, 0x10051df2c, 0x10051df60, 0x10051df80, 0x10051e0a0, 0x10051e118, 0x10051e5e0, 0x10051e6ec, 0x10051ead0, 0x10051eb78, 0x10051ee08, 0x10051ee44, 0x10051fc80, 0x10051fcd4, 0x100520294, 0x100520440, 0x100520458, 0x100520484, 0x10052079c, 0x1005207e4, 0x100520a08, 0x100520a60, 0x100520c4c, 0x100520cc8, 0x100520db0, 0x100520df0, 0x10052c8d0, 0x10052c910, 0x10052ea40, 0x10052ea70, 0x10052edc0, 0x10052edf0, 0x10052f36c, 0x10052f39c, 0x10052f53c, 0x10052f558, 0x10052f5d0, 0x10052f5fc, 0x10052f880, 0x10052f8a4, 0x10054c9a4, 0x10054c9c4, 0x10054d1f0, 0x10054d210, 0x10054d290, 0x10054d2b8, 0x10054d348, 0x10054d380, 0x10054d798, 0x10054d868, 0x10054d904, 0x10054d930, 0x10054dbdc, 0x10054dc24, 0x10054dd34, 0x10054e24c, 0x10054e360, 0x10054e75c, 0x10054e850, 0x10054eb08, 0x10054ee3c, 0x10054ef3c, 0x10054f6f4, 0x10054f774, 0x10054f844, 0x10054f8b8, 0x10054fb0c, 0x10054fbb0, 0x10054ff28, 0x10054ff98, 0x100551424, 0x100551538, 0x100552854, 0x1005528ac, 0x1005535bc, 0x100553618, 0x100553844, 0x100553898, 0x100553aec, 0x100553b44, 0x100553d38, 0x100553d8c, 0x100553f80, 0x100553fd4, 0x1005541e8, 0x100554240, 0x100554448, 0x10055449c, 0x1005547d8, 0x10055482c, 0x100555028, 0x100555078, 0x100555504, 0x100555568, 0x100555944, 0x1005559a4, 0x1005562ac, 0x100556324, 0x100556a00, 0x100556a8c, 0x100556f98, 0x100556ff8, 0x100557400, 0x100557460, 0x100557830, 0x100557880, 0x100557d48, 0x100557da0, 0x100558278, 0x1005582cc, 0x1005586d8, 0x10055872c, 0x100559344, 0x1005593b8, 0x10055a26c, 0x10055a39c, 0x10055a8ec, 0x10055aa0c, 0x10055abfc, 0x10055ac50, 0x10055ada8, 0x10055ade4, 0x1005693b8, 0x1005693e8, 0x1005694d4, 0x1005694ec, 0x10056a668, 0x10056a690, 0x10056a7a0, 0x10056a98c, 0x10056acf0, 0x10056addc, 0x10056b144, 0x10056b500, 0x10056b5f4, 0x10056ceb4, 0x10056d030, 0x10056d8ec, 0x10056d9e8, 0x10056de14, 0x10056dedc, 0x10056e96c, 0x10056e9ac, 0x10056f454, 0x10056f494, 0x10056f98c, 0x10056fd5c, 0x10057638c, 0x1005763ac, 0x100576408, 0x100576424, 0x100576558, 0x100576574, 0x1005765c0, 0x1005765dc, 0x100576728, 0x100576744, 0x10057678c, 0x1005767a8, 0x100578f24, 0x100578f58, 0x10057d44c, 0x10057d4a8, 0x10057fba8, 0x10057fbe8, 0x1005800a4, 0x100580160, 0x1005805c8, 0x10058076c, 0x100580b98, 0x100580c54, 0x100581234, 0x1005812f0, 0x10058181c, 0x1005818f4, 0x100581ff0, 0x1005820ac, 0x1005824e4, 0x10058251c, 0x1005828b8, 0x1005828f4, 0x100582bd0, 0x100582bf0, 0x100582e94, 0x100582eb4, 0x100582fe0, 0x100583008, 0x1005830cc, 0x1005830f4, 0x10058320c, 0x100583234, 0x10058338c, 0x1005833d0, 0x1005846a8, 0x100584750, 0x1005870f4, 0x100587200, 0x10058f974, 0x10058f9a4, 0x10058fa8c, 0x10058fabc, 0x10058fdc0, 0x10058fe4c, 0x10058ff40, 0x10058ff70, 0x100590834, 0x100590904, 0x100591574, 0x1005915c8, 0x1005964b8, 0x1005964ec, 0x1005968c4, 0x1005968e4, 0x100599940, 0x10059999c, 0x1005a727c, 0x1005a72c4, 0x1005b6258, 0x1005b62a0, 0x1005b699c, 0x1005b69bc, 0x1005b8988, 0x1005b8afc, 0x1005b9080, 0x1005b90d0, 0x1005bcc70, 0x1005bcde4, 0x1005bd004, 0x1005bd170, 0x1005c1010, 0x1005c1098, 0x1005c1214, 0x1005c12b4, 0x1005c1878, 0x1005c1a64, 0x1005c1c30, 0x1005c1cd8, 0x1005c1f30, 0x1005c1f40, 0x1005c1fbc, 0x1005c201c, 0x1005c204c, 0x1005c20b0, 0x1005c20cc, 0x1005c6c20, 0x1005c6d7c, 0x1005c72d0, 0x1005c73a4, 0x1005c8664, 0x1005c8a40, 0x1005c8c64, 0x1005c8d4c, 0x1005c975c, 0x1005c9918, 0x1005c9b18, 0x1005c9bf4, 0x1005c9c7c, 0x1005ca454, 0x1005ca55c, 0x1005ca5f8, 0x1005ca694, 0x1005ca730, 0x1005ca7dc, 0x1005ca910, 0x1005caa68, 0x1005cab4c, 0x1005cac08, 0x1005cacd0, 0x1005cadec, 0x1005caf84, 0x1005cbd94, 0x1005cbfb4, 0x1005cc58c, 0x1005cc5e8, 0x1005cc9fc, 0x1005ccc34, 0x1005cd1b8, 0x1005cdb34, 0x1005ce4d0, 0x1005ce8b0, 0x1005cef78, 0x1005d7ce4, 0x1005d7d5c, 0x1005d893c, 0x1005d8a18, 0x1005d98a8, 0x1005d9a10, 0x1005d9cc8, 0x1005d9ff8, 0x1005db2e8, 0x1005db334, 0x1005dd3a4, 0x1005dd420, 0x1005dd888, 0x1005e20dc, 0x1005e2118, 0x1005e2490, 0x1005e2b78, 0x1005e2c54, 0x1005e2e0c, 0x1005e2e34, 0x1005e35a0, 0x1005e35d0, 0x1005e36e4, 0x1005e3704, 0x1005e3770, 0x1005e3794, 0x1005e3c20, 0x1005e3c70, 0x1005e3db4, 0x1005e3de8, 0x1005e3e70, 0x1005e3ecc, 0x1005e3f4c, 0x1005e3f7c, 0x1005e3ffc, 0x1005e402c, 0x1005e418c, 0x1005e41c8, 0x1005e57d8, 0x1005e5844, 0x1005e5958, 0x1005e59c0, 0x1005e5c00, 0x1005e5c70, 0x1005e5d48, 0x1005e5db8, 0x1005e5f14, 0x1005e5ffc, 0x1005e61d8, 0x1005e62a4, 0x1005e6494, 0x1005e6588, 0x1005e67a8, 0x1005e6874, 0x1005e6934, 0x1005e6a0c, 0x1005e6b90, 0x1005e6c18, 0x1005e6c94, 0x1005e6d6c, 0x1005e6e48, 0x1005e6fe8, 0x1005e7424, 0x1005e74f0, 0x1005e85f0, 0x1005e86a8, 0x1005ea410, 0x1005ea474, 0x1005ea5c8, 0x1005ea62c, 0x1005ecc9c, 0x1005eefb0, 0x1005ef30c, 0x1005ef3c0, 0x1005f4a2c, 0x1005f4bd0, 0x1005f4e0c, 0x1005f95c4, 0x1005f984c, 0x1005f9f6c, 0x1005fa02c, 0x1005fa514, 0x1005fa6a0, 0x1005fa764, 0x1005fa858, 0x1005faaac, 0x1005faf8c, 0x1005ff428, 0x1005ff4a8, 0x10060f318, 0x10060f5e4, 0x100629310, 0x1006295d0, 0x10063186c, 0x1006318b8, 0x100632d2c, 0x100632d4c, 0x1006335ac, 0x100633730, 0x1006344d8, 0x1006346f0, 0x100635bdc, 0x1006361c0, 0x10063684c, 0x100637db0, 0x1006380bc, 0x100642bc4, 0x100642ca0, 0x100643210, 0x1006434fc, 0x100643518, 0x100643528, 0x100665608, 0x10066568c, 0x10066a2f4, 0x10066a380, 0x10066b6ac, 0x10066b7b0, 0x10066c11c, 0x10066c190, 0x10066c7e0, 0x10066c874, 0x10066cefc, 0x10066cf64, 0x10066e3f0, 0x10066e6e4, 0x10066e778, 0x10066e794, 0x10066ec18, 0x10066ecf8, 0x10066ef88, 0x10066f044, 0x10066f364, 0x10066f420, 0x10066f630, 0x10066f658, 0x10066f88c, 0x10066f980, 0x10066fba4, 0x10066fc20, 0x10066fec4, 0x10066ff64, 0x100670564, 0x100671ba8, 0x100672640, 0x100672684, 0x100673664, 0x1006736ac, 0x1006737d8, 0x100673814, 0x100676110, 0x100676550, 0x100676690, 0x100676718, 0x100676c48, 0x100676e88, 0x1006775b0, 0x1006778b4, 0x100677a24, 0x100677b34, 0x100677d5c, 0x100677e80, 0x100678070, 0x100678298, 0x10067b1e8, 0x10067b268, 0x10067b3dc, 0x10067b438, 0x1006857cc, 0x1006857fc, 0x1006858e4, 0x100685914, 0x100685c18, 0x100685ca4, 0x100685d98, 0x100685dc8, 0x100686414, 0x100686448, 0x1006a0344, 0x1006a0380, 0x1006a0470, 0x1006a04d8, 0x1006a05dc, 0x1006a0724, 0x1006a2e74, 0x1006a30f8, 0x1006a33b0, 0x1006a3534, 0x1006a36cc
+Chained-fixup pointers: 
+FUNCTION 0x100247c48  end 0x100247c7c
+00100247c48: 7f2303d5 pacibsp                                                  
+00100247c4c: f44fbea9 stp       x20, x19, [sp, #-0x20]!                        
+00100247c50: fd7b01a9 stp       x29, x30, [sp, #0x10]                          
+00100247c54: fd430091 add       x29, sp, #0x10                                 
+00100247c58: f30300aa mov       x19, x0                                        
+00100247c5c: 08004039 ldrb      w8, [x0]                                       
+00100247c60: 68000034 cbz       w8, #0x100247c6c                               
+00100247c64: 7f020039 strb      wzr, [x19]                                     
+00100247c68: 3062f997 bl        #0x1000a0528                                   ref 0x1000a0528
+00100247c6c: e00313aa mov       x0, x19                                        
+00100247c70: fd7b41a9 ldp       x29, x30, [sp, #0x10]                          
+00100247c74: f44fc2a8 ldp       x20, x19, [sp], #0x20                          
+00100247c78: ff0f5fd6 retab                                                    
+
+IDENTIFICATION: BD_ADDR formatter establishes byte order LC_FUNCTION_STARTS: 0x1004108f8 .. 0x10041099c
+Direct branch/call sites: 0x10020a420, 0x10020a494, 0x10020da34, 0x10020ec0c, 0x10021033c, 0x1002146a8, 0x10021b1ac, 0x10021d580, 0x100220a50, 0x100224dc8, 0x100224ea8, 0x10022526c, 0x100225914, 0x100225a00, 0x100225b30, 0x100225bdc, 0x100225cc8, 0x100225d58, 0x10022a828, 0x10022b540, 0x10022b5b4, 0x10022b920, 0x10022e464, 0x100231104, 0x100236f38, 0x100237154, 0x10023a5ec, 0x10023a6ac, 0x10023a714, 0x10023a89c, 0x10023a968, 0x10023a9fc, 0x10023aab0, 0x10023ac78, 0x10023ac90, 0x10023ae08, 0x10023afcc, 0x1002407c8, 0x1002407e0, 0x100247134, 0x1002c27f4, 0x1002c3cd4, 0x1002dd2e4, 0x1002ded5c, 0x1002dedc8, 0x1002dee1c, 0x1002e106c, 0x1002e14e8, 0x1002e1d14, 0x1002fb8fc, 0x10030af7c, 0x10032be24, 0x10032be70, 0x10032c848, 0x10032c910, 0x10032d4f8, 0x10032d6c0, 0x10032d6ec, 0x10032da80, 0x10032de7c, 0x10032df1c, 0x10032e2b4, 0x10032e2e4, 0x10032e438, 0x10032e510, 0x10032e528, 0x10032e5bc, 0x10032e5f8, 0x10032e888, 0x10032e9f0, 0x10032eaac, 0x10032eb84, 0x10032ec3c, 0x10032ec70, 0x10032eeac, 0x10032f154, 0x10032f250, 0x10032f2c0, 0x10032f428, 0x10032f4c8, 0x10032f4fc, 0x10032f530, 0x10032f824, 0x10032fb60, 0x100361f6c, 0x100374670, 0x100376fdc, 0x100377084, 0x10037af58, 0x10037b024, 0x10037b0b0, 0x1003820cc, 0x1003821cc, 0x1003823b8, 0x100382514, 0x1003ae6b4, 0x1003ae6cc, 0x1003ae7a4, 0x1003ae7bc, 0x1003ae960, 0x1003aeab8, 0x1003aead0, 0x1003aeb60, 0x1003aeb78, 0x1003af030, 0x1003af174, 0x1003af18c, 0x1003af26c, 0x1003af284, 0x1003bc8a4, 0x1003c2a7c, 0x1003c2b40, 0x1003c2b64, 0x1003c2c08, 0x1003c2c28, 0x1003c3a54, 0x1003cf72c, 0x1003cfb1c, 0x1003d4ca4, 0x1003db75c, 0x1003db944, 0x1003dd908, 0x1003de05c, 0x1003de204, 0x1003e0088, 0x1003e0138, 0x1003f4d68, 0x1003ffe60, 0x10040077c, 0x100400e08, 0x100400eec, 0x100400fc4, 0x100406a30, 0x1004071b4, 0x10040726c, 0x100407320, 0x100407ecc, 0x100408004, 0x100409318, 0x1004097f0, 0x10040aa04, 0x10040b930, 0x10040c3c4, 0x10040c488, 0x10040d158, 0x10040d6d0, 0x10040e090, 0x10041fc9c, 0x1004400c0, 0x1004413cc, 0x100448ab0, 0x10047c24c, 0x10047c2f4, 0x10047f0dc, 0x1004814d8, 0x100497730, 0x1004d5c70, 0x1004d5c88, 0x1004e5144, 0x1004e534c, 0x1004e58e8, 0x1004e59b4, 0x1004e5ad8, 0x1004e5d48, 0x1004e5db0, 0x1004e632c, 0x1004e6344, 0x1004e63bc, 0x1004e63d4, 0x10052a344, 0x10052b124, 0x10056e204, 0x100578934, 0x100578ab4, 0x100578b84, 0x100578d50, 0x100578fd4, 0x10057909c, 0x1005791c0, 0x100590594, 0x1005cb3d4, 0x100693e84, 0x1006967bc
+Chained-fixup pointers: 
+FUNCTION 0x100410928  end 0x100410960
+00100410928: 08004039 ldrb      w8, [x0]                                       
+0010041092c: 09044039 ldrb      w9, [x0, #1]                                   
+00100410930: 0a084039 ldrb      w10, [x0, #2]                                  
+00100410934: 0b0c4039 ldrb      w11, [x0, #3]                                  
+00100410938: 0c104039 ldrb      w12, [x0, #4]                                  
+0010041093c: 0d144039 ldrb      w13, [x0, #5]                                  
+00100410940: ec3702a9 stp       x12, x13, [sp, #0x20]                          
+00100410944: ea2f01a9 stp       x10, x11, [sp, #0x10]                          
+00100410948: e82700a9 stp       x8, x9, [sp]                                   
+0010041094c: 222100f0 adrp      x2, #0x100837000                               
+00100410950: 42003f91 add       x2, x2, #0xfc0                                 '%02X:%02X:%02X:%02X:%02X:%02X'
+00100410954: e0c30091 add       x0, sp, #0x30                                  
+00100410958: 41028052 mov       w1, #0x12                                      
+0010041095c: 4d300d94 bl        #0x10075ca90                                   _snprintf
+
+Native events at image+0x779498: 01 02 08 09 0a 0b 0c
+Target descriptor image+0x9369e0:
+0x1009369e0 -> 0x10055b580
+0x1009369e8 -> 0x0
+0x1009369f0 -> 0x100936d78
+0x1009369f8 -> 0x0
+0x100936a00 -> 0x100936e40
+Target metadata callback table (chained fixups decoded by LIEF):
+0x0 0x100936d78 -> 0x10055b5fc
+0x8 0x100936d80 -> 0x10055b670
+0x10 0x100936d88 -> 0x10055b6d4
+0x18 0x100936d90 -> 0x10055b748
+0x20 0x100936d98 -> 0x10055b7cc
+0x28 0x100936da0 -> 0x0
+0x30 0x100936da8 -> 0x0
+0x38 0x100936db0 -> 0x0
+0x40 0x100936db8 -> 0x0
+0x48 0x100936dc0 -> 0x10055b850
+0x50 0x100936dc8 -> 0x10055b8d4
+0x58 0x100936dd0 -> 0x10055b940
+0x60 0x100936dd8 -> 0x10055b9bc
+0x68 0x100936de0 -> 0x10055ba40
+0x70 0x100936de8 -> 0x0
+0x78 0x100936df0 -> 0x10055babc
+0x80 0x100936df8 -> 0x10055bb38
+0x88 0x100936e00 -> 0x10055bbb4
+0x90 0x100936e08 -> 0x10055bc60
+0x98 0x100936e10 -> 0x10055bcf4
+0xa0 0x100936e18 -> 0x10055bda0
+0xa8 0x100936e20 -> 0x10055be34
+0xb0 0x100936e28 -> 0x10055beb0
+0xb8 0x100936e30 -> 0x0
+0xc0 0x100936e38 -> 0x0

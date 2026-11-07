@@ -1,3 +1,4 @@
+#include "VolumeControl.h"
 /*
  * Hooks.xm - Speaka inside bluetoothd: makes the iPhone a Bluetooth speaker (an A2DP Sink) for the PC.
  *
@@ -344,6 +345,7 @@ static void note_signal(unsigned direction,uint64_t cid,const uint8_t *p,size_t 
         AudioRelaySetActive(change);
         /* v9.9: a SUSPEND is a pause, and the stream stays open; only CLOSE or ABORT ends it. */
         AudioRelaySetStreamState(change==1?AUDIO_STREAM_STREAMING:(p[1]&63u)==9u?AUDIO_STREAM_PAUSED:AUDIO_STREAM_CLOSED);
+        if(change!=1 && (p[1]&63u)!=9u) SpeakaVolumeDisconnect();
         /* v9.1: by= names who sent the command this line belongs to. A command (msg=0) is its sender's; a response
          * answers the other side's command. In the 23:33 loop every START and SUSPEND was by=phone: Apple's own A2DP
          * code driving the PC's stream as if the iPhone were the source. Logging only; nothing is blocked. */
@@ -1294,6 +1296,7 @@ static uint64_t hook_native_registration(uint64_t audio_context)
             g_sink_accepted = 0u;
             AudioRelaySetActive(0);
             AudioRelaySetStreamState(AUDIO_STREAM_CLOSED);
+            SpeakaVolumeDisconnect();
             pthread_mutex_unlock(&g_stream_control_lock);
             SpeakaSetStatus("diag.v82.sep", "LOST: Bluetooth was turned off and on; speaker endpoint gone until bluetoothd restarts (tap Start)");
             SpeakaLogNow("V892 SINK_LOST native Source loop ran again (#%u): Bluetooth re-initialized inside this bluetoothd; "
@@ -1813,6 +1816,7 @@ static int sink_receive_ready(void)
     if(g_sink_armed && uuid_ok) g_relay_ready=AudioRelayPrepare();
     if(g_relay_ready) install_media_hook((uintptr_t)mh, uuid_ok);
     if(g_relay_ready) install_idle_guard((uintptr_t)mh, uuid_ok);
+    if(g_relay_ready) SpeakaVolumeInstall((uintptr_t)mh, uuid_ok);
     install_optional_sdp_probe((uintptr_t)mh, uuid_ok);
     install_native_registration_hook((uintptr_t)mh, uuid_ok);
     SpeakaSessionReport(g_sink_armed, sink_receive_ready());

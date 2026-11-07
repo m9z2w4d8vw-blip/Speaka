@@ -1,0 +1,458 @@
+BTAvrcp SHA-256 4bd97270734de51a461fd787aac6b76b574df656c5c234817b8bbd8bdb1bfa61 UUID fffba70c-3450-3fd2-8fa9-86c70c83dd99
+All addresses are unslid VAs. Labels are descriptive; no live hook validation.
+
+
+IDENTIFICATION: handleMsg: Objective-C method / XPC dispatcher LC_FUNCTION_STARTS: 0x1000071c8 .. 0x1000072e0
+Direct branch/call sites: 
+Chained-fixup pointers: 
+FUNCTION 0x1000071c8 handleMsg: end 0x1000072e0
+001000071c8: 7f2303d5 pacibsp                                                  
+001000071cc: ff0302d1 sub       sp, sp, #0x80                                  
+001000071d0: f85f04a9 stp       x24, x23, [sp, #0x40]                          
+001000071d4: f65705a9 stp       x22, x21, [sp, #0x50]                          
+001000071d8: f44f06a9 stp       x20, x19, [sp, #0x60]                          
+001000071dc: fd7b07a9 stp       x29, x30, [sp, #0x70]                          
+001000071e0: fdc30191 add       x29, sp, #0x70                                 
+001000071e4: f40300aa mov       x20, x0                                        
+001000071e8: 1e260094 bl        #0x100010a60                                   _objc_retain_x2
+001000071ec: f50300aa mov       x21, x0                                        
+001000071f0: 01bd0710 adr       x1, #0x100016990                               'kMsgId'
+001000071f4: 1f2003d5 nop                                                      
+001000071f8: 92260094 bl        #0x100010c40                                   _xpc_dictionary_get_string
+001000071fc: f60300aa mov       x22, x0                                        
+00100007200: a1bc0770 adr       x1, #0x100016997                               'kMsgArgs'
+00100007204: 1f2003d5 nop                                                      
+00100007208: e00315aa mov       x0, x21                                        
+0010000720c: 91260094 bl        #0x100010c50                                   _xpc_dictionary_get_value
+00100007210: a4250094 bl        #0x1000108a0                                   _objc_claimAutoreleasedReturnValue
+00100007214: f30300aa mov       x19, x0                                        
+00100007218: e8430091 add       x8, sp, #0x10                                  
+0010000721c: 1f2003d5 nop                                                      
+00100007220: 10970858 ldr       x16, #0x100018500                              __NSConcreteStackBlock
+00100007224: f10308aa mov       x17, x8                                        
+00100007228: 315cedf2 movk      x17, #0x6ae1, lsl #48                          
+0010000722c: 300ac1da pacda     x16, x17                                       
+00100007230: f00b00f9 str       x16, [sp, #0x10]                               
+00100007234: 1f2003d5 nop                                                      
+00100007238: 4088065c ldr       d0, #0x100014340                               ref 0x100014340
+0010000723c: e00f00fd str       d0, [sp, #0x18]                                
+00100007240: 08410091 add       x8, x8, #0x10                                  
+00100007244: a9b80810 adr       x9, #0x100018958                               ref 0x100018958
+00100007248: 1f2003d5 nop                                                      
+0010000724c: b0040010 adr       x16, #0x1000072e0                              ref 0x1000072e0
+00100007250: 1f2003d5 nop                                                      
+00100007254: 1001c1da pacia     x16, x8                                        
+00100007258: f02702a9 stp       x16, x9, [sp, #0x20]                           
+0010000725c: f45703a9 stp       x20, x21, [sp, #0x30]                          
+00100007260: 08260094 bl        #0x100010a80                                   _objc_retain_x21
+00100007264: f50300aa mov       x21, x0                                        
+00100007268: e0430091 add       x0, sp, #0x10                                  
+0010000726c: f1250094 bl        #0x100010a30                                   _objc_retainBlock
+00100007270: f70300aa mov       x23, x0                                        
+00100007274: 1f2003d5 nop                                                      
+00100007278: 40a30b58 ldr       x0, #0x10001e6e0                               _OBJC_CLASS_$_NSString
+0010000727c: f60300f9 str       x22, [sp]                                      
+00100007280: 42f40810 adr       x2, #0x100019108                               CF:'handle%sMsg:replyBlock:'
+00100007284: 1f2003d5 nop                                                      
+00100007288: ce2e0094 bl        #0x100012dc0                                   objc:stringWithFormat: / _objc_msgSend
+0010000728c: 85250094 bl        #0x1000108a0                                   _objc_claimAutoreleasedReturnValue
+00100007290: f60300aa mov       x22, x0                                        
+00100007294: 17250094 bl        #0x1000106f0                                   _NSSelectorFromString
+00100007298: f80300aa mov       x24, x0                                        
+0010000729c: b5250094 bl        #0x100010970                                   _objc_release_x22
+001000072a0: e00314aa mov       x0, x20                                        
+001000072a4: e10318aa mov       x1, x24                                        
+001000072a8: e20313aa mov       x2, x19                                        
+001000072ac: e30317aa mov       x3, x23                                        
+001000072b0: 8c250094 bl        #0x1000108e0                                   _objc_msgSend
+001000072b4: b3250094 bl        #0x100010980                                   _objc_release_x23
+001000072b8: e81f40f9 ldr       x8, [sp, #0x38]                                
+001000072bc: c9250094 bl        #0x1000109e0                                   _objc_release_x8
+001000072c0: a8250094 bl        #0x100010960                                   _objc_release_x21
+001000072c4: 9f250094 bl        #0x100010940                                   _objc_release_x19
+001000072c8: fd7b47a9 ldp       x29, x30, [sp, #0x70]                          
+001000072cc: f44f46a9 ldp       x20, x19, [sp, #0x60]                          
+001000072d0: f65745a9 ldp       x22, x21, [sp, #0x50]                          
+001000072d4: f85f44a9 ldp       x24, x23, [sp, #0x40]                          
+001000072d8: ff030291 add       sp, sp, #0x80                                  
+001000072dc: ff0f5fd6 retab                                                    
+
+IDENTIFICATION: handleRegisterForChangesMsg:replyBlock: Objective-C method LC_FUNCTION_STARTS: 0x100005f14 .. 0x100005f80
+Direct branch/call sites: 
+Chained-fixup pointers: 
+FUNCTION 0x100005f14 handleRegisterForChangesMsg:replyBlock: end 0x100005f80
+00100005f14: 7f2303d5 pacibsp                                                  
+00100005f18: ffc300d1 sub       sp, sp, #0x30                                  
+00100005f1c: f44f01a9 stp       x20, x19, [sp, #0x10]                          
+00100005f20: fd7b02a9 stp       x29, x30, [sp, #0x20]                          
+00100005f24: fd830091 add       x29, sp, #0x20                                 
+00100005f28: f30300aa mov       x19, x0                                        
+00100005f2c: e52a0094 bl        #0x100010ac0                                   _objc_retain_x3
+00100005f30: e00700f9 str       x0, [sp, #8]                                   
+00100005f34: e00313aa mov       x0, x19                                        
+00100005f38: 6a300094 bl        #0x1000120e0                                   objc:nowPlayingInfo / _objc_msgSend
+00100005f3c: fd031daa mov       x29, x29                                       
+00100005f40: 002b0094 bl        #0x100010b40                                   _objc_unsafeClaimAutoreleasedReturnValue
+00100005f44: e00740f9 ldr       x0, [sp, #8]                                   
+00100005f48: e30300aa mov       x3, x0                                         
+00100005f4c: 680c41f8 ldr       x8, [x3, #0x10]!                               
+00100005f50: 81008052 mov       w1, #4                                         
+00100005f54: 020080d2 mov       x2, #0                                         
+00100005f58: 03093fd7 blraa     x8, x3                                         
+00100005f5c: e00740f9 ldr       x0, [sp, #8]                                   
+00100005f60: fd7b42a9 ldp       x29, x30, [sp, #0x20]                          
+00100005f64: f44f41a9 ldp       x20, x19, [sp, #0x10]                          
+00100005f68: ffc30091 add       sp, sp, #0x30                                  
+00100005f6c: ff2303d5 autibsp                                                  
+00100005f70: d0071eca eor       x16, x30, x30, lsl #1                          
+00100005f74: 5000f0b6 tbz       x16, #0x3e, #0x100005f7c                       
+00100005f78: 208e38d4 brk       #0xc471                                        
+00100005f7c: 692a0014 b         #0x100010920                                   _objc_release
+
+Objective-C method-list metadata (selector, type encoding):
+0x1000029c4 init @16@0:8
+0x100002a2c createSwitcher @?16@0:8
+0x100002c14 wait: B24@0:8d16
+0x100002cd8 condition @16@0:8
+0x100002ce0 setCondition: v24@0:8@16
+0x100002cec pendingSwitchers Q16@0:8
+0x100002cf4 setPendingSwitchers: v24@0:8Q16
+0x100002cfc .cxx_destruct v16@0:8
+0x100002d08 init @16@0:8
+0x100002d8c initWithName:sessionClass: @32@0:8r*16#24
+0x100002f5c _handleEvent: v24@0:8@16
+0x100003008 _handleConnection: v24@0:8@16
+0x1000030cc name r*16@0:8
+0x1000030d4 sessionClass #16@0:8
+0x1000030dc server @16@0:8
+0x1000030e4 .cxx_destruct v16@0:8
+0x100003140 init @16@0:8
+0x1000031c4 initWithConnection: @24@0:8@16
+0x1000033bc sendMsg: v24@0:8@16
+0x1000033c4 sendReply: v24@0:8@16
+0x1000033cc handleMsg: v24@0:8@16
+0x1000033d4 numberForKey:optional:dict: @36@0:8r*16B24@28
+0x1000036bc stringForKey:optional:dict: @36@0:8r*16B24@28
+0x10000384c xpcDictForKey:optional:dict: @36@0:8r*16B24@28
+0x1000039c0 _sendMsg:isReply: v28@0:8@16B24
+0x100003a44 _handleEvent: v24@0:8@16
+0x100003c0c _objectForKey:dict:optional:converters: @44@0:8r*16@24B32@36
+0x100003d80 connection @16@0:8
+0x100003d88 transaction @16@0:8
+0x100003d90 watchdog @16@0:8
+0x100003d98 .cxx_destruct v16@0:8
+0x100003e2c beginTransaction v16@0:8
+0x100003ecc endTransaction v16@0:8
+0x100003f38 _startTimer v16@0:8
+0x1000040e0 _stopTimer v16@0:8
+0x100004120 _timerEvent v16@0:8
+0x1000041d4 _timeout v16@0:8
+0x100004200 isTransacting B16@0:8
+0x100004208 setIsTransacting: v20@0:8B16
+0x100004210 transactionCount Q16@0:8
+0x100004218 setTransactionCount: v24@0:8Q16
+0x100004220 timerTransactionCount Q16@0:8
+0x100004228 setTimerTransactionCount: v24@0:8Q16
+0x100004230 timer @16@0:8
+0x100004238 setTimer: v24@0:8@16
+0x100004244 .cxx_destruct v16@0:8
+0x1000042d4 init @16@0:8
+0x100004450 dealloc v16@0:8
+0x1000044b0 libraryDidChange v16@0:8
+0x1000044f0 getCurrentPath: v24@0:8@?16
+0x100004700 changePath:replyBlock: v32@0:8Q16@?24
+0x10000490c getVFSItemsFromStart:toEnd:attributeIDs:replyBlock: v48@0:8Q16Q24@32@?40
+0x100004a84 getSearchItemsFromStart:toEnd:attributeIDs:replyBlock: v48@0:8Q16Q24@32@?40
+0x100004c08 getNowPlayingItemsFromStart:toEnd:attributeIDs:replyBlock: v48@0:8Q16Q24@32@?40
+0x100004da0 getVFSItemWithUid:attributeIDs:reply: C40@0:8Q16@24@32
+0x100004e4c getSearchItemWithUid:attributeIDs:reply: C40@0:8Q16@24@32
+0x100004ef0 getNowPlayingItemWithUid:attributeIDs:reply: C40@0:8Q16@24@32
+0x100005174 search:replyBlock: v32@0:8@16@?24
+0x100005370 getVFSItemsCount Q16@0:8
+0x1000053c0 getSearchItemsCount Q16@0:8
+0x100005400 getNowPlayingItemsCount Q16@0:8
+0x100005440 playVFSItemWithUid: C24@0:8Q16
+0x100005498 playSearchItemWithUid: C24@0:8Q16
+0x100005520 playNowPlayingItemWithUid: C24@0:8Q16
+0x1000055ac delegate @16@0:8
+0x1000055d8 setDelegate: v24@0:8@16
+0x1000055e4 currentVFSPath @16@0:8
+0x1000055ec setCurrentVFSPath: v24@0:8@16
+0x1000055f8 currentSearchQuery @16@0:8
+0x100005600 setCurrentSearchQuery: v24@0:8@16
+0x10000560c .cxx_destruct v16@0:8
+0x100005658 dealloc v16@0:8
+0x1000056c8 nowPlayingInfo @16@0:8
+0x10000574c library @16@0:8
+0x1000057d0 handleSendCommandMsg:replyBlock: v32@0:8@16@?24
+0x100005994 handleSetSettingsMsg:replyBlock: v32@0:8@16@?24
+0x100005a48 handleGetSettingsMsg:replyBlock: v32@0:8@16@?24
+0x100005b64 handleGetPlayStatusMsg:replyBlock: v32@0:8@16@?24
+0x100005ca0 handleGetElementAttributesMsg:replyBlock: v32@0:8@16@?24
+0x100005f14 handleRegisterForChangesMsg:replyBlock: v32@0:8@16@?24
+0x100005f80 handleRegisterForPlayerChangesMsg:replyBlock: v32@0:8@16@?24
+0x100006074 handleRegisterForPlaybackStateChangesMsg:replyBlock: v32@0:8@16@?24
+0x100006168 handleRegisterForTrackChangesMsg:replyBlock: v32@0:8@16@?24
+0x10000625c handleRegisterForSettingsChangesMsg:replyBlock: v32@0:8@16@?24
+0x100006378 handleSetAddressedPlayerMsg:replyBlock: v32@0:8@16@?24
+0x10000641c handleSetBrowsedPlayerMsg:replyBlock: v32@0:8@16@?24
+0x100006510 handleChangePathMsg:replyBlock: v32@0:8@16@?24
+0x1000065f4 handleGetFolderItemsMsg:replyBlock: v32@0:8@16@?24
+0x100006808 handleGetItemAttributesMsg:replyBlock: v32@0:8@16@?24
+0x100006a18 handleSearchMsg:replyBlock: v32@0:8@16@?24
+0x100006abc handleGetTotalNumberOfItemsMsg:replyBlock: v32@0:8@16@?24
+0x100006c5c handlePlayItemMsg:replyBlock: v32@0:8@16@?24
+0x100006dc4 handleGetImagePropertiesMsg:replyBlock: v32@0:8@16@?24
+0x100006eec handleGetImageMsg:replyBlock: v32@0:8@16@?24
+0x1000071c8 handleMsg: v24@0:8@16
+0x1000072f4 sendReplyToMsg:status:args: v36@0:8@16C24@28
+0x1000073a4 sendMsg:args: v32@0:8@16@24
+0x10000747c playerDidChange: v20@0:8i16
+0x100007538 playbackStateDidChange: v24@0:8q16
+0x1000075f4 trackDidChange: v24@0:8Q16
+0x1000076b0 settingsDidChange: v24@0:8{?=ii}16
+0x100007794 playbackQueueDidChange v16@0:8
+0x1000077a4 libraryDidChange v16@0:8
+0x100007810 attributeIDsFromArgs: @24@0:8@16
+0x100007874 getMediaPlayersFromStart:toEnd:replyBlock: v40@0:8Q16Q24@?32
+0x100007aac getNowPlayingAttributeIDs:reply: C32@0:8@16@24
+0x100007e20 lazyNowPlayingInfo @16@0:8
+0x100007e30 setLazyNowPlayingInfo: v24@0:8@16
+0x100007e44 lazyLibrary @16@0:8
+0x100007e54 setLazyLibrary: v24@0:8@16
+0x100007e68 isForwarding B16@0:8
+0x100007e78 setIsForwarding: v20@0:8B16
+0x100007e88 isRewinding B16@0:8
+0x100007e98 setIsRewinding: v20@0:8B16
+0x100007ea8 .cxx_destruct v16@0:8
+0x100007efc initWithName:uid: @32@0:8@16Q24
+0x100007fe0 dealloc v16@0:8
+0x100008040 refreshActiveCategories v16@0:8
+0x1000081c8 folderNameForUid: @24@0:8Q16
+0x1000082d0 folderTypeForUid: C24@0:8Q16
+0x1000082f0 baseQuery @16@0:8
+0x100008320 childrenCount Q16@0:8
+0x100008358 createFolderWithUid:folder: C32@0:8Q16^@24
+0x10000852c replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x100008624 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x100008698 playItemWithUid: C24@0:8Q16
+0x10000870c activeCategories @16@0:8
+0x10000871c setActiveCategories: v24@0:8@16
+0x100008730 .cxx_destruct v16@0:8
+0x100008744 initWithName:uid: @32@0:8@16Q24
+0x100008754 initWithName:uid:parentPlaylistID:isRecentlyAdded: @44@0:8@16Q24@32B40
+0x1000087f8 showRecentlyAddedFolder B16@0:8
+0x100008890 playlistIsFolder: B24@0:8@16
+0x1000088d8 baseQuery @16@0:8
+0x100008990 childrenCount Q16@0:8
+0x1000089ec createFolderWithUid:folder: C32@0:8Q16^@24
+0x100008bc0 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x100008d14 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x100008d74 playItemWithUid: C24@0:8Q16
+0x100008dd4 parentPlaylistID @16@0:8
+0x100008de4 isRecentlyAdded B16@0:8
+0x100008df4 .cxx_destruct v16@0:8
+0x100008e08 targetApp @16@0:8
+0x100008e28 childrenCount Q16@0:8
+0x100008e78 createFolderWithUid:folder: C32@0:8Q16^@24
+0x100008ec8 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x100008f50 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x100008fd8 playItemWithUid: C24@0:8Q16
+0x100009140 baseQuery @16@0:8
+0x10000914c targetApp @16@0:8
+0x10000915c baseQuery @16@0:8
+0x100009168 targetApp @16@0:8
+0x100009178 baseQuery @16@0:8
+0x100009184 targetApp @16@0:8
+0x100009194 baseQuery @16@0:8
+0x1000091a0 targetApp @16@0:8
+0x1000091b0 baseQuery @16@0:8
+0x1000091bc targetApp @16@0:8
+0x1000091cc init @16@0:8
+0x100009258 baseQuery @16@0:8
+0x100009288 childrenCount Q16@0:8
+0x100009290 createFolderWithUid:folder: C32@0:8Q16^@24
+0x100009320 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x1000093b0 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x1000093c4 playItemWithUid: C24@0:8Q16
+0x1000093d8 initWithName:uid: @32@0:8@16Q24
+0x1000093e0 initWithName:uid:isRecentlyAdded: @36@0:8@16Q24B32
+0x100009434 showRecentlyAddedFolder B16@0:8
+0x1000094a0 artistHasSingleAlbum: B24@0:8@16
+0x1000094ec artistName: @24@0:8@16
+0x100009590 baseQuery @16@0:8
+0x1000095f8 childrenCount Q16@0:8
+0x100009654 createFolderWithUid:folder: C32@0:8Q16^@24
+0x100009860 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x1000099bc replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x100009a1c playItemWithUid: C24@0:8Q16
+0x100009a7c isRecentlyAdded B16@0:8
+0x100009a8c initWithName:uid: @32@0:8@16Q24
+0x100009a94 initWithName:uid:isRecentlyAdded: @36@0:8@16Q24B32
+0x100009ae8 showRecentlyAddedFolder B16@0:8
+0x100009b54 albumName: @24@0:8@16
+0x100009c04 baseQuery @16@0:8
+0x100009c64 childrenCount Q16@0:8
+0x100009cc0 createFolderWithUid:folder: C32@0:8Q16^@24
+0x100009e3c replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x100009f80 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x100009fe0 playItemWithUid: C24@0:8Q16
+0x10000a040 isRecentlyAdded B16@0:8
+0x10000a050 initWithName:uid: @32@0:8@16Q24
+0x10000a058 initWithName:uid:isRecentlyAdded: @36@0:8@16Q24B32
+0x10000a0ac showRecentlyAddedFolder B16@0:8
+0x10000a118 baseQuery @16@0:8
+0x10000a178 childrenCount Q16@0:8
+0x10000a1d4 createFolderWithUid:folder: C32@0:8Q16^@24
+0x10000a368 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x10000a4c4 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x10000a524 playItemWithUid: C24@0:8Q16
+0x10000a584 isRecentlyAdded B16@0:8
+0x10000a5d4 initWithName:uid: @32@0:8@16Q24
+0x10000a668 predicates @16@0:8
+0x10000a66c query @16@0:8
+0x10000a7fc storePredicates: v24@0:8@16
+0x10000a8bc childrenCount Q16@0:8
+0x10000a8dc createFolderWithUid:folder: C32@0:8Q16^@24
+0x10000a8fc replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x10000a91c replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x10000a93c playItemWithUid: C24@0:8Q16
+0x10000a95c baseQuery @16@0:8
+0x10000a97c storePredicate: v24@0:8@16
+0x10000a9d8 replyFolderWithType:uid:name: @36@0:8C16@20@28
+0x10000aaf8 replyItemWithUid:name:attributes: @40@0:8@16@24@32
+0x10000ac20 recentlyAddedFolderName @16@0:8
+0x10000ac88 name @16@0:8
+0x10000ac90 uid Q16@0:8
+0x10000ac98 storedPredicates @16@0:8
+0x10000aca0 builtQuery @16@0:8
+0x10000aca8 setBuiltQuery: v24@0:8@16
+0x10000acb4 .cxx_destruct v16@0:8
+0x10000ad04 unplayedEpisodesFolderName @16@0:8
+0x10000ad6c baseQuery @16@0:8
+0x10000ad78 childrenCount Q16@0:8
+0x10000adc8 createFolderWithUid:folder: C32@0:8Q16^@24
+0x10000af88 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x10000b0d8 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x10000b138 playItemWithUid: C24@0:8Q16
+0x10000b198 baseQuery @16@0:8
+0x10000b1a4 childrenCount Q16@0:8
+0x10000b1f4 createFolderWithUid:folder: C32@0:8Q16^@24
+0x10000b328 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x10000b41c replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x10000b47c playItemWithUid: C24@0:8Q16
+0x10000b4dc initWithName:uid: @32@0:8@16Q24
+0x10000b4e4 initWithName:uid:isRecentlyAdded: @36@0:8@16Q24B32
+0x10000b538 showRecentlyAddedFolder B16@0:8
+0x10000b5a4 composerHasSingleAlbum: B24@0:8@16
+0x10000b5f0 baseQuery @16@0:8
+0x10000b650 childrenCount Q16@0:8
+0x10000b6ac createFolderWithUid:folder: C32@0:8Q16^@24
+0x10000b8d0 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x10000ba4c replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x10000baac playItemWithUid: C24@0:8Q16
+0x10000bb0c isRecentlyAdded B16@0:8
+0x10000bb1c mobileBluetoothBundle @16@0:8
+0x10000bb7c initWithName:uid: @32@0:8@16Q24
+0x10000be08 refreshRecentStations v16@0:8
+0x10000bf18 fetchRecentStations: v24@0:8@?16
+0x10000c134 stationWithUid: @24@0:8Q16
+0x10000c1c8 childrenCount Q16@0:8
+0x10000c200 createFolderWithUid:folder: C32@0:8Q16^@24
+0x10000c238 replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x10000c3c4 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x10000c484 playItemWithUid: C24@0:8Q16
+0x10000c4ec recentStations @16@0:8
+0x10000c4fc setRecentStations: v24@0:8@16
+0x10000c510 .cxx_destruct v16@0:8
+0x10000c524 collectionAtIndex: @24@0:8Q16
+0x10000c5b0 itemAtIndex: @24@0:8Q16
+0x10000c63c itemWithUid: @24@0:8Q16
+0x10000c7e4 collectionWithUid:property: @32@0:8Q16@24
+0x10000c8ac propertiesForUid @16@0:8
+0x10000c948 uid @16@0:8
+0x10000caa8 replyItemWithAttributeIDs: @24@0:8@16
+0x10000cc08 replyAttributesForIDs: @24@0:8@16
+0x10000cce4 setReplyAttributeForID:inReplyAttributes: v32@0:8Q16@24
+0x10000cfe0 init @16@0:8
+0x10000d258 _initializeState v16@0:8
+0x10000d9ac dealloc v16@0:8
+0x10000da44 _refreshInfo v16@0:8
+0x10000dacc _refreshApp v16@0:8
+0x10000db4c _refreshAppIsPlaying v16@0:8
+0x10000dbd0 _refreshActiveOrigin v16@0:8
+0x10000dc54 _refreshSupportedCommands v16@0:8
+0x10000dd08 _getEncodingForMimeType: Q24@0:8@16
+0x10000dd68 _infoDidChangeNotification v16@0:8
+0x10000dd6c _appDidChangeNotification: v24@0:8@16
+0x10000dd70 _appIsPlayingDidChangeNotification: v24@0:8@16
+0x10000dde8 _playbackQueueDidChangeNotification v16@0:8
+0x10000ddec _activeOriginDidChangeNotification v16@0:8
+0x10000ddf0 _supportedCommandsDidChangeNotification v16@0:8
+0x10000ddf4 _infoDidChange: v24@0:8@16
+0x10000de70 _appDidChange: v24@0:8@16
+0x10000df54 _appIsPlayingDidChange: v20@0:8B16
+0x10000dfc8 _playbackQueueDidChange v16@0:8
+0x10000e028 _activeOriginDidChange: v24@0:8^v16
+0x10000e0cc _supportedCommandsDidChange: v24@0:8@16
+0x10000e1e4 trackTitle @16@0:8
+0x10000e23c trackAlbum @16@0:8
+0x10000e2d0 trackArtist @16@0:8
+0x10000e328 trackGenre @16@0:8
+0x10000e380 trackQueueIndex @16@0:8
+0x10000e440 trackQueueCount @16@0:8
+0x10000e4e4 trackDuration @16@0:8
+0x10000e574 trackPosition @16@0:8
+0x10000e6ac trackImageHandle @16@0:8
+0x10000e7a4 isBrowsablePlayer B16@0:8
+0x10000e804 playerId i16@0:8
+0x10000e828 playerName @16@0:8
+0x10000e8f4 _playbackRate f16@0:8
+0x10000e980 _defaultPlaybackRate f16@0:8
+0x10000e9ec playbackState q16@0:8
+0x10000ea78 _playbackStateDidChange v16@0:8
+0x10000eb00 _trackHash Q16@0:8
+0x10000eda4 trackId Q16@0:8
+0x10000ef34 _trackDidChange v16@0:8
+0x10000efc8 settings {?=ii}16@0:8
+0x10000efcc _settingsDidChange: v24@0:8{?=ii}16
+0x10000f07c isLocalOrigin B16@0:8
+0x10000f0a0 isMusicApp B16@0:8
+0x10000f0e4 encodings @16@0:8
+0x10000f0f0 widths @16@0:8
+0x10000f0fc heights @16@0:8
+0x10000f108 delegate @16@0:8
+0x10000f134 setDelegate: v24@0:8@16
+0x10000f140 browsablePlayers @16@0:8
+0x10000f148 mrInfo @16@0:8
+0x10000f150 setMrInfo: v24@0:8@16
+0x10000f15c mrAppIdentifier @16@0:8
+0x10000f164 setMrAppIdentifier: v24@0:8@16
+0x10000f170 mrAppIsPlaying B16@0:8
+0x10000f178 setMrAppIsPlaying: v20@0:8B16
+0x10000f180 mrActiveOrigin ^v16@0:8
+0x10000f188 setMrActiveOrigin: v24@0:8^v16
+0x10000f190 currentPlaybackState q16@0:8
+0x10000f198 setCurrentPlaybackState: v24@0:8q16
+0x10000f1a0 currentTrackHash Q16@0:8
+0x10000f1a8 setCurrentTrackHash: v24@0:8Q16
+0x10000f1b0 currentSettings {?=ii}16@0:8
+0x10000f1b8 setCurrentSettings: v24@0:8{?=ii}16
+0x10000f1c0 currentArtworkIdentifier @16@0:8
+0x10000f1c8 setCurrentArtworkIdentifier: v24@0:8@16
+0x10000f1d4 .cxx_destruct v16@0:8
+0x10000f27c initWithName:uid: @32@0:8@16Q24
+0x10000f324 dealloc v16@0:8
+0x10000f384 refreshActiveCategories v16@0:8
+0x10000f51c folderNameForUid: @24@0:8Q16
+0x10000f63c folderTypeForUid: C24@0:8Q16
+0x10000f664 baseQuery @16@0:8
+0x10000f670 childrenCount Q16@0:8
+0x10000f6a8 createFolderWithUid:folder: C32@0:8Q16^@24
+0x10000f8fc replyItemAtIndex:attributeIDs: @32@0:8Q16@24
+0x10000f9f4 replyAttributesForUid:attributeIDs: @32@0:8Q16@24
+0x10000fa68 playItemWithUid: C24@0:8Q16
+0x10000fadc activeCategories @16@0:8
+0x10000faec setActiveCategories: v24@0:8@16
+0x10000fb00 .cxx_destruct v16@0:8
+0x10000fb14 enumerateAttributeIDs: v24@0:8@?16

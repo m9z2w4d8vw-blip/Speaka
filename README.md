@@ -34,6 +34,10 @@ iPhone's Bluetooth daemon.
 **Status:** working end to end with a Windows laptop. That covers connecting and streaming; pausing, resuming and
 changing songs; switching outputs during playback; and wired earbuds without replugging.
 
+**AVRCP volume research:** an optional, disabled-by-default volume layer and a build-specific native adapter are
+documented in [AVRCP-VOLUME.md](docs/AVRCP-VOLUME.md), with reproducible disassembly evidence. Host tests cover the
+protocol and PCM gain; Windows/iPhone interoperability and the native hooks still require live testing.
+
 > [!WARNING]
 > Speaka is experimental. It changes how a system daemon behaves through undocumented internals, and it supports
 > **exactly one** `bluetoothd` build, from iOS 17.0 (see [Requirements](#requirements)). On any other build it hooks

@@ -67,3 +67,10 @@ static inline void speaka_state_unpack(uint64_t s, unsigned *loaded, unsigned *u
     if (hooks_bad)   *hooks_bad   = (unsigned)((s >> 16) & 0xFFu);
     if (last_event)  *last_event  = (uint32_t)(s >> 32);
 }
+
+/* Opt-in AVRCP experiment; absent/off preserves current playback behavior. */
+#define SPEAKA_KEY_VOLUME_MODE "SpeakaAVRCPVolumeMode"
+#define SPEAKA_KEY_VOLUME_REQUEST "SpeakaAVRCPLocalVolumeRequest"
+/* The last verified Speaka PC (PeerIdentity.c): bound at startup so its AVRCP requests are answered even if they
+ * arrive before its A2DP configuration. Written by the tweak. */
+#define SPEAKA_KEY_VOLUME_PEER "SpeakaAVRCPVolumePeer"
