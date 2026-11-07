@@ -247,7 +247,8 @@ class SpeakaApp(unittest.TestCase):
         self.assertEqual(pinned, {"outputModes", "readStatus", "setOutputMode", "sendAction", "pollRequest",
                                   "connectedComputerName", "pairedComputerName", "computerName", "isAudioDevice", "lookupSummary",
                                   "updateNotificationsEnabled", "setUpdateNotificationsEnabled", "notifiedVersion",
-                                  "setNotifiedVersion", "removeLeftoverPreferences", "removeLegacyCodecSettings"})
+                                  "setNotifiedVersion", "removeLeftoverPreferences", "removeLegacyCodecSettings",
+                                  "roomVerdict"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -380,7 +381,9 @@ class SpeakaApp(unittest.TestCase):
             for prefix in prefixes:
                 self.assertTrue(matches(prefix, key), f"the tweak never writes {key} starting {prefix!r}")
             for prefix in prefixes:
-                self.assertIn(f'"{prefix}', steps.replace("live_slots=7 ", "live_slots=").replace("SEID=7", "SEID="),
+                # v9.9.1: the room step's result is judged by shared/SessionCheck.h, which the steps call.
+                checked = steps + read(ROOT / "shared/SessionCheck.h")
+                self.assertIn(f'"{prefix}', checked.replace("live_slots=7 ", "live_slots=").replace("SEID=7", "SEID="),
                               f"{prefix!r} is listed here but no step checks it")
         # The results the steps read from the session line are the ones SpeakaSessionReport writes.
         report = read(ROOT / "tweak/Session.c")
@@ -1889,3 +1892,136 @@ class CodecWarning(unittest.TestCase):
         self.assertIn("VStack(alignment: .leading, spacing: 2)", header)         # same column, same spacing
         content = read(SPEAKA_SOURCES / "ContentView.swift")
         self.assertIn("detailIsWarning: model.headerDetailIsWarning,\n                       secondWarning: model.headerSecondWarning)", content)
+
+
+class RoomCheck(unittest.TestCase):
+    """v9.9.1: 9.9's dual layout (six Sources + SEID 7 AAC-LC + the SBC Sink) allocates eight endpoint slots, and the
+    device registered both Sinks (10:58:30.129) - but the tweak printed expected=7 for every layout and the room step
+    accepted only live_slots=7, so a correct launch showed "No room for the speaker", stored while the session was
+    already on, so it stayed up all session. The tweak now reports the count its shadow returned and its layout; the
+    app accepts only a readable count equal to that layout's own (shared/SessionCheck.h, run here as the app runs it)."""
+
+    def tweak_format(self):
+        hooks = read(ROOT / "tweak/Hooks.xm")
+        call = hooks.split('SpeakaSetStatus("diag.v81_seven_slots",\n', 1)[1].split(");", 1)[0]
+        fmt = re.search(r'"(ONE SHOT result: [^"]+)"', call).group(1)
+        self.assertEqual(re.findall(r"%[a-z]+", fmt), ["%s", "%u", "%u", "%s"])
+        args = [a.strip() for a in call.split(fmt + '",', 1)[1].split(",")]
+        self.assertEqual(args, ['readable ? "" : "unreadable/"', "(unsigned)live_count", "expected", "layout"])
+        return fmt
+
+    def test_the_verdict_on_what_the_tweak_writes(self):
+        fmt = self.tweak_format().replace("\\", "\\\\").replace('"', '\\"')
+        harness = r"""
+#include <assert.h>
+#include <stdio.h>
+#include "shared/SessionCheck.h"
+static int verdict(int readable, unsigned live, unsigned expected, const char *layout) {
+    char s[256];
+    snprintf(s, sizeof s, "FMT", readable ? "" : "unreadable/", live, expected, layout);
+    return sp_room_verdict(s);
+}
+int main(void) {
+    assert(verdict(1, 8, 8, "dual") == SP_ROOM_DONE);       /* the dual layout, eight slots */
+    assert(verdict(1, 7, 7, "single") == SP_ROOM_DONE);     /* the single fallback, seven */
+    assert(verdict(1, 7, 8, "dual") == SP_ROOM_FAILED);     /* dual, but only seven allocated */
+    assert(verdict(1, 8, 7, "single") == SP_ROOM_FAILED);   /* single, but eight */
+    unsigned odd[] = {0, 6, 9, 63, 255};
+    for (unsigned i = 0; i < sizeof odd / sizeof odd[0]; i++) {
+        assert(verdict(1, odd[i], 8, "dual") == SP_ROOM_FAILED);
+        assert(verdict(1, odd[i], 7, "single") == SP_ROOM_FAILED);
+        assert(verdict(1, odd[i], odd[i], "dual") == SP_ROOM_FAILED);
+    }
+    assert(verdict(0, 8, 8, "dual") == SP_ROOM_FAILED);     /* the count couldn't be read */
+    assert(verdict(0, 7, 7, "single") == SP_ROOM_FAILED);
+    assert(verdict(1, 8, 7, "dual") == SP_ROOM_FAILED);     /* expected and layout disagree */
+    assert(verdict(1, 7, 8, "single") == SP_ROOM_FAILED);
+    assert(verdict(1, 8, 8, "triple") == SP_ROOM_FAILED);   /* a layout it doesn't know */
+    /* Not a result: the step keeps waiting (and times out) - never done. */
+    assert(sp_room_verdict(NULL) == SP_ROOM_NOT_REPORTED);
+    assert(sp_room_verdict("") == SP_ROOM_NOT_REPORTED);
+    assert(sp_room_verdict("OVERRIDE APPLIED once: config shadow=(8,3,3); verify live slots") == SP_ROOM_NOT_REPORTED);
+    assert(sp_room_verdict("REFUSED: config pointer/signature/count not exact") == SP_ROOM_NOT_REPORTED);
+    /* Malformed counts. */
+    assert(sp_room_verdict("ONE SHOT result: live_slots=8x expected=8 layout=dual native_sources=6;") == SP_ROOM_FAILED);
+    assert(sp_room_verdict("ONE SHOT result: live_slots= expected=8 layout=dual native_sources=6;") == SP_ROOM_FAILED);
+    assert(sp_room_verdict("ONE SHOT result: live_slots=0008 expected=8 layout=dual native_sources=6;") == SP_ROOM_FAILED);
+    assert(sp_room_verdict("ONE SHOT result: live_slots=8 layout=dual native_sources=6;") == SP_ROOM_FAILED);
+    assert(sp_room_verdict("ONE SHOT result: live_slots=8 expected=8 layout=dual") == SP_ROOM_FAILED);   /* no space after */
+    /* A tweak before 9.9.1 (no layout): only its single-Sink success counts; 9.9's 8/"7" is not waved through. */
+    assert(sp_room_verdict("ONE SHOT result: live_slots=7 expected=7 native_sources=6; v8.2 may separately attempt Sink") == SP_ROOM_DONE);
+    assert(sp_room_verdict("ONE SHOT result: live_slots=8 expected=7 native_sources=6; v8.2 may separately attempt Sink") == SP_ROOM_FAILED);
+    assert(sp_room_verdict("ONE SHOT result: live_slots=unreadable/0 expected=7 native_sources=6; v8.2 may separately attempt Sink") == SP_ROOM_FAILED);
+    puts("room verdict: dual 8 and single 7 pass; mismatched, odd, unreadable, malformed and unknown fail; missing waits");
+    return 0;
+}
+""".replace("FMT", fmt)
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = pathlib.Path(td) / "room.c"; exe = pathlib.Path(td) / "room"; src.write_text(harness)
+            for std in ("-std=gnu11", "-std=c99"):
+                build = subprocess.run([cc, std, "-Wall", "-Wextra", "-Werror", "-Wformat=2", "-I" + str(ROOT), str(src), "-o", str(exe)],
+                                       capture_output=True, text=True, timeout=60)
+                self.assertEqual(build.returncode, 0, build.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+            print(ran.stdout, end="")
+
+    def test_the_tweak_reports_this_launchs_expectation(self):
+        hooks = read(ROOT / "tweak/Hooks.xm")
+        audit = hooks.split("if (g_config_shadow_returned) {\n                    uint64_t context = 0;", 1)[1].split("\n                }\n", 1)[0]
+        self.assertIn("const unsigned expected = g_config_shadow[0];", audit)       # what the shadow returned
+        self.assertIn('const char *layout = g_dual_sink ? "dual" : "single";', audit)   # reported separately
+        self.assertIn("V81_LIVE RESULT readable=%s live_slots=%u expected=%u layout=%s sources=6", audit)
+        self.assertNotIn("expected=7", hooks)                                       # no layout-blind expectation
+        # The registration itself is unchanged: it still refuses unless the live count is the layout's.
+        self.assertIn("(slots != 7u && slots != 8u) || avdtp_slots != slots || (slots == 8u) != (g_dual_sink != 0)", hooks)
+
+    def test_the_app_asks_the_shared_check(self):
+        steps = read(SPEAKA_SOURCES / "SessionSteps.swift")
+        room = steps.split("    static let room = SessionStep(", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("switch SPTweakClient.roomVerdict(slots) {\n        case .done: return .done\n        case .failed: return .failed(slots)", room)
+        self.assertNotIn('hasPrefix("ONE SHOT result: live_slots=7 ")', room)
+        self.assertLess(room.index("SPTweakClient.roomVerdict(slots)"), room.index('slots.hasPrefix("REFUSED")'))
+        client = read(CLIENT_M)
+        self.assertIn('#include "shared/SessionCheck.h"', client)
+        verdict = client.split("+ (SPRoomVerdict)roomVerdict:(NSString *)result", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("switch (sp_room_verdict(result.UTF8String)) {", verdict)
+        self.assertIn("case SP_ROOM_DONE: return SPRoomDone;", verdict)
+        self.assertIn("default: return SPRoomNotReported;", verdict)
+        self.assertIn("typedef NS_ENUM(NSInteger, SPRoomVerdict) {", read(CLIENT_H))
+
+    def test_an_eight_slot_launch_passes_every_layout_dependent_step(self):
+        # What the 9.9 tweak writes in a dual launch, from its own formats, against the steps that read those keys.
+        hooks = read(ROOT / "tweak/Hooks.xm")
+        steps = read(SPEAKA_SOURCES / "SessionSteps.swift")
+        table = re.search(r'"REPLACED post native Source: entries=%u, native=6, Sink SEID 7%s; original parent block intentionally retained"', hooks)
+        self.assertTrue(table)
+        dual_table = "REPLACED post native Source: entries=8, native=6, Sink SEID 7 (AAC-LC) + SBC; original parent block intentionally retained"
+        for name in ("tableFailures", "loopHookFailures"):
+            failures = re.findall(r'"([^"]+)"', steps.split(f"static let {name} = [", 1)[1].split("]", 1)[0])
+            self.assertTrue(failures, name)
+            self.assertFalse([f for f in failures if dual_table.startswith(f)], name)
+        self.assertIn('SpeakaSetStatus("diag.v82.sep", "LOCAL register=0 SEID=%u role=SNK', hooks)
+        self.assertIn('sep.hasPrefix("LOCAL register=0 SEID=7")', steps)       # SEID 7 (AAC-LC) registers first in both
+        self.assertLess(hooks.index("g_sink_accepted = 1u;\n        SpeakaSetStatus(\"diag.v82.sep\""), hooks.index("    if (e8) {"))
+        client = read(CLIENT_M)
+        self.assertIn('[sep containsString:@"register=0"] && [sep containsString:@"SEID=7"]', client)
+
+    def test_a_resolved_startup_failure_does_not_stay(self):
+        model = read(SPEAKA_SOURCES / "SpeakaModel.swift")
+        advance = model.split("    private func advance(_ pending: SPRequest) {", 1)[1].split("\n    }\n", 1)[0]
+        failed = advance.split("case .failed(let reason):", 1)[1].split("case .waiting", 1)[0]
+        self.assertLess(failed.index("stop(line: step.failed"), failed.index("problemStep = step"))   # after fail() resets it
+        stalled = advance.split("case .waiting(let reason):", 1)[1]
+        self.assertLess(stalled.index("stop(line: step.failed"), stalled.index("problemStep = step"))
+        refresh = model.split("    func refresh() {", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("if let problemStep, request == nil, problem != nil, problemStep.check(self.status) == .done {", refresh)
+        self.assertLess(refresh.index("self.status = status.diagnostics"), refresh.index("problemStep.check(self.status)"))
+        # Every problem not set by a step's failure drops the step, so no other warning can be cleared by it.
+        for m in re.finditer(r"\bproblem = (?!nil)", model):
+            self.assertIn("problemStep = nil", model[m.start():m.start() + 260], model[m.start():m.start() + 80])
+        for m in re.finditer(r"\n(\s*)problem = nil\n\s*problemSession = nil\n", model):
+            self.assertIn("problemStep = nil", model[m.end():m.end() + 40])
+        self.assertIn("var headerDetail: String { headerWarning ?? codecWarning ?? \"by Parv\" }", model)   # unchanged
+

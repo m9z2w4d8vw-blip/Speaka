@@ -773,7 +773,8 @@ static void install_config_hook(uintptr_t base, int uuid_ok)
             "single: SEID 7 AAC-LC only - a previous dual attempt did not complete");
     }
     SpeakaSetStatus("diag.v82.trial", g_sink_armed ?
-        "ARMED: one-shot seven slots + one Sink SEP + local SDP candidate + signaling RX" :
+        (g_dual_sink ? "ARMED: one-shot eight slots + AAC-LC and SBC Sink SEPs + local SDP candidate + signaling RX" :
+                       "ARMED: one-shot seven slots + one AAC-LC Sink SEP + local SDP candidate + signaling RX") :
         (decisive_requested ? "REFUSED: seven-slot arm absent or legacy ON" : "OFF (default)"));
     if (decisive_requested && !g_sink_armed) SpeakaLogNow("V82 REFUSED: both independent one-shot arms required; legacy OFF");
     if (!config_observer_requested() && !g_seven_armed) {
@@ -1504,17 +1505,22 @@ static uint64_t hook_register(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3
                 snapshot_table_capacity();
                 snapshot_allocation();
                 /* Independently verify that the ORIGINAL constructor allocated
-                 * seven entries. This is read-only and adds NO Sink endpoint. */
+                 * the entries this launch asked for. This is read-only and adds NO Sink endpoint.
+                 * v9.9.1: expected is the count the shadow returned for this launch (8: the dual AAC-LC + SBC
+                 * layout, 7: the single AAC-LC fallback), and layout is g_dual_sink, reported separately so the app
+                 * can check they agree (shared/SessionCheck.h). 9.9 printed a fixed seven for both. */
                 if (g_config_shadow_returned) {
                     uint64_t context = 0;
                     uint8_t live_count = 0;
                     int readable = safe_peek((uint64_t)(g_image_base + 0x9768b0u), &context, sizeof context) &&
                                    safe_peek(context + 0x60u, &live_count, sizeof live_count);
+                    const unsigned expected = g_config_shadow[0];
+                    const char *layout = g_dual_sink ? "dual" : "single";
                     SpeakaSetStatus("diag.v81_seven_slots",
-                                  "ONE SHOT result: live_slots=%s%u expected=7 native_sources=6; v8.2 may separately attempt Sink",
-                                  readable ? "" : "unreadable/", (unsigned)live_count);
-                    SpeakaLogNow("V81_LIVE RESULT readable=%s live_slots=%u expected=7 sources=6; v8.2 gate follows",
-                               readable ? "yes" : "no", (unsigned)live_count);
+                                  "ONE SHOT result: live_slots=%s%u expected=%u layout=%s native_sources=6; v8.2 may separately attempt Sink",
+                                  readable ? "" : "unreadable/", (unsigned)live_count, expected, layout);
+                    SpeakaLogNow("V81_LIVE RESULT readable=%s live_slots=%u expected=%u layout=%s sources=6; v8.2 gate follows",
+                               readable ? "yes" : "no", (unsigned)live_count, expected, layout);
                 }
                 /* v8.3: never insert Sink inside the native Source loop.
                    The optional post-return hook runs after all native Source setup. */

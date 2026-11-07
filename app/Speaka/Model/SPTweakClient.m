@@ -12,6 +12,7 @@
 #include <notify.h>
 #import "shared/SpeakaShared.h"
 #include "shared/PeerName.h"
+#include "shared/SessionCheck.h"
 
 #pragma mark - preferences (same domain and scope as the tweak and the Settings page)
 
@@ -422,6 +423,16 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
 
 // v9.9.11: the AAC experiment's switches are gone - AAC-LC and SBC are both offered, the PC chooses, and the
 // helper decodes whichever it negotiated. Their saved values are removed once (nothing reads them).
+// v9.9.1: the tweak's live endpoint-count result, judged by shared/SessionCheck.h - the code the host tests run.
++ (SPRoomVerdict)roomVerdict:(NSString *)result
+{
+    switch (sp_room_verdict(result.UTF8String)) {
+    case SP_ROOM_DONE: return SPRoomDone;
+    case SP_ROOM_FAILED: return SPRoomFailed;
+    default: return SPRoomNotReported;
+    }
+}
+
 + (void)removeLegacyCodecSettings
 {
     if (SPCopyPref(@SPEAKA_KEY_AAC) != nil) SPWritePref(@SPEAKA_KEY_AAC, nil);

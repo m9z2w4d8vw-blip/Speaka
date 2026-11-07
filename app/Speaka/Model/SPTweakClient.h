@@ -64,6 +64,12 @@ typedef NS_ENUM(NSInteger, SPRequestState) {
 @property (nonatomic, copy, nullable) NSString *resultMessage;
 @end
 
+typedef NS_ENUM(NSInteger, SPRoomVerdict) {
+    SPRoomNotReported,      // no result yet
+    SPRoomDone,             // the expected endpoint slots exist
+    SPRoomFailed,           // a result that isn't the expected count for its layout
+};
+
 @interface SPTweakClient : NSObject
 + (instancetype)sharedClient;
 /// The three output modes, in Settings order: key, title, shortTitle, symbol, detail.
@@ -79,6 +85,9 @@ typedef NS_ENUM(NSInteger, SPRequestState) {
 // v9.9.11: AAC-LC (preferred) and SBC are both standard - no codec switches. Removes the AAC experiment's saved
 // switches (SpeakaAAC, SpeakaAACSink) once; nothing reads them any more.
 + (void)removeLegacyCodecSettings NS_SWIFT_NAME(removeLegacyCodecSettings());
+// v9.9.1: the live endpoint-count result (diag.v81_seven_slots): done only when the count was readable, equals
+// what this launch's layout expected (8 dual, 7 single), and agrees with the layout - shared/SessionCheck.h.
++ (SPRoomVerdict)roomVerdict:(NSString *)result NS_SWIFT_NAME(roomVerdict(_:));
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled NS_SWIFT_NAME(setUpdateNotificationsEnabled(_:));
 
 /// Uninstall (v9.8): every key Speaka keeps in com.apple.bluetooth (all start with "Speaka", shared/SpeakaShared.h) and the

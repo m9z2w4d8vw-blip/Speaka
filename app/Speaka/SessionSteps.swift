@@ -86,7 +86,13 @@ struct SessionStep {
         stalled: "Bluetooth didn't report room for the speaker."
     ) { status in
         let slots = status["diag.v81_seven_slots", default: ""]
-        if slots.hasPrefix("ONE SHOT result: live_slots=7 ") { return .done }
+        // v9.9.1: 8 slots for the dual AAC-LC + SBC layout, 7 for the single AAC-LC fallback - readable, matching what
+        // the launch expected, and the layout's own count (shared/SessionCheck.h, via SPTweakClient).
+        switch SPTweakClient.roomVerdict(slots) {
+        case .done: return .done
+        case .failed: return .failed(slots)
+        default: break
+        }
         if slots.hasPrefix("ONE SHOT result:") || slots.hasPrefix("REFUSED") { return .failed(slots) }
         let lookup = status["diag.v80_config_lookup", default: ""]
         if lookup.hasPrefix("NO_INDEX3") { return .failed(lookup) }

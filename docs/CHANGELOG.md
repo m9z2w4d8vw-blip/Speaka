@@ -9,6 +9,14 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **Fixed: a false "No room for the speaker" after a successful Start (device test of 9.9).** The dual layout
+  allocates eight endpoint slots and the device registered both Sinks, but the live audit printed a fixed
+  `expected=7` and the app's room step accepted only `live_slots=7`. The failure was recorded with the session already
+  on, which never moved on, so it stayed up all session. The tweak now reports the count its shadow returned for that
+  launch and its layout (`live_slots=8 expected=8 layout=dual`); the app accepts only a readable count equal to that
+  layout's own (8 dual, 7 single) through `shared/SessionCheck.h`, which the host tests run as the app does. A
+  startup failure whose own step later passes is cleared. Status and app only: Bluetooth behaves as in 9.9.
+
 - **Volume sync is on by default.** Windows' slider sets the iPhone's own output volume, the iPhone's buttons and
   Control Center reach Windows, and Speaka's PCM gain stays at unity (live-verified on iOS 17.0 with Windows 11 in
   9.8.99: 188 iOS sets read back correctly, no fallback). Nothing to enable: install, Start, connect. The experiment's

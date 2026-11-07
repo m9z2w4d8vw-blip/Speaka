@@ -566,6 +566,11 @@ private capability copy); SEID 7 registers with the AAC-LC records, then the SBC
 from the same captured native SBC set with `sink_prepare_caps`, so its codec pointer is its own. The configure,
 SET_CONFIGURATION and START paths accept exactly SEID 7 and the SBC Sink's assigned SEID.
 
+The live audit after Apple's six Sources (`diag.v81_seven_slots`) reports
+`live_slots=N expected=E layout=dual|single`: `E` is the count the shadow returned for that launch, the layout comes
+from the layout decision separately, and the app accepts only `N == E` with `E` the layout's own (8 or 7). The
+registration itself refuses on the same mismatch. Live on the device (9.9): `live_slots=8`, both Sinks `ret=0`.
+
 Fallback: `SpeakaDualSinkState` is set to `pending` before the 8-slot shadow is returned and `ok` once both endpoints
 registered. A `pending` found at the next launch means that launch never finished; that launch, and every later one,
 uses the single layout (7 slots, SEID 7 AAC-LC - the 9.8.9x layout that played on the device). If only the SBC

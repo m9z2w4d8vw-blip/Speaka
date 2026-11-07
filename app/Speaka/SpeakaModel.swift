@@ -107,6 +107,10 @@ final class SpeakaModel: ObservableObject {
     private var timer: Timer? = nil
     private var active = false
     private var problemSession: SPSession? = nil
+    /// v9.9.1: the Start or Stop step whose failure is in the header, if one is. When a later poll shows that step's
+    /// own check passing - what it reported no longer holds - the failure is cleared. A genuine failure stays until
+    /// it's resolved, the speaker's state moves on, or the next Start or Stop.
+    private var problemStep: SessionStep? = nil
     private var computerNameDate: Date? = nil
     /// Whether dpkg doesn't list the tweak, read at most every 2 s while the tweak isn't running.
     @Published private(set) var tweakPackageMissing = false
@@ -335,6 +339,14 @@ final class SpeakaModel: ObservableObject {
         if let problemSession, problemSession != next.session {
             problem = nil
             self.problemSession = nil
+            problemStep = nil
+        }
+        // ...or until the step that failed passes. 9.9's false "No room for the speaker" was recorded with the
+        // session already on, which never moved on, so it stayed up for the whole session.
+        if let problemStep, request == nil, problem != nil, problemStep.check(self.status) == .done {
+            problem = nil
+            problemSession = nil
+            self.problemStep = nil
         }
         // The PC's name is looked up at most every 3 s while the speaker is on, playing or not, so it shows as soon as
         // the PC connects; nil means "Connect from your PC" before audio, and "Your PC" during it.
@@ -376,6 +388,7 @@ final class SpeakaModel: ObservableObject {
         let action = buttonStops ? "stop" : "start"
         problem = nil
         problemSession = nil
+        problemStep = nil
         lyrics.removeAll()
         sheetTitle = action == "start" ? "Starting" : "Stopping"
         sheetVisible = true
@@ -414,9 +427,11 @@ final class SpeakaModel: ObservableObject {
             }
         case .failed(let reason):
             stop(line: step.failed, problem: "\(step.failed): \(reason)")
+            problemStep = step
         case .waiting(let reason):
             if Date().timeIntervalSince(pending.started) > SessionStep.timeout {
                 stop(line: step.failed, problem: reason.map { "\(step.failed): \($0)" } ?? step.stalled)
+                problemStep = step
             }
         }
     }
@@ -531,6 +546,7 @@ final class SpeakaModel: ObservableObject {
         uninstalling = true
         problem = nil
         problemSession = nil
+        problemStep = nil
         let helper = Bundle.main.bundlePath + "/speakahelper"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var errors: [String] = []
@@ -552,6 +568,7 @@ final class SpeakaModel: ObservableObject {
                 self.uninstalling = false
                 self.problem = reason
                 self.problemSession = self.snapshot.session
+                self.problemStep = nil   // not a step's failure
                 self.refresh()
             }
         }
@@ -574,6 +591,7 @@ final class SpeakaModel: ObservableObject {
             outputChangeDate = nil
             problem = "Couldn't save the audio output. Try again, or use Settings > Speaka."
             problemSession = snapshot.session
+            problemStep = nil   // not a step's failure
             refresh()
         }
     }
@@ -620,6 +638,7 @@ final class SpeakaModel: ObservableObject {
         sheetTitle = "Stopped"
         self.problem = problem
         problemSession = problem == nil ? nil : snapshot.session
+        problemStep = nil   // advance() sets it again for a step's failure
     }
 
     /// Keep the finished log on screen for a moment, then fold the button back (1.6 s, as in Caz).
