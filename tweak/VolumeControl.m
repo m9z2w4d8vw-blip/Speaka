@@ -49,9 +49,21 @@ typedef uint32_t (*Send)(const uint8_t *,uint8_t,const NativeFrame *);
 typedef void (*Disconnect)(const uint8_t *,uint32_t);
 typedef void (*StackLock)(void);
 typedef uint64_t (*RegisterTarget)(uint64_t,uint32_t,uint64_t,uint64_t);
+/* v9.9.9: read-only observation points, upstream of every filter in receive() (docs/AVRCP-VOLUME.md):
+ * +0xe1d9c: the Target's command callback (peer, label, frame) - registration signs it (adr+paciza) and stores it
+ *           at the AVRCP state +0x28; every incoming command of every opcode reaches it first.
+ * +0xccb08: AVCTP's incoming connection indication (?, peer, channel) - Windows opening AVRCP.
+ * +0x54f8c4: "Connecting AVRCP profile to device %{public}s" (manager, device) - iOS opening AVRCP itself. */
+typedef void (*TargetCommand)(const uint8_t *,uint64_t,const NativeFrame *);
+typedef void (*AvctpIncoming)(uint64_t,const uint8_t *,uint64_t);
+typedef uint64_t (*AvrcpConnect)(uint64_t,uint64_t);
 static Receive original_receive;
 static Disconnect original_disconnect;
 static RegisterTarget original_register_target;
+static TargetCommand original_target_command;
+static AvctpIncoming original_avctp_incoming;
+static AvrcpConnect original_avrcp_connect;
+static unsigned seen_commands,seen_incoming,seen_outgoing;
 static Send send_response;
 static StackLock stack_lock,stack_unlock;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
@@ -61,6 +73,13 @@ static uint64_t epoch;
 static int mode,installed; /* 0 off, 1 observe, 2 experimental */
 static uint8_t last_peer[6];
 static int have_last_peer,configured;
+/* v9.9.9: the initial volume. Until Windows engages absolute volume (registers for 0x0d or sets a volume) it
+ * attenuates the stream itself, so Speaka stays at unity; once engaged it sends full scale and expects the sink to.
+ * The level reported then is the last one this PC set (persisted) - so Windows adopting it causes no jump - or, for
+ * a PC never seen, half: never maximum. */
+#define SP_VOLUME_FIRST_DEFAULT 64u
+static unsigned last_level=SP_VOLUME_FIRST_DEFAULT;
+static int engaged;
 static unsigned observed;
 static dispatch_queue_t queue;
 static dispatch_source_t timer;
@@ -74,10 +93,13 @@ static int peek(uint64_t address,void *out,size_t n) {
 }
 /* The gain is kept in the mailbox the tweak created at install, so a value Windows sets before the helper runs (it
  * starts at configuration) is the value the helper plays at. */
+static void persist_level(void *unused);
 static int apply(void *unused,uint8_t value) {
     (void)unused;
     if(!mailbox) return 0;
     sp_volume_mailbox_set(mailbox,1,value);
+    engaged=1;
+    if(value!=last_level) {last_level=value;if(queue) dispatch_async_f(queue,NULL,persist_level);}
     SpeakaLogNow("AVRCP_VOLUME set value=%u (%u%%) helper_live=%d",value,(value*100u+63u)/127u,
                  sp_volume_mailbox_ready(mailbox));
     return 1;
@@ -95,11 +117,19 @@ static const SPVolumeIO io={apply,send_reply,NULL};
 /* A new epoch, no subscription, unity gain - and the last verified Speaka PC bound again, so its AVRCP requests are
  * answered even if they arrive before the next A2DP configuration. */
 static void reset_locked(const char *why) {
-    ++epoch;sp_volume_reset(&state);sp_volume_mailbox_set(mailbox,0,127);
-    if(mode==2 && have_last_peer) sp_volume_bind(&state,last_peer,epoch,127);
+    ++epoch;sp_volume_reset(&state);sp_volume_mailbox_set(mailbox,0,127);engaged=0;
+    if(mode==2 && have_last_peer) sp_volume_bind(&state,last_peer,epoch,(uint8_t)last_level);
     char a[18];peer_address_text(last_peer,a);
     SpeakaLogNow("AVRCP_VOLUME reset why=%s epoch=%llu bound=%s",why,(unsigned long long)epoch,
                  state.bound?a:"none");
+}
+static void persist_level(void *unused) {
+    (void)unused;
+    int v=(int)last_level;
+    CFNumberRef n=CFNumberCreate(kCFAllocatorDefault,kCFNumberIntType,&v);
+    CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_VOLUME_LEVEL),n,CFSTR(SPEAKA_PREFS_DOMAIN));
+    (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
+    if(n) CFRelease(n);
 }
 static void persist_peer(void *unused) {
     (void)unused;
@@ -121,6 +151,7 @@ void SpeakaVolumeConfigure(const uint8_t *peer) {
     configured=1;
     int changed=peer && (!have_last_peer || memcmp(last_peer,peer,6)!=0);
     if(peer) {memcpy(last_peer,peer,6);have_last_peer=1;}
+    if(changed) last_level=SP_VOLUME_FIRST_DEFAULT;   /* another PC: its level is unknown */
     reset_locked(peer?"configured":"configured_unidentified");
     pthread_mutex_unlock(&lock);
     if(changed && queue) dispatch_async_f(queue,NULL,persist_peer);
@@ -136,6 +167,11 @@ static uint32_t receive(const uint8_t *address,uint8_t label,const NativeFrame *
             if(mode==2)
                 consumed=sp_volume_command(&state,&io,peer,epoch,label,frame.ctype,p,frame.count,
                                             native_events,sizeof native_events);
+            /* Windows registered for volume: from now on it expects the sink to apply the level it was told. */
+            if(consumed && p[3]==0x31 && state.subscribed && !engaged && mailbox) {
+                sp_volume_mailbox_set(mailbox,1,state.value);engaged=1;
+                SpeakaLogNow("AVRCP_VOLUME engaged value=%u reported_as_current",state.value);
+            }
             if(observed++<64) {
                 char name[18];peer_address_text(peer,name);
                 SpeakaLogNow("AVRCP_VOLUME rx peer=%s label=%u ctype=%u pdu=0x%02x param=0x%02x count=%u match=%d "
@@ -167,6 +203,40 @@ static uint64_t register_target(uint64_t descriptor,uint32_t features,uint64_t a
                  (advertised&0x02u)!=0);
     SpeakaSetStatus("diag.v106.avrcp_sdp","target features %#x, advertised %#x",features,advertised);
     return original_register_target(descriptor,advertised,a2,a3);
+}
+/* v9.9.9 observation: every incoming Target command, before any filter. Logged, then native. */
+static void target_command(const uint8_t *address,uint64_t label,const NativeFrame *incoming) {
+    unsigned n=__atomic_add_fetch(&seen_commands,1u,__ATOMIC_RELAXED);
+    if(n<=64u || n%100u==0u) {
+        NativeFrame frame;uint8_t peer[6],ops[8]={0};char a[18]="?";
+        if(peek((uint64_t)address,peer,6)) peer_address_text(peer,a);
+        if(peek((uint64_t)incoming,&frame,sizeof frame)) {
+            if(frame.count) (void)peek((uint64_t)frame.operands,ops,frame.count<8?frame.count:8);
+            SpeakaLogNow("AVRCP_VOLUME tg_rx #%u peer=%s label=%llu ctype=%u subunit=%u/%u opcode=%#x count=%u "
+                         "ops=%02x%02x%02x%02x%02x%02x%02x%02x%s%s",n,a,(unsigned long long)label,frame.ctype,
+                         frame.subunit_type,frame.subunit_id,frame.opcode,frame.count,ops[0],ops[1],ops[2],ops[3],
+                         ops[4],ops[5],ops[6],ops[7],frame.opcode==0?" vendor_pdu=":"",
+                         frame.opcode==0?(ops[3]==0x10?"0x10":ops[3]==0x31?"0x31":ops[3]==0x50?"0x50":"other"):"");
+        } else SpeakaLogNow("AVRCP_VOLUME tg_rx #%u peer=%s frame_unreadable",n,a);
+    }
+    original_target_command(address,label,incoming);
+}
+static void avctp_incoming(uint64_t context,const uint8_t *address,uint64_t channel) {
+    unsigned n=__atomic_add_fetch(&seen_incoming,1u,__ATOMIC_RELAXED);
+    if(n<=16u) {
+        uint8_t peer[6];char a[18]="?";
+        if(peek((uint64_t)address,peer,6)) peer_address_text(peer,a);
+        SpeakaLogNow("AVRCP_VOLUME avctp_incoming #%u peer=%s channel=%#llx",n,a,(unsigned long long)channel);
+    }
+    original_avctp_incoming(context,address,channel);
+}
+static uint64_t avrcp_connect(uint64_t manager,uint64_t device) {
+    unsigned n=__atomic_add_fetch(&seen_outgoing,1u,__ATOMIC_RELAXED);
+    uint8_t peer[6];char a[18]="?";
+    if(n<=16u && peek(device+PEER_DEVICE_ADDRESS,peer,6)) peer_address_text(peer,a);
+    uint64_t result=original_avrcp_connect(manager,device);
+    if(n<=16u) SpeakaLogNow("AVRCP_VOLUME avrcp_outgoing #%u peer=%s result=%#llx",n,a,(unsigned long long)result);
+    return result;
 }
 /* A local Speaka change (BTPSAudioHelper --volume) - the reverse direction, CHANGED to a registered Windows. */
 static void tick(void *unused) {
@@ -224,7 +294,10 @@ void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {
         {0xa042c,{0xd503237f,0xa9be4ff4,0xa9017bfd,0x910043fd}},
         {0xa0528,{0xd503237f,0xa9be4ff4,0xa9017bfd,0x910043fd}},
         {0x55b2f4,{0xd503237f,0xa9be4ff4,0xa9017bfd,0x910043fd}},
-        {0xe1a98,{0xd503237f,0xd102c3ff,0xa9075ff8,0xa90857f6}}
+        {0xe1a98,{0xd503237f,0xd102c3ff,0xa9075ff8,0xa90857f6}},
+        {0xe1d9c,{0xd503237f,0xd10203ff,0xa9045ff8,0xa90557f6}},
+        {0xccb08,{0xd503237f,0xd10143ff,0xa9015ff8,0xa90257f6}},
+        {0x54f8c4,{0xd503237f,0xd10303ff,0xa9085ff8,0xa90957f6}}
     };
     int match=exact_uuid;uint32_t words[4];uint8_t events[7];uint64_t slot=1;
     for(size_t i=0;i<sizeof checks/sizeof checks[0];i++)
@@ -242,10 +315,22 @@ void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {
         mailbox=sp_volume_mailbox_open(sidecar,hello.pid,hello.token,1);
         if(!mailbox) {SpeakaLogNow("AVRCP_VOLUME refused: sidecar unavailable");return;}
         have_last_peer=load_last_peer(last_peer);
+        CFPropertyListRef level=CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_VOLUME_LEVEL),CFSTR(SPEAKA_PREFS_DOMAIN));
+        int saved=-1;
+        if(level && CFGetTypeID(level)==CFNumberGetTypeID()) CFNumberGetValue(level,kCFNumberIntType,&saved);
+        if(level) CFRelease(level);
+        if(have_last_peer && saved>=0 && saved<=127) last_level=(unsigned)saved;
     }
     /* Before main: the Target registers its SDP record during bluetoothd's startup, after this. */
     MSHookFunction((void *)(base+0xe1a98),(void *)register_target,(void **)&original_register_target);
     if(!original_register_target) {SpeakaLogNow("AVRCP_VOLUME registration trampoline missing");return;}
+    /* Observation, both modes: logged and passed on unchanged. A missing trampoline only loses the log line. */
+    MSHookFunction((void *)(base+0xe1d9c),(void *)target_command,(void **)&original_target_command);
+    MSHookFunction((void *)(base+0xccb08),(void *)avctp_incoming,(void **)&original_avctp_incoming);
+    MSHookFunction((void *)(base+0x54f8c4),(void *)avrcp_connect,(void **)&original_avrcp_connect);
+    if(!original_target_command || !original_avctp_incoming || !original_avrcp_connect)
+        SpeakaLogNow("AVRCP_VOLUME observation trampolines: command=%d incoming=%d outgoing=%d",
+                     original_target_command!=NULL,original_avctp_incoming!=NULL,original_avrcp_connect!=NULL);
     MSHookFunction((void *)(base+0xe0ff4),(void *)receive,(void **)&original_receive);
     if(!original_receive) {SpeakaLogNow("AVRCP_VOLUME receive trampoline missing");return;}
     if(mode==2) {
@@ -255,7 +340,7 @@ void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {
     installed=1;
     queue=dispatch_queue_create("com.parv.speaka.volume",DISPATCH_QUEUE_SERIAL);
     pthread_mutex_lock(&lock);
-    if(mode==2 && have_last_peer) {++epoch;sp_volume_bind(&state,last_peer,epoch,127);}
+    if(mode==2 && have_last_peer) {++epoch;sp_volume_bind(&state,last_peer,epoch,(uint8_t)last_level);}
     pthread_mutex_unlock(&lock);
     if(mode==2 && queue) {
         timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,queue);
@@ -266,6 +351,6 @@ void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {
         } else SpeakaLogNow("AVRCP_VOLUME no timer: local changes disabled");
     }
     char a[18];peer_address_text(last_peer,a);
-    SpeakaLogNow("AVRCP_VOLUME installed mode=%s last_peer=%s STATIC EVIDENCE ONLY; live validation pending",
-                 mode==2?"experimental":"observe",have_last_peer?a:"none");
+    SpeakaLogNow("AVRCP_VOLUME installed mode=%s last_peer=%s last_level=%u STATIC EVIDENCE ONLY; live validation pending",
+                 mode==2?"experimental":"observe",have_last_peer?a:"none",last_level);
 }

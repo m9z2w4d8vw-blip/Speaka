@@ -54,9 +54,11 @@ class VolumeRuntime(unittest.TestCase):
         source = (ROOT / "tweak/VolumeControl.m").read_text()
         block = source.split("checks[]={", 1)[1].split("};", 1)[0]
         gates = re.findall(r"\{(0x[0-9a-f]+),\{([^}]+)\}\}", block)
-        # v9.9.8: dispatcher, response, lock, unlock, teardown - and the Target's SDP registration (+0xe1a98).
-        self.assertEqual(len(gates), 6)
-        self.assertIn("0xe1a98", [g[0] for g in gates])
+        # v9.9.8: dispatcher, response, lock, unlock, teardown, the Target's SDP registration (+0xe1a98);
+        # v9.9.9: the Target command callback, AVCTP's incoming connection, and iOS's own AVRCP connect.
+        self.assertEqual(len(gates), 9)
+        for offset in ("0xe1a98", "0xe1d9c", "0xccb08", "0x54f8c4"):
+            self.assertIn(offset, [g[0] for g in gates])
         for offset, words in gates:
             address = base + int(offset, 16)
             self.assertIn(int(offset, 16), starts)
@@ -190,7 +192,9 @@ int main(void) {
         self.assertIn('reset_locked(peer?"configured":"configured_unidentified");', configure)
         reset = adapter.split("static void reset_locked(const char *why) {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("++epoch;sp_volume_reset(&state);sp_volume_mailbox_set(mailbox,0,127);", reset)
-        self.assertIn("if(mode==2 && have_last_peer) sp_volume_bind(&state,last_peer,epoch,127);", reset)
+        # v9.9.9: rebound at the level that PC last set, and at unity until Windows engages.
+        self.assertIn("if(mode==2 && have_last_peer) sp_volume_bind(&state,last_peer,epoch,(uint8_t)last_level);", reset)
+        self.assertIn("sp_volume_mailbox_set(mailbox,0,127);engaged=0;", reset)
         # Off mode installs nothing.
         install = adapter.split("void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {", 1)[1]
         self.assertLess(install.index("if(!mode) return;"), install.index("MSHookFunction("))
@@ -226,3 +230,69 @@ int main(void) {
         writers = helper.split("static void hold_pcm(", 1)[1].split("static void keep_output(", 1)[0]
         self.assertNotIn("sp_volume", writers)                 # the ring holds decoded, un-attenuated PCM
         self.assertIn('hlog(stdout,"V106_VOLUME gain=%u/127 (%u%%) output=%s\\n"', helper)
+
+    def test_observation_hooks_pass_everything_through(self):
+        # v9.9.9: the earliest points of the incoming Target path. They log and call the original, unconditionally,
+        # in observe and experimental mode alike - they can't drop, alter or answer anything.
+        adapter = self.read("tweak/VolumeControl.m")
+        for name, call in (("static void target_command(", "    original_target_command(address,label,incoming);\n}"),
+                           ("static void avctp_incoming(", "    original_avctp_incoming(context,address,channel);\n}"),
+                           ("static uint64_t avrcp_connect(", "    return result;\n}")):
+            body = adapter.split(name, 1)[1].split("\n}\n", 1)[0] + "\n}"
+            self.assertTrue(body.rstrip().endswith(call.split("\n")[-1]), name)
+            self.assertIn(call.split("\n")[0].strip(), body)
+            self.assertNotIn("consumed", body)
+            self.assertNotIn("return 0;", body)
+        self.assertIn("uint64_t result=original_avrcp_connect(manager,device);", adapter)
+        install = adapter.split("void SpeakaVolumeInstall(uintptr_t base,int exact_uuid) {", 1)[1]
+        hooks = install.index("(void *)(base+0xe1d9c)")
+        self.assertLess(install.index("if(!match)"), hooks)                       # gated by the build checks
+        self.assertLess(hooks, install.index("if(mode==2) {\n        MSHookFunction((void *)(base+0x55b2f4)"))
+        self.assertIn("if(n<=64u || n%100u==0u) {", adapter)                      # bounded logging
+
+    def test_initial_volume_is_the_pcs_last_level_never_maximum(self):
+        harness = r"""
+#include <assert.h>
+#include <string.h>
+#include "shared/VolumeControl.h"
+static uint8_t interim_value = 255;
+static int apply_fn(void *c, uint8_t v) { (void)c; (void)v; return 1; }
+static int send_fn(void *c, const uint8_t peer[6], uint8_t label, uint8_t code, const uint8_t *p, size_t n) {
+    (void)c; (void)peer; (void)label;
+    if (code == SP_AVRCP_INTERIM && n >= 9) interim_value = p[8];   /* 00 19 58 31 00 00 02 0d <value> */
+    return 1;
+}
+static const SPVolumeIO io = { apply_fn, send_fn, NULL };
+int main(void) {
+    const uint8_t laptop[6] = {0x24, 0xB2, 0xB9, 0xA1, 0xA4, 0x68};
+    const uint8_t reg[] = {0, 0x19, 0x58, 0x31, 0, 0, 5, 0x0d, 0, 0, 0, 0};
+    SPVolume s;
+    /* The laptop last set 40/127: on reconnecting it is told 40 when it registers - no jump if it adopts it. */
+    sp_volume_bind(&s, laptop, 7, 40);
+    assert(sp_volume_command(&s, &io, laptop, 7, 3, SP_AVRCP_NOTIFY, reg, sizeof reg, NULL, 0) == 1);
+    assert(interim_value == 40);
+    /* A PC never seen: half, not maximum. */
+    sp_volume_bind(&s, laptop, 8, 64);
+    assert(sp_volume_command(&s, &io, laptop, 8, 4, SP_AVRCP_NOTIFY, reg, sizeof reg, NULL, 0) == 1);
+    assert(interim_value == 64);
+    return 0;
+}
+"""
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "level.c"; exe = Path(td) / "level"; src.write_text(harness)
+            build = subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), str(src),
+                                    str(ROOT / "shared/VolumeControl.c"), "-o", str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+        adapter = self.read("tweak/VolumeControl.m")
+        self.assertIn("#define SP_VOLUME_FIRST_DEFAULT 64u", adapter)
+        self.assertIn("if(changed) last_level=SP_VOLUME_FIRST_DEFAULT;", adapter)         # another PC: unknown level
+        apply = adapter.split("static int apply(void *unused,uint8_t value) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("engaged=1;", apply)
+        self.assertIn("dispatch_async_f(queue,NULL,persist_level);", apply)                 # off the receive thread
+        receive = adapter.split("static uint32_t receive(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("if(consumed && p[3]==0x31 && state.subscribed && !engaged && mailbox) {", receive)
+        self.assertIn("sp_volume_mailbox_set(mailbox,1,state.value);engaged=1;", receive)
+

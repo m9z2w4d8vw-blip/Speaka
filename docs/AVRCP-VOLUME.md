@@ -254,3 +254,50 @@ the user's `Speaka-iOS17` project and this repository's copy):
 Still unverified on the device: the hooks at runtime, the response path, the local-change locking, and Windows'
 behaviour (whether it uses absolute volume with this Target, and with or without Category 2).
 
+## v9.9.9: why no `rx` appeared, and the observation points
+
+Device evidence (v9.8.97): experimental mode installed, the Target registration advertised `0x1d3`, the laptop was
+bound, the local gain path worked (08:17:33) - and no `AVRCP_VOLUME rx` line of any kind appeared, not even
+GetCapabilities (`0x10`), which an AVRCP 1.4+ controller sends to a Target before anything else.
+
+The receive hook is on the right path, and its filter is Apple's own (Ghidra, `bluetoothd`):
+
+* `+0xe1a98` (Target registration) builds `adr x16, +0xe1d9c` / `paciza x16` and stores it at the AVRCP state `+0x28`:
+  `+0xe1d9c (peer, label, frame)` is the Target's command callback for every incoming command.
+* `+0xe1d9c` sends opcode 0 (VENDOR DEPENDENT) to `+0xe29fc`, which tail-calls `+0xe0ff4` (the hooked dispatcher)
+  whenever the Target descriptor's metadata table (`+0x10` -> `0x936d78`) is present - it is. With no Target registered
+  it logs "No target registered; rejecting command".
+* For PASS THROUGH it rejects `frame[1] != 9 || frame[2] != 0` ("Rejecting PASS THROUGH command directed at subunit
+  <%d,%d>"): byte 1 is the subunit type, byte 2 the id, byte 3 the opcode - exactly what `receive()` checks.
+
+So no vendor command reached the Target at all. Either Windows never opened AVRCP to it, or it opened it and sent the
+Target nothing. A likely reason for the second: Windows caches a paired device's SDP record, and the laptop was paired
+when the Target advertised `0x1d1` (no Category 2); it has to be removed and paired again to read `0x1d3`. Three
+read-only hooks, installed in observe and experimental mode alike, now tell these apart in one run:
+
+| Log | Hook | Meaning |
+| --- | --- | --- |
+| `avctp_incoming peer=` | `+0xccb08`, AVCTP's incoming connection indication | Windows opened AVRCP |
+| `avrcp_outgoing peer= result=` | `+0x54f8c4`, "Connecting AVRCP profile to device %{public}s" | iOS opened AVRCP |
+| `tg_rx ... opcode= vendor_pdu=` | `+0xe1d9c`, the Target command callback | a command arrived, any kind, before any filter |
+
+Each is fingerprinted (function starts, checked against the reference binary by the tests), logs at most 64 calls
+(then every 100th) or 16 connections, and calls the original unconditionally.
+
+## Initial volume
+
+Before Windows engages absolute volume (registers for event `0x0d` or sends SetAbsoluteVolume) it attenuates the stream
+itself, so Speaka stays at unity gain: no double attenuation. Once engaged, Windows sends full scale and expects the sink
+to apply the level. The level Speaka reports when Windows registers is the last one that PC set (persisted,
+`SpeakaAVRCPVolumeLevel`), so Windows adopting it causes no jump; for a PC never seen it is 64 (50%), never 127. If
+Windows pushes its own level instead, that is applied. The level Windows had on another output before the connection is
+not visible over Bluetooth; matching it would need a Windows-side component that reads the previous endpoint's volume.
+
+## The iPhone's own volume
+
+The iPhone's buttons and Control Center change iOS's output volume, a separate stage after Speaka's gain. Reporting it
+to Windows while Windows' slider drives Speaka's gain would put two attenuations in series (and a slider showing one
+of them). A single domain needs either Windows to drive iOS's output volume (a private setter, not verified) or the
+buttons to drive Speaka's gain instead. This release only observes iOS's volume (`V106_IOS_VOLUME`, the helper,
+read-only) to establish that the daemon sees the buttons; nothing is sent or applied from it.
+

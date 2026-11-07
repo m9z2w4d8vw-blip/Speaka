@@ -724,6 +724,7 @@ static void stream(int fd) {
     int warm=0;uint64_t healthy_since=0;   /* v9.9.4: has this connection streamed at real time yet? */
     excl_state_t excl;excl_init(&excl);uint64_t last_hint_poll=0;int hint_seen=-1;   /* v9.9.5 */
     unsigned volume_seen=127;   /* v9.9.8: the AVRCP gain last reported as reaching the output */
+    int ios_volume_seen=-1;uint64_t ios_volume_polled=0;   /* v9.9.9: iOS output volume, observed only */
     input_rate_t input;input_rate_reset(&input,helper_ms(),(int)(__atomic_load_n(&s->generation,__ATOMIC_ACQUIRE)&1u));
     uint64_t other_quiet_since=0,last_poll=0;   /* v9.9.2: the other app's audio stopping clears an interruption */
     PCMLevels level={0};
@@ -776,6 +777,16 @@ static void stream(int fd) {
                     hlog(stdout,"V106_VOLUME gain=%u/127 (%u%%) output=%s\n",gain,(gain*100u+63u)/127u,
                          o->queue&&!o->paused?"playing":"idle");
                     volume_seen=gain;
+                }
+                /* v9.9.9: does this daemon see the iPhone's volume buttons / Control Center? (public, read-only;
+                 * nothing is sent or applied - iPhone-to-Windows needs one volume domain, docs/AVRCP-VOLUME.md) */
+                if(o->queue && now-ios_volume_polled>=500u) {
+                    ios_volume_polled=now;
+                    int ios=(int)([AVAudioSession sharedInstance].outputVolume*127.0f+0.5f);
+                    if(ios!=ios_volume_seen) {
+                        if(ios_volume_seen>=0) hlog(stdout,"V106_IOS_VOLUME %d/127 (was %d) - observed only\n",ios,ios_volume_seen);
+                        ios_volume_seen=ios;
+                    }
                 }
             }
             /* Every path below keeps own.running equal to "a queue is running"; this only guards against a miss. */

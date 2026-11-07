@@ -77,6 +77,14 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **AVRCP volume: why nothing arrived, and an initial-volume policy (v9.8.97 test):** no `AVRCP_VOLUME rx` line of any
+  kind appeared - not even GetCapabilities. Traced in bluetoothd: the Target's command callback (+0xe1d9c, signed and
+  registered by the Target registration) sends vendor commands through +0xe29fc to the hooked +0xe0ff4, and Apple's own
+  PASS THROUGH check confirms the frame layout the hook filters on - so no command reached the Target at all. Windows
+  either never opened AVRCP or sent the Target nothing (it caches SDP: the laptop was paired while the Target advertised
+  0x1d1). Read-only hooks now log AVRCP connections in both directions and every Target command before any filter. Until
+  Windows engages absolute volume Speaka stays at unity; when it registers it is told the last level that PC set
+  (persisted), or 50% for a new PC - never 127. iOS's own volume is observed (V106_IOS_VOLUME), not yet synchronized.
 - **AVRCP absolute volume, integrated (off by default):** Astra's implementation (portable target protocol, volume
   mailbox, post-decode PCM gain for AAC and SBC, build-gated native adapter, evidence) is applied, with corrections:
   the AVRCP peer is bound to the A2DP device v9.8.96 identifies from the stream map (not the obsolete learned path),

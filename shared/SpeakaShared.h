@@ -74,3 +74,6 @@ static inline void speaka_state_unpack(uint64_t s, unsigned *loaded, unsigned *u
 /* The last verified Speaka PC (PeerIdentity.c): bound at startup so its AVRCP requests are answered even if they
  * arrive before its A2DP configuration. Written by the tweak. */
 #define SPEAKA_KEY_VOLUME_PEER "SpeakaAVRCPVolumePeer"
+/* The last volume that PC set (0..127), reported when it next registers - so a reconnection keeps its level.
+ * Written by the tweak. */
+#define SPEAKA_KEY_VOLUME_LEVEL "SpeakaAVRCPVolumeLevel"
