@@ -75,10 +75,12 @@ static inline int peer_pick_port(const char *const *names, const char *const *ty
     return first;
 }
 
-/* The name the app shows, in this order: the BluetoothManager device whose address the route's PC port carries (it
+/* The name the app shows, in this order (v9.9.5): the connection's own identity (tweak/PeerIdentity.c); then the
+ * BluetoothManager device whose address the route's PC port carries (it
  * is the device actually streaming - unless it is an audio device); a computer BluetoothManager lists as connected;
  * the PC port's own name; the one paired computer, but only while audio is arriving; else NULL ("Your PC"). */
 typedef struct {
+    const char *connection;          /* v9.9.5: bluetoothd's record of the PC that configured the speaker */
     const char *identity;            /* the address-matched device's name, or NULL */
     int identity_is_audio;           /* that device is headphones or a speaker: not the PC */
     const char *connected_computer;  /* BluetoothManager: a connected computer */
@@ -89,9 +91,38 @@ typedef struct {
 
 static inline const char *peer_choose_name(const peer_names_t *n)
 {
+    if (n->connection && n->connection[0]) return n->connection;
     if (n->identity && n->identity[0] && !n->identity_is_audio) return n->identity;
     if (n->connected_computer && n->connected_computer[0]) return n->connected_computer;
     if (n->route && n->route[0] && !n->identity_is_audio) return n->route;
     if (n->receiving && n->paired_computer && n->paired_computer[0]) return n->paired_computer;
     return NULL;
+}
+
+/* ---- the connected PC from bluetoothd's own paired-device records (v9.9.5) ----
+ * Test-92: every route the helper saw was the speaker (21 of 21), so the route never names the PC while Speaka holds
+ * it, and the app's BluetoothManager reported "not ready". bluetoothd keeps a record per paired device - its name and
+ * when it was last seen (com.apple.MobileBluetooth.devices) - and the tweak reads it from inside bluetoothd when the PC
+ * configures the speaker. The device that just connected is the one seen most recently; it is named only when that is
+ * unambiguous: seen within PEER_RECENT_S, and no other record within PEER_TIE_S of it. Otherwise nothing is named and
+ * the app keeps "Your PC" - never a wrong device. */
+#define PEER_RECENT_S 600.0
+#define PEER_TIE_S 10.0
+typedef struct { const char *name; const char *address; double last_seen; int has_time; } peer_record_t;
+
+/* LastSeenTime as Unix seconds: stored either as Unix time or as CFAbsoluteTime (seconds since 2001). */
+static inline double peer_unix_time(double t) { return t > 1.0e9 ? t : t + 978307200.0; }
+
+/* Index of the record that names the connection; -1 if none was seen recently, -2 if two are too close to call. */
+static inline int peer_pick_recent(const peer_record_t *r, unsigned n, double now)
+{
+    int best = -1, second = -1;
+    for (unsigned i = 0; i < n; ++i) {
+        if (!r[i].has_time || !r[i].name || !r[i].name[0]) continue;
+        if (best < 0 || r[i].last_seen > r[best].last_seen) { second = best; best = (int)i; }
+        else if (second < 0 || r[i].last_seen > r[second].last_seen) second = (int)i;
+    }
+    if (best < 0 || now - r[best].last_seen > PEER_RECENT_S) return -1;
+    if (second >= 0 && r[best].last_seen - r[second].last_seen < PEER_TIE_S) return -2;
+    return best;
 }

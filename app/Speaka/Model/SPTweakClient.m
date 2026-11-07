@@ -121,6 +121,7 @@ static NSString *SPOutputsDescription(id outputs)
         _diagnostics = @{};
         _routeName = @"";
         _routeUID = @"";
+        _peerName = @"";
     }
     return self;
 }
@@ -247,6 +248,9 @@ static NSString *SPOutputsDescription(id outputs)
         routeName = SPBluetoothOutputName(SPOwnRouteOutputs());
     s.routeName = routeName;
     s.routeUID = routeUID;
+    // v9.9.5: the tweak names the PC from bluetoothd's own device records when it configures the speaker - the
+    // connection's identity, independent of the audio route and of BluetoothManager (tweak/PeerIdentity.c).
+    s.peerName = SPString(status[@"diag.v104.peer"]);
     id volume = helper[@"volume"];
     s.volumeZero = s.playing && [volume isKindOfClass:[NSNumber class]] && [volume doubleValue] < 0.05;
 

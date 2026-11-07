@@ -521,6 +521,25 @@ static int resume_output(Output *o,unsigned rate,AudioRing *s) {
     log_route(session,"resumed",o->rate,s);
     return 0;
 }
+/* v9.9.5: another app's non-mixing audio is playing alongside Speaka's mixing session. Activate once without
+ * MixWithOthers - iOS then interrupts that app - and mix again at once, so the next activation can't take Speaka's
+ * session (OutputPolicy.h, excl_*). The session stays active throughout: the route never leaves Speaka's output. */
+static int assert_exclusive(void) {
+    AVAudioSession *session=[AVAudioSession sharedInstance];NSError *error=nil;
+    int speaker=g_output_mode==OUTPUT_MODE_SPEAKER;
+    NSString *category=g_output_mode==OUTPUT_MODE_ANY?AVAudioSessionCategoryPlayback:AVAudioSessionCategoryPlayAndRecord;
+    g_session_changed_ms=helper_ms();          /* the route change this causes is our own echo */
+    BOOL ok=[session setCategory:category mode:AVAudioSessionModeDefault
+                         options:(AVAudioSessionCategoryOptions)output_session_options(speaker,0) error:&error];
+    if(ok) ok=[session setActive:YES error:&error];
+    long code=ok?0:(long)error.code;
+    (void)[session setCategory:category mode:AVAudioSessionModeDefault
+                       options:(AVAudioSessionCategoryOptions)output_session_options(speaker,1) error:NULL];
+    if(speaker) (void)[session overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:NULL];
+    g_session_changed_ms=helper_ms();
+    if(!ok) hlog(stdout,"V103_EXCLUSIVE_FAIL code=%ld\n",code);
+    return ok?1:0;
+}
 static int reassert_speaker(Output *o,unsigned rate,AudioRing *s) {
     AVAudioSession *session=[AVAudioSession sharedInstance];NSError *error=nil;
     stop_output(o,s,"route_changed_reassert",0);
@@ -692,6 +711,7 @@ static void stream(int fd) {
     mix_init(&g_mix);forget_pc_port();
     capture_pc_port([AVAudioSession sharedInstance].currentRoute,"before_activation");
     int warm=0;uint64_t healthy_since=0;   /* v9.9.4: has this connection streamed at real time yet? */
+    excl_state_t excl;excl_init(&excl);uint64_t last_hint_poll=0;int hint_seen=-1;   /* v9.9.5 */
     input_rate_t input;input_rate_reset(&input,helper_ms(),(int)(__atomic_load_n(&s->generation,__ATOMIC_ACQUIRE)&1u));
     uint64_t other_quiet_since=0,last_poll=0;   /* v9.9.2: the other app's audio stopping clears an interruption */
     PCMLevels level={0};
@@ -884,6 +904,22 @@ static void stream(int fd) {
                          rate_hint,own.failures,own.fights,(unsigned long long)lost_ms,
                          own.next_ms==OWN_NEVER?-1ll:(own.next_ms>now?(long long)(own.next_ms-now):0ll));
                     own_logged=code;
+                }
+            }
+            /* v9.9.5: exclusive audible playback (OutputPolicy.h). Only while Speaka's output runs and its session
+             * mixes; a call or an alarm interrupts it and is handled by the interruption path instead. */
+            if(o->queue && !o->paused && g_mix.mixing && now-last_hint_poll>=200u) {
+                last_hint_poll=now;
+                AVAudioSession *session=[AVAudioSession sharedInstance];
+                int hint=session.secondaryAudioShouldBeSilencedHint?1:0;
+                if(hint!=hint_seen) {
+                    hlog(stdout,"V103_OTHER_AUDIO nonmixing=%d other_playing=%d\n",hint,session.isOtherAudioPlaying?1:0);
+                    hint_seen=hint;
+                }
+                if(hint && excl_should_assert(&excl,now)) {
+                    int ok=assert_exclusive();
+                    excl_asserted(&excl,now);
+                    hlog(stdout,"V103_EXCLUSIVE asserted=%d asserts=%u fights=%u backoff_ms=%u\n",ok,excl.asserts,excl.fights,excl.backoff_ms);
                 }
             }
             /* v9.9.2: close the input-rate window on time even when no packet arrives. */

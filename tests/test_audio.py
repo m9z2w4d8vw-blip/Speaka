@@ -19,6 +19,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -992,7 +993,7 @@ int main(void) {
         self.assertIn("#define SESSION_OPT_DEFAULT_TO_SPEAKER 0x8u", read("audiohelper/OutputPolicy.h"))
         self.assertIn("overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker", configure)
         self.assertIn("!speaker_selected(session)", configure)
-        self.assertEqual(source.count("AVAudioSessionCategoryPlayAndRecord"), 2)
+        self.assertEqual(source.count("AVAudioSessionCategoryPlayAndRecord"), 3)   # speaker, wired, v9.9.5 assert_exclusive
         wired = source.split("static int configure_wired(", 1)[1].split("static int configure_output(", 1)[0]
         self.assertIn("output_session_options(0,(int)g_mix.mixing)", wired)      # v9.9.4: mixing, no Bluetooth option
         for option in ("AllowBluetooth", "AllowBluetoothA2DP", "AllowAirPlay"):
@@ -1247,6 +1248,42 @@ int main(void) {
 # 8 s without media, so every pause longer than that looped (13 phone STARTs and 13 phone SUSPENDs in two minutes).
 # The helper now owns the output from its connection until the session ends. Policy: audiohelper/OutputPolicy.h.
 
+class StartupTiming(unittest.TestCase):
+    """Priority 1 (v9.9.5): the startup report separates elapsed launch time from everything else, for the next device
+    matrix. Run on the real Test-92 lines (tests/fixtures/startup_test92_*.log): Test A's PC-started stream at 16.8 s
+    after launch was slow until ~42-45 s; Test B's at 94.7 s ran at full rate from its first window."""
+
+    def report(self, name):
+        sys.path.insert(0, str(ROOT / "tools"))
+        try:
+            import startup_report
+        finally:
+            sys.path.pop(0)
+        return startup_report.report((ROOT / "tests/fixtures" / name).read_text().splitlines())
+
+    def test_cold_start_is_slow_until_about_42_s_after_launch(self):
+        a = self.report("startup_test92_A.log")
+        self.assertEqual(len(a), 1)
+        self.assertEqual((a[0]["by"], a[0]["since_launch_ms"]), ("pc", 16832))
+        self.assertTrue(a[0]["slow_start"])
+        self.assertLess(a[0]["first_pkt_per_s"], 25)                 # 21/s: well under 46.875
+        self.assertTrue(41.0 <= a[0]["full_at_s"] <= 46.0, a[0]["full_at_s"])
+        slow = [w for w in a[0]["windows"] if w["at_s"] < 41.0]
+        self.assertTrue(slow and all(w["pkt_per_s"] < 25 for w in slow))
+        self.assertTrue(all(w["bytes_per_pkt"] > 500 for w in slow))   # real AAC frames, not silence
+
+    def test_a_stream_started_long_after_launch_is_at_full_rate_at_once(self):
+        b = self.report("startup_test92_B.log")
+        self.assertTrue(b and b[0]["since_launch_ms"] > 90000)
+        self.assertFalse(b[0]["slow_start"])
+        self.assertEqual(b[0]["full_at_s"], b[0]["windows"][0]["at_s"])
+
+    def test_every_start_line_carries_its_initiator_and_launch_time(self):
+        hooks = read("tweak/Hooks.xm")
+        self.assertIn('by=%s since_launch_ms=%llu"', hooks)
+        self.assertIn("g_load_mach = mach_absolute_time();", hooks)
+
+
 class OutputOwnership(unittest.TestCase):
     def compile_run(self, source, cpp=False):
         compiler = shutil.which("c++" if cpp else "cc")
@@ -1416,7 +1453,7 @@ int main(void) {
         # the strongest public priority before every activation.
         for option in ("DuckOthers", "InterruptSpokenAudioAndMixWithOthers", "AllowBluetoothA2DP", "OptionAllowBluetooth"):
             self.assertNotIn(option, helper)
-        self.assertEqual(helper.count("output_session_options("), 3)                # every configure_* uses the policy
+        self.assertEqual(helper.count("output_session_options("), 5)   # every configure_* and assert_exclusive (twice)
         self.assertEqual(helper.count("prefer_uninterrupted(session);"), 4)   # every activation: 3 configure_* + resume
         self.assertIn("setPrefersNoInterruptionsFromSystemAlerts:YES", helper)
         self.assertEqual(helper.count("ok=[session setActive:YES error:&error];if(ok) note_session(1,"), 3)
@@ -1513,6 +1550,72 @@ int main(void) {
         # System interruptions (calls, alarms) are still handled by the v9.9.2 pause/resume path.
         began = loop.split("if(changed==1) {", 1)[1].split("} else {", 1)[0]
         self.assertIn('pause_output(o,s,"interruption_began");', began)
+
+    def test_exclusive_audible_playback_policy(self):
+        # Priority 2 (v9.9.5). Test D (v9.8.92): mixing kept the route and the PC's stream intact while TikTok played - no
+        # interruption, no route change, no phone START/SUSPEND - but TikTok was audible. v9.8.91 (non-mixing) silenced it
+        # only by losing the session, and the phone suspended the PC's stream when Speaka took it back. Now Speaka mixes
+        # (it can't be taken) and, when another app's non-mixing audio starts, activates once without mixing so iOS
+        # interrupts that app. This models the policy against two kinds of app; it is not a model of iOS.
+        out = self.compile_run(r"""
+#include <assert.h>
+#include <stdio.h>
+#include "OutputPolicy.h"
+typedef struct { unsigned asserts; uint64_t audible_ms; } R;
+/* A TikTok-like app plays from 5 s and re-activates at every scroll (every 4 s); an assertion pauses it until the next
+ * scroll. A fighting app instead takes the audio back 300 ms after each assertion. The helper polls every 200 ms. */
+static R run(int fighting) {
+    excl_state_t e; excl_init(&e); R r = {0, 0};
+    int playing = 0; uint64_t resume_at = 0;
+    for (uint64_t t = 0; t < 60000; t += 10) {
+        if (!fighting && t >= 5000 && (t - 5000) % 4000 == 0) playing = 1;
+        if (fighting && t == 5000) playing = 1;
+        if (fighting && resume_at && t >= resume_at) { playing = 1; resume_at = 0; }
+        if (playing) r.audible_ms += 10;
+        if (t % 200 == 0 && playing && excl_should_assert(&e, t)) {
+            excl_asserted(&e, t); r.asserts++; playing = 0;      /* iOS interrupts the other app */
+            if (fighting) resume_at = t + 300;
+        }
+    }
+    return r;
+}
+int main(void) {
+    for (int speaker = 0; speaker <= 1; speaker++) {
+        unsigned base = output_session_options(speaker, 1), assertive = output_session_options(speaker, 0);
+        assert((base & SESSION_OPT_MIX_WITH_OTHERS) && !(assertive & SESSION_OPT_MIX_WITH_OTHERS));
+        assert(!((base | assertive) & (SESSION_OPT_ALLOW_BLUETOOTH | SESSION_OPT_ALLOW_BLUETOOTH_A2DP)));
+    }
+    excl_state_t e; excl_init(&e);
+    assert(excl_should_assert(&e, 50)); excl_asserted(&e, 50);
+    assert(!excl_should_assert(&e, 50 + EXCL_MIN_INTERVAL_MS - 1) && excl_should_assert(&e, 50 + EXCL_MIN_INTERVAL_MS));
+    excl_asserted(&e, 1100); assert(e.fights == 1 && e.backoff_ms == 2000);           /* came straight back */
+    excl_asserted(&e, 3200); excl_asserted(&e, 7300); excl_asserted(&e, 15400);
+    assert(e.backoff_ms == EXCL_BACKOFF_MAX_MS);                                         /* capped */
+    excl_asserted(&e, 15400 + EXCL_CALM_MS); assert(e.fights == 0 && e.backoff_ms == 0);   /* calm resets */
+    R scroll = run(0), fight = run(1);
+    printf("scrolling app: %u assertions, audible %llu ms over 55 s; fighting app: %u assertions, audible %llu ms\n",
+           scroll.asserts, (unsigned long long)scroll.audible_ms, fight.asserts, (unsigned long long)fight.audible_ms);
+    assert(scroll.asserts == 14);                     /* one per scroll */
+    assert(scroll.audible_ms <= 14u * 200u);          /* at most one poll interval each */
+    assert(fight.asserts <= 12);                      /* backoff: no endless loop of activations */
+    return 0;
+}
+""")
+        print(out, end="")
+        helper = read("audiohelper/AudioHelper.m")
+        body = between(helper, "static int assert_exclusive(void) {", "\n}\n")
+        mixless = body.index("output_session_options(speaker,0)")
+        activate = body.index("[session setActive:YES error:&error]")
+        mixing = body.index("output_session_options(speaker,1)")
+        self.assertLess(mixless, activate); self.assertLess(activate, mixing)   # non-mixing activation, then mix again
+        self.assertNotIn("setActive:NO", body)                                  # never inactive: the route can't move
+        self.assertIn("overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker", body)
+        loop = between(helper, "for(;;) {", "[[NSNotificationCenter defaultCenter] removeObserver:observer];")
+        self.assertIn("if(o->queue && !o->paused && g_mix.mixing && now-last_hint_poll>=200u) {", loop)
+        self.assertIn("session.secondaryAudioShouldBeSilencedHint", loop)
+        self.assertIn("if(hint && excl_should_assert(&excl,now)) {", loop)
+        began = loop.split("if(changed==1) {", 1)[1].split("} else {", 1)[0]
+        self.assertIn('pause_output(o,s,"interruption_began");', began)          # calls and alarms: unchanged
 
     def test_control_log_names_the_initiator(self):
         tweak = read("tweak/Hooks.xm")

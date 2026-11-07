@@ -495,7 +495,8 @@ int main(void) {
     const char *n3[] = {"Speaker"}, *t3[] = {"Speaker"};
     assert(peer_pick_port(n3, t3, 1) == -1);                /* the speaker alone names nothing */
     /* The order the app shows a name in. */
-    peer_names_t n = {"Parv's Workstation", 0, "Other Laptop", "Parv's Workstation", "Old PC", 1};
+    peer_names_t n = {.identity="Parv's Workstation", .connected_computer="Other Laptop",
+                      .route="Parv's Workstation", .paired_computer="Old PC", .receiving=1};
     assert(!strcmp(peer_choose_name(&n), "Parv's Workstation"));      /* the device streaming, by address, first */
     n.identity = 0;
     assert(!strcmp(peer_choose_name(&n), "Other Laptop"));            /* then a connected computer */
@@ -506,13 +507,13 @@ int main(void) {
     n.receiving = 0;
     assert(peer_choose_name(&n) == 0);                                /* not while idle: "Your PC" / connect prompt */
     /* The route's Bluetooth output is the user's AirPods: neither its identity nor its name is the PC's. */
-    peer_names_t buds = {"AirPods Pro", 1, 0, "AirPods Pro", 0, 1};
+    peer_names_t buds = {.identity="AirPods Pro", .identity_is_audio=1, .route="AirPods Pro", .receiving=1};
     assert(peer_choose_name(&buds) == 0);
     /* Two computers paired and none listed as connected: the paired guess is withheld (nil), so no wrong name. */
-    peer_names_t two = {0, 0, 0, 0, 0, 1};
+    peer_names_t two = {.receiving=1};
     assert(peer_choose_name(&two) == 0);
     /* A different PC connects: the captured port changes and so does the name - nothing is cached here. */
-    peer_names_t first = {0, 0, 0, "DESKTOP-A1", 0, 1}, second = {0, 0, 0, "DESKTOP-B2", 0, 1};
+    peer_names_t first = {.route="DESKTOP-A1", .receiving=1}, second = {.route="DESKTOP-B2", .receiving=1};
     assert(!strcmp(peer_choose_name(&first), "DESKTOP-A1") && !strcmp(peer_choose_name(&second), "DESKTOP-B2"));
     return 0;
 }
@@ -522,8 +523,10 @@ int main(void) {
         with tempfile.TemporaryDirectory() as td:
             for lang, name, std in (("c", "peer.c", "-std=gnu11"), ("c++", "peer.cpp", "-std=c++17")):
                 src = pathlib.Path(td) / name; exe = pathlib.Path(td) / (name + ".out"); src.write_text(harness)
+                # C++: designated initializers that leave fields out are zero, as in C; -Wextra would flag them.
+                extra = ["-Wno-missing-field-initializers"] if lang == "c++" else []
                 build = subprocess.run([cc if lang == "c" else (shutil.which("c++") or cc), std, "-Wall", "-Wextra",
-                                        "-Werror", "-I" + str(ROOT), str(src), "-o", str(exe)],
+                                        "-Werror", *extra, "-I" + str(ROOT), str(src), "-o", str(exe)],
                                        capture_output=True, text=True, timeout=60)
                 self.assertEqual(build.returncode, 0, build.stderr)
                 ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
@@ -552,11 +555,88 @@ int main(void) {
             self.assertIn("peer_class_is_audio(device.hasClass, SPMajorIndex(device.rawClass))", body)
             self.assertIn("@catch (NSException *exception)", body)
         model = read(MODEL)
-        # Swift's order is peer_choose_name's: identity, connected computer, route (unless audio), paired while receiving.
-        self.assertIn("let name = identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??\n"
+        # Swift's order is peer_choose_name's: the connection's identity (v9.9.5), the route's device by address,
+        # a connected computer, the route's name (unless audio), the paired computer while receiving.
+        self.assertIn("let name = peer ?? identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??\n"
                       "                (snapshot.receiving ? pairedName : nil)", model)
         self.assertIn("SPConnectedDevice.computerName(forRouteUID: next.routeUID)", model)
         self.assertIn("SPConnectedDevice.isAudioDevice(forRouteUID: next.routeUID)", model)
+
+    def test_the_pc_is_named_from_the_connection_itself(self):
+        """Priority 3 (v9.9.5). Test-92: all 21 routes the helper saw were the speaker, so the route never names the PC
+        while Speaka holds it, and BluetoothManager reported "not ready". The tweak now names the PC from bluetoothd's
+        own records when the PC configures the speaker: the device seen most recently, only if that is unambiguous. The
+        PC does not have to become the iPhone's output, and a wrong device is never shown."""
+        harness = r"""
+#include <assert.h>
+#include <string.h>
+#include "shared/PeerName.h"
+int main(void) {
+    double now = 1.7e9;
+    /* The laptop just connected; AirPods were last used two hours ago; a Fitbit record carries no time. */
+    peer_record_t a[] = {{"AirPods Pro", "AA:AA:AA:AA:AA:AA", now - 7200, 1}, {"LAPTOP-UGIVBIA5", "BB:BB:BB:BB:BB:BB", now - 3, 1},
+                         {"Versa 2", "CC:CC:CC:CC:CC:CC", 0, 0}};
+    assert(peer_pick_recent(a, 3, now) == 1);
+    /* The AirPods reconnected at the same moment: too close to call, so nothing is named ("Your PC"). */
+    a[0].last_seen = now - 6;
+    assert(peer_pick_recent(a, 3, now) == -2);
+    /* Nobody seen in the last ten minutes: a stale record never names a new connection. */
+    peer_record_t b[] = {{"LAPTOP-UGIVBIA5", "BB:BB:BB:BB:BB:BB", now - 3600, 1}};
+    assert(peer_pick_recent(b, 1, now) == -1);
+    /* LastSeenTime stored as CFAbsoluteTime (seconds since 2001) is the same instant. */
+    assert(peer_unix_time(now - 978307200.0) == now && peer_unix_time(now) == now);
+    /* Two computers paired: the one that just connected, whatever it is called. */
+    peer_record_t c[] = {{"DESKTOP-OLD", "DD:DD:DD:DD:DD:DD", now - 86400, 1}, {"Parv's Workstation", "EE:EE:EE:EE:EE:EE", now - 2, 1}};
+    assert(peer_pick_recent(c, 2, now) == 1);
+    /* No records at all, or none with a name. */
+    assert(peer_pick_recent(c, 0, now) == -1);
+    peer_record_t d[] = {{"", "FF:FF:FF:FF:FF:FF", now - 1, 1}};
+    assert(peer_pick_recent(d, 1, now) == -1);
+    /* The app's order: the connection's own identity first, then everything else as before. */
+    peer_names_t n = {.connection = "LAPTOP-UGIVBIA5", .identity = "Other", .connected_computer = "Other", .receiving = 1};
+    assert(!strcmp(peer_choose_name(&n), "LAPTOP-UGIVBIA5"));
+    n.connection = "";
+    assert(!strcmp(peer_choose_name(&n), "Other"));
+    return 0;
+}
+"""
+        cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+        with tempfile.TemporaryDirectory() as td:
+            for lang, name, std in (("c", "rec.c", "-std=gnu11"), ("c++", "rec.cpp", "-std=c++17")):
+                src = pathlib.Path(td) / name; exe = pathlib.Path(td) / (name + ".out"); src.write_text(harness)
+                extra = ["-Wno-missing-field-initializers"] if lang == "c++" else []
+                build = subprocess.run([cc if lang == "c" else (shutil.which("c++") or cc), std, "-Wall", "-Wextra",
+                                        "-Werror", *extra, "-I" + str(ROOT), str(src), "-o", str(exe)],
+                                       capture_output=True, text=True, timeout=60)
+                self.assertEqual(build.returncode, 0, build.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(ran.returncode, 0, ran.stderr)
+        # The tweak: at every CONFIGURE, forget the last PC first, then look - off the signalling thread - three times.
+        hooks = read(ROOT / "tweak/Hooks.xm")
+        config = block_until(hooks, "static uint64_t hook_setconfigind(", "\n}\n")
+        self.assertIn("AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);\n        SpeakaPeerIdentifySoon();", config)
+        peer = read(ROOT / "tweak/PeerIdentity.c")
+        soon = block_until(peer, "void SpeakaPeerIdentifySoon(void)", "\n}\n")
+        self.assertLess(soon.index('SpeakaSetStatus("diag.v104.peer", "%s", "");'), soon.index("dispatch_async_f("))
+        self.assertEqual(soon.count("identify_later"), 3)               # now, +10 s, +60 s; plain C, no blocks
+        self.assertNotIn("^{", peer)
+        self.assertIn('CFSTR("com.apple.MobileBluetooth.devices")', peer)
+        for key in ('CFSTR("Name")', 'CFSTR("DefaultName")', 'CFSTR("LastSeenTime")'):
+            self.assertIn(key, peer)
+        ident = block_until(peer, "static void identify(const char *when)", "\n}\n")
+        self.assertIn("int pick = peer_pick_recent(r, n, now);", ident)
+        self.assertLess(ident.index("if (pick >= 0) {"), ident.index('SpeakaSetStatus("diag.v104.peer", "%s", entries[pick].name);'))
+        self.assertIn("V104_PEER_RECORD", ident)                                   # every record, for the log
+        self.assertIn("tweak/PeerIdentity.c", read(ROOT / "Makefile"))
+        # The app shows it first.
+        client = read(ROOT / "app/Speaka/Model/SPTweakClient.m")
+        self.assertIn('s.peerName = SPString(status[@"diag.v104.peer"]);', client)
+        model = read(MODEL)
+        self.assertIn("let peer: String? = snapshot.peerName.isEmpty ? nil : snapshot.peerName", model)
+        # Credits explains BluetoothManager's state, including why it didn't attach.
+        device = read(ROOT / "app/Speaka/Model/SPConnectedDevice.m")
+        self.assertIn("@selector(lastInitError)", device)
+        self.assertIn("lastInitError %d", device)
 
     def test_the_pcs_name_shows_as_soon_as_it_connects(self):
         """The PC is named from iOS's Bluetooth list once it's connected, before any audio, whatever form its device class
@@ -565,7 +645,9 @@ int main(void) {
         for selector in ("sharedInstance", "available", "connectedDevices", "pairedDevices", "name", "address",
                          "majorClass", "connected"):
             self.assertIn(f"@selector({selector})", source)
-        self.assertEqual(source.count("objc_msgSend)"), 3)          # every private call goes through these three
+        # every private call goes through SPSend/SPSendBool/majorClass, plus v9.9.5's two guarded class calls
+        # (setSharedInstanceQueue:, lastInitError)
+        self.assertEqual(source.count("objc_msgSend)"), 5)
         self.assertIn("if (!target || ![target respondsToSelector:selector])", source)
         # The class in any form: index 1, masked 0x100, with the minor class 0x10C, or the whole Class of Device.
         self.assertIn("return value >= 0x100 ? (value >> 8) & 0x1F : value & 0x1F;", source)
@@ -599,7 +681,7 @@ int main(void) {
         self.assertIn("SPConnectedDevice.pairedComputerName()", lookup)
         line = block(model, "var statusLine: StatusLine? {")
         self.assertLess(line.index('text: "\\(who) · connected"'), line.index('text: "Connect from your PC"'))
-        self.assertIn("let name = identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??", line)
+        self.assertIn("let name = peer ?? identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??", line)
         self.assertLess(line.index('let who = name ?? "Your PC"'), line.index("guard snapshot.receiving else {"))
 
     # ------------------------------------------------------------------ updates

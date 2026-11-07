@@ -22,6 +22,9 @@ static Class SPBluetoothManagerClass(void)
     dispatch_once(&onceToken, ^{
         dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_LAZY);
         managerClass = NSClassFromString(@"BluetoothManager");
+        // v9.9.5: give it the main queue before the first sharedInstance, for its attach callbacks.
+        if ([managerClass respondsToSelector:@selector(setSharedInstanceQueue:)])
+            ((void (*)(id, SEL, id))objc_msgSend)((id)managerClass, @selector(setSharedInstanceQueue:), dispatch_get_main_queue());
     });
     return managerClass;
 }
@@ -214,8 +217,14 @@ static NSArray<SPBluetoothDevice *> *SPAllDevices(id manager)
             return @"Bluetooth's device list isn't available to Speaka.";
         BOOL available = SPSendBool(manager, @selector(available), YES);
         NSArray<SPBluetoothDevice *> *devices = SPAllDevices(manager);
+        // v9.9.5: why it isn't ready - BluetoothManager records its attach error (+lastInitError).
+        Class managerClass = SPBluetoothManagerClass();
+        int initError = [managerClass respondsToSelector:@selector(lastInitError)]
+            ? ((int (*)(id, SEL))objc_msgSend)((id)managerClass, @selector(lastInitError)) : -1;
         if (devices.count == 0)
-            return available ? @"Bluetooth's device list is empty." : @"Bluetooth's device list isn't ready yet.";
+            return [NSString stringWithFormat:@"%@ (available %@, lastInitError %d)",
+                    available ? @"Bluetooth's device list is empty." : @"Bluetooth's device list isn't ready yet.",
+                    available ? @"YES" : @"NO", initError];
         NSMutableArray<NSString *> *parts = [NSMutableArray array];
         for (SPBluetoothDevice *device in devices) {
             NSMutableArray<NSString *> *traits = [NSMutableArray array];

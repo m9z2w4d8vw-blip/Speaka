@@ -53,6 +53,7 @@ final class SpeakaModel: ObservableObject {
         var connected = false
         var routeName = ""
         var routeUID = ""
+        var peerName = ""
     }
 
     /// The line above the big button, where Caz shows Update Available.
@@ -206,8 +207,10 @@ final class SpeakaModel: ObservableObject {
         case .on:
             // The PC's name: iOS's Bluetooth list, else the audio route, else (only while it streams) the one paired
             // computer.
-            // The order of shared/PeerName.h peer_choose_name: the streaming device by address first.
-            let name = identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??
+            // The order of shared/PeerName.h peer_choose_name: the connection's own identity (bluetoothd's record of
+            // the PC that configured the speaker), then the route's device by address, then the fallbacks.
+            let peer: String? = snapshot.peerName.isEmpty ? nil : snapshot.peerName
+            let name = peer ?? identityName ?? computerName ?? (routeIsAudioDevice ? nil : routePCName) ??
                 (snapshot.receiving ? pairedName : nil)
             let who = name ?? "Your PC"
             guard snapshot.receiving else {
@@ -290,6 +293,7 @@ final class SpeakaModel: ObservableObject {
         next.connected = status.connected
         next.routeName = status.routeName
         next.routeUID = status.routeUID
+        next.peerName = status.peerName
         // Right after a change the preference can still read the old value for a moment: don't flip back.
         if let changed = outputChangeDate, Date().timeIntervalSince(changed) < 2.0 {
             next.outputMode = snapshot.outputMode

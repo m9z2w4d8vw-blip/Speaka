@@ -408,6 +408,43 @@ static inline int mix_route_lost(mix_state_t *m)
     return 1;
 }
 
+/* ---- exclusive audible playback on a mixing session (v9.9.5) ----
+ * v9.8.92's mixing session kept Speaka's audio and the PC's stream intact while TikTok played (Test D: no
+ * interruption, no route change, no phone-initiated START or SUSPEND) - but TikTok was audible alongside it, which is
+ * not wanted. v9.8.91's non-mixing session silenced TikTok only by losing: TikTok's activation interrupted Speaka, iOS
+ * sent TikTok's audio to the PC and suspended the PC's stream when Speaka took the output back (14:52:30.859).
+ * So the session stays mixing - it can't be taken - and when another app's non-mixing audio starts
+ * (secondaryAudioShouldBeSilencedHint), the helper activates once without MixWithOthers, which is what makes iOS
+ * interrupt that app, then mixes again so the next activation can't take Speaka's session. The session never goes
+ * inactive, so the route never leaves Speaka's output. If an app takes the audio straight back, each assertion waits
+ * twice as long (to EXCL_BACKOFF_MAX_MS), so the two never fight; EXCL_CALM_MS of quiet resets that. */
+#define EXCL_MIN_INTERVAL_MS 1000u
+#define EXCL_FIGHT_WINDOW_MS 3000u
+#define EXCL_BACKOFF_MAX_MS 8000u
+#define EXCL_CALM_MS 30000u
+typedef struct { uint64_t last_ms; unsigned asserts, fights, backoff_ms; } excl_state_t;
+static inline void excl_init(excl_state_t *e) { memset(e, 0, sizeof *e); }
+static inline int excl_should_assert(const excl_state_t *e, uint64_t now)
+{
+    if (!e->last_ms) return 1;
+    uint64_t wait = e->backoff_ms > EXCL_MIN_INTERVAL_MS ? e->backoff_ms : EXCL_MIN_INTERVAL_MS;
+    return now >= e->last_ms && now - e->last_ms >= wait;
+}
+static inline void excl_asserted(excl_state_t *e, uint64_t now)
+{
+    uint64_t since = e->last_ms && now >= e->last_ms ? now - e->last_ms : UINT64_MAX;
+    if (since < EXCL_FIGHT_WINDOW_MS + e->backoff_ms) {      /* the other app came straight back */
+        if (e->fights < 16u) e->fights++;
+        unsigned next = e->backoff_ms ? e->backoff_ms * 2u : 2000u;
+        e->backoff_ms = next > EXCL_BACKOFF_MAX_MS ? EXCL_BACKOFF_MAX_MS : next;
+    } else if (since >= EXCL_CALM_MS) {
+        e->fights = 0;
+        e->backoff_ms = 0;
+    }
+    e->last_ms = now ? now : 1u;
+    e->asserts++;
+}
+
 /* AVAudioSessionRouteChangeReason values (public, stable since iOS 6). A route change the helper did not cause and
  * that is a real device arrival or removal lets a waiting output start at once. */
 enum { OWN_ROUTE_NEW_DEVICE = 1, OWN_ROUTE_OLD_DEVICE_GONE = 2 };

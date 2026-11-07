@@ -77,6 +77,27 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **Exclusive audible playback (v9.8.92 Test D):** v9.8.92's mixing session let TikTok be heard alongside Speaka,
+  which isn't wanted - but it also proved the route and the PC's stream stay intact while another app plays (no
+  interruption, no route change, no phone-initiated START or SUSPEND). v9.8.91's non-mixing session silenced TikTok
+  only by losing its session, and the phone suspended the PC's stream when Speaka took it back. The session now stays
+  mixing (it can't be taken) and, when another app's non-mixing audio starts (secondaryAudioShouldBeSilencedHint),
+  activates once without MixWithOthers - which makes iOS interrupt that app - then mixes again. It never goes inactive,
+  so the route never leaves Speaka's output; an app that takes the audio straight back meets a doubling backoff (to
+  8 s), never a loop. Calls and alarms still interrupt as before. Unverified on the device: that iOS honours the
+  re-activation of an active session (V103_EXCLUSIVE shows each one) and reports the hint to a daemon (V103_OTHER_AUDIO).
+- **The PC's name, from the connection (Test-92):** every one of Test-92's 21 routes was the speaker, so the route
+  never names the PC while Speaka holds it (and v9.8.92's V102_PC_ROUTE never fired), and BluetoothManager reported
+  "not ready". The tweak now reads bluetoothd's own paired-device records when the PC configures the speaker (and 10 s
+  and 60 s later) and names the device seen most recently - only if no other was seen within 10 s of it - published as
+  diag.v104.peer, which the app shows first. A new connection forgets the last name before looking, so a failed lookup
+  shows "Your PC", never the wrong PC. Credits now gives BluetoothManager's lastInitError. Unverified: where iOS 17
+  keeps those records (preferences or the system-group container: V104_PEER says which, or that none were found).
+- **Startup, still unresolved (Test-92):** Test A's PC-started stream at 16.8 s after launch was slow until ~42 s
+  after launch - the sixth measurement putting the end there - and nothing Speaka did coincides with the recovery.
+  Test B was confounded (94.7 s after launch: past the window, and with mixing iPhone audio never reached the PC), so
+  the phone-initiated-start idea stays untested. tools/startup_report.py turns any Speaka.log into per-stream rows (who
+  started it, how long after launch, first rate, when full rate began) for the A-D matrix.
 - **Startup throttle, narrowed (v9.8.91 device test):** across the v9.8.85-v9.8.91 logs, every audio stream the PC
   started within ~42 s of a bluetoothd launch, with no phone-initiated START or SUSPEND before it, arrived at a third of
   real time (9 of 9); every stream in that window started by Apple's own A2DP code, or after it had signalled, ran at

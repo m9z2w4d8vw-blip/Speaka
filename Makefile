@@ -18,7 +18,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = Speaka
 
 # bluetoothd never plays audio itself: the helper does (audiohelper/), so no audio frameworks load into it.
-Speaka_FILES      = tweak/Hooks.xm tweak/SinkEndpoint.c tweak/StreamControl.c tweak/AudioRelay.c tweak/Session.c tweak/Log.c shared/AudioRing.c shared/AACConfig.c
+Speaka_FILES      = tweak/Hooks.xm tweak/SinkEndpoint.c tweak/StreamControl.c tweak/AudioRelay.c tweak/Session.c tweak/Log.c tweak/PeerIdentity.c shared/AudioRing.c shared/AACConfig.c
 # -I.: tweak/Hooks.xm reaches tweak/ and shared/ from the root, since Theos compiles it from .theos/obj.
 Speaka_CFLAGS     = -fobjc-arc -fvisibility=hidden -fblocks -I.
 Speaka_FRAMEWORKS = CoreFoundation Foundation

@@ -314,6 +314,7 @@ static uint64_t hook_setconfigind(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a
         unsigned seen=g_pc_config.valid;
         /* v9.9: the stream is configured: the helper is connected now and owns the output before the PC's START. */
         AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);
+        SpeakaPeerIdentifySoon();          /* v9.9.5: who is it? (background queue, PeerIdentity.c) */
         pthread_mutex_unlock(&g_stream_control_lock);
         SpeakaLogNow("V88_CONFIG handle=%u local_seid=7 remote_seid=%u codec=%s%s",(unsigned)a2,(unsigned)a4,
                      avdtp_codec_name((uint8_t)codec),seen?"":" (assumed: SET_CONFIGURATION not seen)");
