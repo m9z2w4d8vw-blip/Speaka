@@ -850,6 +850,9 @@ static void stream(int fd) {
             uint32_t state=__atomic_load_n(&s->stream_state,__ATOMIC_ACQUIRE);
             if(state!=stream_state) {
                 hlog(stdout,"V99_STREAM state=%u (was %u) output=%d\n",state,stream_state,o->queue!=NULL);
+                /* v9.9.6: a new configuration is a new connection: a route capture belongs to the connection it was
+                 * made in, so the tweak never mistakes the last PC's capture for this one's (PeerIdentity.c). */
+                if(state==AUDIO_STREAM_CONFIGURED) forget_pc_port();
                 own_stream(&own,state,now);stream_state=state;
             }
             /* v9.9.4: a connection is warm once a stream has played 2 s at real time without being held. */

@@ -11,6 +11,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #include <notify.h>
 #import "shared/SpeakaShared.h"
+#include "shared/PeerName.h"
 
 #pragma mark - preferences (same domain and scope as the tweak and the Settings page)
 
@@ -33,6 +34,33 @@ static BOOL SPWritePref(NSString *key, id value)   // nil removes the key
 static NSString *SPString(id value)
 {
     return [value isKindOfClass:[NSString class]] ? value : @"";
+}
+
+/// v9.9.6: the verified name cache - iOS's own name/address pairs from route captures, at most PEER_CACHE_SIZE,
+/// least recently seen evicted (shared/PeerName.h). It names a connection only when the connection's own address
+/// (the tweak, tweak/PeerIdentity.c) matches one of its entries.
+static NSString *const SPPeerCacheKey = @SPEAKA_APP_KEY_PEER_NAMES;
+
+static void SPPeerCacheLoad(peer_cache_t *cache)
+{
+    memset(cache, 0, sizeof *cache);
+    for (id item in [[NSUserDefaults standardUserDefaults] arrayForKey:SPPeerCacheKey]) {
+        if (![item isKindOfClass:[NSDictionary class]]) continue;
+        NSString *address = SPString(((NSDictionary *)item)[@"address"]), *name = SPString(((NSDictionary *)item)[@"name"]);
+        id seen = ((NSDictionary *)item)[@"seen"];
+        if (address.length && name.length)
+            peer_cache_learn(cache, address.UTF8String, name.UTF8String, [seen isKindOfClass:[NSNumber class]] ? [seen doubleValue] : 0);
+    }
+}
+
+static void SPPeerCacheSave(const peer_cache_t *cache)
+{
+    NSMutableArray *entries = [NSMutableArray array];
+    for (unsigned i = 0; i < cache->n; i++)
+        [entries addObject:@{ @"address": [NSString stringWithUTF8String:cache->e[i].address] ?: @"",
+                              @"name": [NSString stringWithUTF8String:cache->e[i].name] ?: @"",
+                              @"seen": @(cache->e[i].seen) }];
+    [[NSUserDefaults standardUserDefaults] setObject:entries forKey:SPPeerCacheKey];
 }
 
 static NSDictionary *SPDaemonStatus(void)
@@ -122,6 +150,7 @@ static NSString *SPOutputsDescription(id outputs)
         _routeName = @"";
         _routeUID = @"";
         _peerName = @"";
+        _peerAddress = @"";
     }
     return self;
 }
@@ -236,21 +265,40 @@ static NSString *SPOutputsDescription(id outputs)
     s.connected = s.session == SPSessionOn && (helperAttached || (peerUp && !helperEnded));
     NSString *routeName = SPBluetoothOutputName(helper[@"outputs"]);
     NSString *routeUID = @"";
-    // v9.9.4: since v9.8.87 the helper holds the route on its own output, so the live route never lists the PC. It
-    // now reports the PC as the route last listed it - before its own activation, or while another app routed to it.
+    // v9.9.6: the connection's own address (the tweak reads it from the PC's AVDTP connection, before any audio), and
+    // iOS's name/address pair for the PC if a route listed it during this connection (the helper's capture).
+    NSString *connection = SPString(status[@"diag.v105.peer_address"]);
+    NSString *captureName = @"", *captureUID = @"";
     id pc = helper[@"pc"];
     if ([pc isKindOfClass:[NSDictionary class]]) {
+        captureName = SPString(((NSDictionary *)pc)[@"name"]);
+        captureUID = SPString(((NSDictionary *)pc)[@"uid"]);
+    }
+    // A capture of another device than this connection's is never used for it.
+    BOOL captureIsConnection = connection.length == 0 || peer_address_equal(connection.UTF8String, captureUID.UTF8String);
+    if (captureName.length && captureIsConnection) {
         if (routeName.length == 0)
-            routeName = SPString(((NSDictionary *)pc)[@"name"]);
-        routeUID = SPString(((NSDictionary *)pc)[@"uid"]);
+            routeName = captureName;
+        routeUID = captureUID;
     }
     if (routeName.length == 0 && s.session == SPSessionOn)
         routeName = SPBluetoothOutputName(SPOwnRouteOutputs());
     s.routeName = routeName;
     s.routeUID = routeUID;
-    // v9.9.5: the tweak names the PC from bluetoothd's own device records when it configures the speaker - the
-    // connection's identity, independent of the audio route and of BluetoothManager (tweak/PeerIdentity.c).
-    s.peerName = SPString(status[@"diag.v104.peer"]);
+    // v9.9.6: learn iOS's pair (a new PC, or a renamed one), then name the connection by its address.
+    peer_cache_t cache;
+    SPPeerCacheLoad(&cache);
+    if (captureName.length && captureUID.length) {
+        const char *known = peer_cache_lookup(&cache, captureUID.UTF8String);
+        if (!known || strcmp(known, captureName.UTF8String) != 0) {
+            peer_cache_learn(&cache, captureUID.UTF8String, captureName.UTF8String, [[NSDate date] timeIntervalSince1970]);
+            SPPeerCacheSave(&cache);
+        }
+    }
+    const char *resolved = peer_resolve(connection.length ? connection.UTF8String : NULL, captureUID.UTF8String,
+                                        captureName.UTF8String, &cache);
+    s.peerAddress = connection;
+    s.peerName = resolved ? ([NSString stringWithUTF8String:resolved] ?: @"") : @"";
     id volume = helper[@"volume"];
     s.volumeZero = s.playing && [volume isKindOfClass:[NSNumber class]] && [volume doubleValue] < 0.05;
 

@@ -1,170 +1,146 @@
-/* PeerIdentity.c - name the PC that just connected, from bluetoothd's own paired-device records (v9.9.5).
+/* PeerIdentity.c - the PC's address from its own connection (v9.9.6).
  *
- * The app could name the PC only from the audio route (which lists it only while nothing else holds the route - never,
- * since Speaka holds it from the moment the PC connects) or through BluetoothManager (which reported "not ready" in
- * Test-92). This runs inside bluetoothd, which keeps a record per paired device: com.apple.MobileBluetooth.devices,
- * keyed by address, with Name / DefaultName and LastSeenTime. When the PC configures the speaker, the record seen most
- * recently is that PC - if that is unambiguous (shared/PeerName.h, peer_pick_recent). The result is published as
- * diag.v104.peer / diag.v104.peer_address for the app, and every record looked at is logged, so a wrong or missing
- * name can be explained from the log. Runs on a background queue, never on bluetoothd's signalling thread. */
+ * v9.8.94: the paired-device records this used to read were never found on this iOS, the route listed the PC in only
+ * 2 of 7 connections, and BluetoothManager stayed unavailable. When a route does list the PC, iOS gives its name and
+ * address together (V102_PC_ROUTE name=LAPTOP-UGIVBIA5 uid=24:B2:B9:A1:A4:68-tacl); the helper publishes that pair.
+ * The PC's AVDTP configuration arrives with a native owner object (SetConfigInd x0). With a route-verified address from
+ * this very connection, this searches that object - and the objects it points to, one level deep - for the address's
+ * exact six bytes (shared/PeerName.h). A match shows where the connection keeps its peer's address: the path is saved,
+ * and every later configuration reads the address straight from the connection, immediately - before any audio. A path
+ * that ever disagrees with a fresh route capture is forgotten. Reads go through vm_read_overwrite, so a stale pointer
+ * fails instead of crashing bluetoothd; all of it runs on a background queue, never on the signalling thread. */
 #include "Tweak.h"
 #include "../shared/PeerName.h"
+#include "../shared/SpeakaShared.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <dispatch/dispatch.h>
-#include <dirent.h>
-#include <stdio.h>
+#include <mach/mach.h>
 #include <string.h>
-#include <sys/stat.h>
 
-#define PEER_MAX_RECORDS 32u
-#define PEER_MAX_FILE (4u * 1024u * 1024u)
+static volatile uint64_t g_owner;          /* SetConfigInd x0 of the current connection */
+static volatile unsigned g_connection;     /* one per configuration; a stale timer does nothing */
+static double g_configured_at;             /* Unix time of the current configuration */
+static unsigned g_published;               /* the address was published for the current connection */
+static unsigned g_dumped;                  /* the owner object was dumped once this bluetoothd session */
 
-typedef struct { char name[128]; char address[32]; double last_seen; int has_time; } PeerEntry;
+static int peek(uint64_t addr, void *out, size_t n)
+{
+    if (addr < 0x1000ull || addr > 0x0000FFFFFFFFFFFFull) return 0;
+    vm_size_t got = 0;
+    kern_return_t kr = vm_read_overwrite(mach_task_self(), (vm_address_t)addr, (vm_size_t)n, (vm_address_t)out, &got);
+    return kr == KERN_SUCCESS && got == (vm_size_t)n;
+}
 
-static void cf_string(CFTypeRef v, char *out, size_t n)
+static double now_unix(void) { return CFAbsoluteTimeGetCurrent() + 978307200.0; }
+
+static void cf_cstring(CFTypeRef v, char *out, size_t n)
 {
     out[0] = 0;
     if (v && CFGetTypeID(v) == CFStringGetTypeID()) (void)CFStringGetCString((CFStringRef)v, out, (CFIndex)n, kCFStringEncodingUTF8);
 }
 
-static int cf_time(CFTypeRef v, double *out)
+static int load_path(peer_path_t *path)
 {
-    if (!v) return 0;
-    if (CFGetTypeID(v) == CFNumberGetTypeID()) {
-        double d = 0;
-        if (!CFNumberGetValue((CFNumberRef)v, kCFNumberDoubleType, &d) || d <= 0) return 0;
-        *out = peer_unix_time(d);
-        return 1;
+    char text[64];
+    CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_PEER_PATH), CFSTR(SPEAKA_PREFS_DOMAIN));
+    cf_cstring(v, text, sizeof text);
+    if (v) CFRelease(v);
+    return peer_path_parse(text, path);
+}
+
+static void save_path(const peer_path_t *path)
+{
+    char text[64];
+    CFStringRef value = NULL;
+    if (path && peer_path_format(path, text, sizeof text))
+        value = CFStringCreateWithCString(kCFAllocatorDefault, text, kCFStringEncodingUTF8);
+    CFPreferencesSetAppValue(CFSTR(SPEAKA_KEY_PEER_PATH), value, CFSTR(SPEAKA_PREFS_DOMAIN));
+    (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
+    if (value) CFRelease(value);
+}
+
+/* The helper's route capture, if it was published after this configuration: iOS's own address for the PC. */
+static int fresh_capture(unsigned char addr[6], char *text, size_t n)
+{
+    int ok = 0;
+    (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
+    CFPropertyListRef status = CFPreferencesCopyAppValue(CFSTR(SPEAKA_KEY_HELPER_STATUS), CFSTR(SPEAKA_PREFS_DOMAIN));
+    if (status && CFGetTypeID(status) == CFDictionaryGetTypeID()) {
+        CFTypeRef time = CFDictionaryGetValue((CFDictionaryRef)status, CFSTR("time"));
+        CFTypeRef pc = CFDictionaryGetValue((CFDictionaryRef)status, CFSTR("pc"));
+        double when = 0;
+        if (time && CFGetTypeID(time) == CFNumberGetTypeID()) (void)CFNumberGetValue((CFNumberRef)time, kCFNumberDoubleType, &when);
+        if (when >= g_configured_at && pc && CFGetTypeID(pc) == CFDictionaryGetTypeID()) {
+            char uid[96];
+            cf_cstring(CFDictionaryGetValue((CFDictionaryRef)pc, CFSTR("uid")), uid, sizeof uid);
+            ok = peer_address_bytes(uid, addr);
+            if (ok) snprintf(text, n, "%s", uid);
+        }
     }
-    if (CFGetTypeID(v) == CFDateGetTypeID()) { *out = CFDateGetAbsoluteTime((CFDateRef)v) + 978307200.0; return 1; }
-    return 0;
-}
-
-/* One device record: { address : { Name, DefaultName, LastSeenTime, ... } }. */
-static void add_record(CFStringRef key, CFTypeRef value, PeerEntry *e, unsigned *n)
-{
-    if (*n >= PEER_MAX_RECORDS || !key || !value || CFGetTypeID(value) != CFDictionaryGetTypeID()) return;
-    CFDictionaryRef d = (CFDictionaryRef)value;
-    PeerEntry *x = &e[*n];
-    memset(x, 0, sizeof *x);
-    cf_string(key, x->address, sizeof x->address);
-    cf_string(CFDictionaryGetValue(d, CFSTR("Name")), x->name, sizeof x->name);
-    if (!x->name[0]) cf_string(CFDictionaryGetValue(d, CFSTR("DefaultName")), x->name, sizeof x->name);
-    x->has_time = cf_time(CFDictionaryGetValue(d, CFSTR("LastSeenTime")), &x->last_seen);
-    if (x->address[0]) (*n)++;
-}
-
-static void add_dictionary(CFDictionaryRef root, PeerEntry *e, unsigned *n)
-{
-    CFIndex count = CFDictionaryGetCount(root);
-    if (count <= 0 || count > 256) return;
-    const void *keys[256], *values[256];
-    CFDictionaryGetKeysAndValues(root, keys, values);
-    for (CFIndex i = 0; i < count; ++i)
-        if (CFGetTypeID(keys[i]) == CFStringGetTypeID()) add_record((CFStringRef)keys[i], values[i], e, n);
-}
-
-static int read_plist_file(const char *path, PeerEntry *e, unsigned *n)
-{
-    struct stat st;
-    if (stat(path, &st) != 0 || st.st_size <= 0 || st.st_size > (off_t)PEER_MAX_FILE) return 0;
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    CFMutableDataRef data = CFDataCreateMutable(kCFAllocatorDefault, 0);
-    uint8_t chunk[8192];
-    size_t got;
-    while (data && (got = fread(chunk, 1, sizeof chunk, f)) > 0) CFDataAppendBytes(data, chunk, (CFIndex)got);
-    fclose(f);
-    if (!data) return 0;
-    CFPropertyListRef plist = CFPropertyListCreateWithData(kCFAllocatorDefault, data, kCFPropertyListImmutable, NULL, NULL);
-    CFRelease(data);
-    if (!plist) return 0;
-    int ok = CFGetTypeID(plist) == CFDictionaryGetTypeID();
-    if (ok) add_dictionary((CFDictionaryRef)plist, e, n);
-    CFRelease(plist);
+    if (status) CFRelease(status);
     return ok;
 }
 
-/* The records, wherever this iOS keeps them: bluetoothd's preferences, then the Bluetooth system-group container. */
-static const char *load_records(PeerEntry *e, unsigned *n)
+static void publish(const unsigned char addr[6], const char *source)
 {
-    *n = 0;
-    CFStringRef domain = CFSTR("com.apple.MobileBluetooth.devices");
-    (void)CFPreferencesAppSynchronize(domain);
-    CFArrayRef keys = CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
-    if (keys) {
-        CFIndex count = CFArrayGetCount(keys);
-        for (CFIndex i = 0; i < count && *n < PEER_MAX_RECORDS; ++i) {
-            CFStringRef key = (CFStringRef)CFArrayGetValueAtIndex(keys, i);
-            if (CFGetTypeID(key) != CFStringGetTypeID()) continue;
-            CFPropertyListRef value = CFPreferencesCopyAppValue(key, domain);
-            if (value) { add_record(key, value, e, n); CFRelease(value); }
-        }
-        CFRelease(keys);
-        if (*n) return "preferences";
-    }
-    static const char *const fixed[] = {
-        "/var/mobile/Library/Preferences/com.apple.MobileBluetooth.devices.plist",
-        "/var/root/Library/Preferences/com.apple.MobileBluetooth.devices.plist",
-    };
-    for (size_t i = 0; i < sizeof fixed / sizeof fixed[0]; ++i)
-        if (read_plist_file(fixed[i], e, n) && *n) return fixed[i];
-    DIR *dir = opendir("/private/var/containers/Shared/SystemGroup");
-    if (dir) {
-        struct dirent *ent;
-        static char found[512];
-        while ((ent = readdir(dir))) {
-            if (ent->d_name[0] == '.') continue;
-            snprintf(found, sizeof found,
-                     "/private/var/containers/Shared/SystemGroup/%s/Library/Preferences/com.apple.MobileBluetooth.devices.plist",
-                     ent->d_name);
-            if (read_plist_file(found, e, n) && *n) { closedir(dir); return found; }
-        }
-        closedir(dir);
-    }
-    return NULL;
+    char text[18];
+    peer_address_text(addr, text);
+    SpeakaSetStatus("diag.v105.peer_address", "%s", text);
+    if (!g_published) SpeakaLogNow("V105_PEER_ADDRESS address=%s source=%s", text, source);
+    g_published = 1;
 }
 
-static void identify(const char *when)
+static void attempt(void *context)
 {
-    static PeerEntry entries[PEER_MAX_RECORDS];
-    unsigned n = 0;
-    const char *source = load_records(entries, &n);
-    double now = CFAbsoluteTimeGetCurrent() + 978307200.0;
-    if (!source) {
-        SpeakaLogNow("V104_PEER when=%s none: no paired-device records found (preferences or system group)", when);
-        return;
+    unsigned connection = (unsigned)(uintptr_t)context;
+    if (connection != __atomic_load_n(&g_connection, __ATOMIC_ACQUIRE)) return;   /* a newer connection took over */
+    uint64_t owner = __atomic_load_n(&g_owner, __ATOMIC_ACQUIRE);
+    if (!owner) return;
+    if (!g_dumped) {
+        unsigned char head[0x100];
+        if (peek(owner, head, sizeof head)) SpeakaLogHexdump("V105_CONNECTION_OWNER", head, sizeof head);
+        g_dumped = 1;
     }
-    peer_record_t r[PEER_MAX_RECORDS];
-    for (unsigned i = 0; i < n; ++i) {
-        r[i] = (peer_record_t){ entries[i].name, entries[i].address, entries[i].last_seen, entries[i].has_time };
-        SpeakaLogNow("V104_PEER_RECORD when=%s address=%s name=%s seen_ago_s=%.0f", when, entries[i].address,
-                     entries[i].name, entries[i].has_time ? now - entries[i].last_seen : -1.0);
+    peer_path_t path;
+    unsigned char read[6], captured[6];
+    char uid[96];
+    int have_path = load_path(&path), have_read = have_path && peer_read_path(owner, peek, &path, read);
+    int have_capture = fresh_capture(captured, uid, sizeof uid);
+    if (have_capture && have_read && memcmp(read, captured, 6) != 0) {
+        char a[18], b[18];
+        peer_address_text(read, a); peer_address_text(captured, b);
+        SpeakaLogNow("V105_PATH_MISMATCH path_address=%s route=%s: path forgotten", a, b);
+        save_path(NULL);
+        have_path = have_read = 0;
     }
-    int pick = peer_pick_recent(r, n, now);
-    if (pick >= 0) {
-        SpeakaSetStatus("diag.v104.peer", "%s", entries[pick].name);
-        SpeakaSetStatus("diag.v104.peer_address", "%s", entries[pick].address);
-        SpeakaLogNow("V104_PEER when=%s name=%s address=%s source=%s records=%u", when, entries[pick].name,
-                     entries[pick].address, source, n);
-    } else {
-        SpeakaLogNow("V104_PEER when=%s unnamed reason=%s source=%s records=%u", when,
-                     pick == -2 ? "two_devices_seen_together" : "none_seen_recently", source, n);
+    if (have_read) { publish(read, have_capture ? "path_confirmed_by_route" : "path"); return; }
+    if (have_capture && !have_path) {
+        peer_path_t learned;
+        if (peer_scan_for_address(owner, peek, captured, &learned)) {
+            char text[64];
+            save_path(&learned);
+            peer_path_format(&learned, text, sizeof text);
+            SpeakaLogNow("V105_PATH_LEARNED path=%s from route uid=%s", text, uid);
+            publish(captured, "learned_from_route");
+        } else {
+            SpeakaLogNow("V105_PATH_NOT_FOUND route uid=%s is not within %#x bytes of the owner or one pointer deep",
+                         uid, PEER_SCAN_OWNER_BYTES);
+        }
     }
 }
 
-/* dispatch_*_f callbacks: plain C, no blocks. */
-static void identify_later(void *when) { identify((const char *)when); }
-
-void SpeakaPeerIdentifySoon(void)
+void SpeakaPeerConnected(uint64_t owner)
 {
-    /* A new connection: forget the last PC first, so a failed lookup leaves "Your PC", never the previous name. Then
-     * look now, and again after bluetoothd has had time to update the record's LastSeenTime. */
-    SpeakaSetStatus("diag.v104.peer", "%s", "");
-    SpeakaSetStatus("diag.v104.peer_address", "%s", "");
+    /* A new connection: forget the last address first, so a failed lookup leaves "Your PC", never the previous PC. */
+    SpeakaSetStatus("diag.v105.peer_address", "%s", "");
+    __atomic_store_n(&g_owner, owner, __ATOMIC_RELEASE);
+    unsigned connection = __atomic_add_fetch(&g_connection, 1u, __ATOMIC_ACQ_REL);
+    g_configured_at = now_unix();
+    g_published = 0;
     dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
-    static const char *const when[] = { "configured", "configured+10s", "configured+60s" };
-    dispatch_async_f(q, (void *)when[0], identify_later);
-    dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, (int64_t)10 * NSEC_PER_SEC), q, (void *)when[1], identify_later);
-    dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, (int64_t)60 * NSEC_PER_SEC), q, (void *)when[2], identify_later);
+    void *context = (void *)(uintptr_t)connection;
+    static const int64_t later_ms[] = { 1000, 3000, 10000, 30000 };   /* for a route capture this connection */
+    dispatch_async_f(q, context, attempt);
+    for (size_t i = 0; i < sizeof later_ms / sizeof later_ms[0]; ++i)
+        dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, later_ms[i] * (int64_t)NSEC_PER_MSEC), q, context, attempt);
 }

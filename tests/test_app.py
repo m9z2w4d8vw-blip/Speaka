@@ -547,7 +547,9 @@ int main(void) {
         # The app reads it, matches it by address, and never names headphones as the PC.
         client = read(ROOT / "app/Speaka/Model/SPTweakClient.m")
         self.assertIn('id pc = helper[@"pc"];', client)
-        self.assertIn('routeUID = SPString(((NSDictionary *)pc)[@"uid"]);', client)
+        # v9.9.6: the capture names the route only when it is this connection's device (or the address is unknown).
+        self.assertIn("BOOL captureIsConnection = connection.length == 0 || peer_address_equal(connection.UTF8String, captureUID.UTF8String);", client)
+        self.assertIn("routeUID = captureUID;", client)
         device = read(ROOT / "app/Speaka/Model/SPConnectedDevice.m")
         for method in ("+ (NSString *)computerNameForRouteUID:(NSString *)uid\n{", "+ (BOOL)isAudioDeviceForRouteUID:(NSString *)uid\n{"):
             body = block(device, method)
@@ -563,46 +565,96 @@ int main(void) {
         self.assertIn("SPConnectedDevice.isAudioDevice(forRouteUID: next.routeUID)", model)
 
     def test_the_pc_is_named_from_the_connection_itself(self):
-        """Priority 3 (v9.9.5). Test-92: all 21 routes the helper saw were the speaker, so the route never names the PC
-        while Speaka holds it, and BluetoothManager reported "not ready". The tweak now names the PC from bluetoothd's
-        own records when the PC configures the speaker: the device seen most recently, only if that is unambiguous. The
-        PC does not have to become the iPhone's output, and a wrong device is never shown."""
+        """Priority 1 (v9.9.6). v9.8.94: the paired-device records were never found, the route listed the PC in only 2
+        of 7 connections, and BluetoothManager stayed unavailable. Now the tweak reads the PC's address from its own
+        AVDTP connection - at a path learned by matching an address iOS verified (the route's name/UID pair) - and the
+        app names that address from a verified cache, before any audio. A different computer has a different address,
+        so it never inherits the last PC's name. Here: the scan, the path and the resolver against a synthetic memory
+        image and the five connection scenarios, then the wiring from SetConfigInd to the app's connection line."""
         harness = r"""
 #include <assert.h>
 #include <string.h>
 #include "shared/PeerName.h"
+/* A synthetic address space: the native owner object and one object it points to. */
+static unsigned char owner_obj[0x400], child_obj[0x200];
+#define OWNER 0x200001000ull
+#define CHILD 0x300002000ull
+static int fake_peek(uint64_t a, void *out, size_t n) {
+    if (a >= OWNER && a + n <= OWNER + sizeof owner_obj) { memcpy(out, owner_obj + (a - OWNER), n); return 1; }
+    if (a >= CHILD && a + n <= CHILD + sizeof child_obj) { memcpy(out, child_obj + (a - CHILD), n); return 1; }
+    return 0;                                                       /* unmapped: like vm_read_overwrite failing */
+}
+static void put_address(unsigned char *at, const char *text, int reversed) {
+    unsigned char b[6]; assert(peer_address_bytes(text, b));
+    for (int i = 0; i < 6; i++) at[i] = reversed ? b[5 - i] : b[i];
+}
 int main(void) {
-    double now = 1.7e9;
-    /* The laptop just connected; AirPods were last used two hours ago; a Fitbit record carries no time. */
-    peer_record_t a[] = {{"AirPods Pro", "AA:AA:AA:AA:AA:AA", now - 7200, 1}, {"LAPTOP-UGIVBIA5", "BB:BB:BB:BB:BB:BB", now - 3, 1},
-                         {"Versa 2", "CC:CC:CC:CC:CC:CC", 0, 0}};
-    assert(peer_pick_recent(a, 3, now) == 1);
-    /* The AirPods reconnected at the same moment: too close to call, so nothing is named ("Your PC"). */
-    a[0].last_seen = now - 6;
-    assert(peer_pick_recent(a, 3, now) == -2);
-    /* Nobody seen in the last ten minutes: a stale record never names a new connection. */
-    peer_record_t b[] = {{"LAPTOP-UGIVBIA5", "BB:BB:BB:BB:BB:BB", now - 3600, 1}};
-    assert(peer_pick_recent(b, 1, now) == -1);
-    /* LastSeenTime stored as CFAbsoluteTime (seconds since 2001) is the same instant. */
-    assert(peer_unix_time(now - 978307200.0) == now && peer_unix_time(now) == now);
-    /* Two computers paired: the one that just connected, whatever it is called. */
-    peer_record_t c[] = {{"DESKTOP-OLD", "DD:DD:DD:DD:DD:DD", now - 86400, 1}, {"Parv's Workstation", "EE:EE:EE:EE:EE:EE", now - 2, 1}};
-    assert(peer_pick_recent(c, 2, now) == 1);
-    /* No records at all, or none with a name. */
-    assert(peer_pick_recent(c, 0, now) == -1);
-    peer_record_t d[] = {{"", "FF:FF:FF:FF:FF:FF", now - 1, 1}};
-    assert(peer_pick_recent(d, 1, now) == -1);
-    /* The app's order: the connection's own identity first, then everything else as before. */
-    peer_names_t n = {.connection = "LAPTOP-UGIVBIA5", .identity = "Other", .connected_computer = "Other", .receiving = 1};
-    assert(!strcmp(peer_choose_name(&n), "LAPTOP-UGIVBIA5"));
-    n.connection = "";
-    assert(!strcmp(peer_choose_name(&n), "Other"));
+    const char *laptop_uid = "24:B2:B9:A1:A4:68-tacl";            /* the v9.8.94 route capture */
+    unsigned char laptop[6], got[6]; char text[18], stored[64];
+    assert(peer_address_bytes(laptop_uid, laptop) && laptop[0] == 0x24 && laptop[5] == 0x68);
+    peer_address_text(laptop, text); assert(!strcmp(text, "24:B2:B9:A1:A4:68"));
+    unsigned char zero[6] = {0}, ones[6] = {255, 255, 255, 255, 255, 255};
+    assert(!peer_address_plausible(zero) && !peer_address_plausible(ones) && peer_address_plausible(laptop));
+
+    /* The connection keeps its peer one pointer deep, byte-reversed (as Bluetooth stacks often store it). */
+    memset(owner_obj, 0, sizeof owner_obj); memset(child_obj, 0, sizeof child_obj);
+    uint64_t child = CHILD; memcpy(owner_obj + 0x18, &child, 8);
+    put_address(child_obj + 0x30, "24:B2:B9:A1:A4:68", 1);
+    peer_path_t path, parsed;
+    assert(peer_scan_for_address(OWNER, fake_peek, laptop, &path));
+    assert(path.depth == 1 && path.off1 == 0x18 && path.off2 == 0x30 && path.reversed);
+    assert(peer_path_format(&path, stored, sizeof stored) && !strcmp(stored, "d1:0x18:0x30:r"));
+    assert(peer_path_parse(stored, &parsed) && !memcmp(&parsed, &path, sizeof path));   /* survives preferences */
+    assert(peer_read_path(OWNER, fake_peek, &parsed, got) && !memcmp(got, laptop, 6));
+    /* Or directly in the owner, forwards. */
+    memset(owner_obj, 0, sizeof owner_obj); put_address(owner_obj + 0x58, "24:B2:B9:A1:A4:68", 0);
+    assert(peer_scan_for_address(OWNER, fake_peek, laptop, &path) && path.depth == 0 && path.off1 == 0x58 && !path.reversed);
+    /* Not there: nothing is learned. An unreadable pointer just fails. */
+    memset(owner_obj, 0, sizeof owner_obj);
+    assert(!peer_scan_for_address(OWNER, fake_peek, laptop, &path));
+    uint64_t wild = 0x500000000ull; memcpy(owner_obj + 0x18, &wild, 8);
+    assert(!peer_read_path(OWNER, fake_peek, &parsed, got));
+    assert(!peer_path_parse("d2:0x18:0x30:r", &path) && !peer_path_parse("d1:0x19:0:f", &path) && !peer_path_parse("", &path));
+
+    /* The verified cache: iOS's pairs only; a renamed PC updates; the least recently seen goes first. */
+    peer_cache_t cache; memset(&cache, 0, sizeof cache);
+    peer_cache_learn(&cache, laptop_uid, "LAPTOP-UGIVBIA5", 100);
+    assert(!strcmp(peer_cache_lookup(&cache, "24:b2:b9:a1:a4:68"), "LAPTOP-UGIVBIA5"));
+    peer_cache_learn(&cache, "24:B2:B9:A1:A4:68", "Parv's Laptop", 200);
+    assert(cache.n == 1 && !strcmp(peer_cache_lookup(&cache, laptop_uid), "Parv's Laptop"));
+    peer_cache_learn(&cache, laptop_uid, "LAPTOP-UGIVBIA5", 300);
+    for (int i = 0; i < 8; i++) { char uid[32]; snprintf(uid, sizeof uid, "10:00:00:00:00:%02X-tacl", i);
+                                  char nm[16]; snprintf(nm, sizeof nm, "PC-%d", i); peer_cache_learn(&cache, uid, nm, 400 + i); }
+    assert(cache.n == PEER_CACHE_SIZE);
+    assert(peer_cache_lookup(&cache, laptop_uid) == NULL);           /* evicted: the least recently seen */
+    assert(!strcmp(peer_cache_lookup(&cache, "10:00:00:00:00:07"), "PC-7"));
+    memset(&cache, 0, sizeof cache);
+    peer_cache_learn(&cache, laptop_uid, "LAPTOP-UGIVBIA5", 100);
+
+    /* Scenario 1/4: connected, no audio, no route capture this time - the path's address names it from the cache. */
+    assert(!strcmp(peer_resolve("24:B2:B9:A1:A4:68", "", "", &cache), "LAPTOP-UGIVBIA5"));
+    /* First connection ever: no path yet, but iOS listed the PC in a route during this connection. */
+    memset(&cache, 0, sizeof cache);
+    assert(!strcmp(peer_resolve(NULL, laptop_uid, "LAPTOP-UGIVBIA5", &cache), "LAPTOP-UGIVBIA5"));
+    assert(peer_resolve(NULL, "", "", &cache) == NULL);              /* nothing known: "Your PC" */
+    peer_cache_learn(&cache, laptop_uid, "LAPTOP-UGIVBIA5", 100);
+    /* Scenario 5: another computer at the same path - a different address. Never the laptop's name. */
+    put_address(child_obj + 0x30, "11:22:33:44:55:66", 1); memcpy(owner_obj + 0x18, &child, 8);
+    assert(peer_read_path(OWNER, fake_peek, &parsed, got)); peer_address_text(got, text);
+    assert(!strcmp(text, "11:22:33:44:55:66"));
+    assert(peer_resolve(text, "", "", &cache) == NULL);
+    /* ...even if the last connection's capture (the laptop) is still around: it is another device's. */
+    assert(peer_resolve(text, laptop_uid, "LAPTOP-UGIVBIA5", &cache) == NULL);
+    /* Its own capture names it. */
+    assert(!strcmp(peer_resolve(text, "11:22:33:44:55:66-tacl", "DESKTOP-OTHER", &cache), "DESKTOP-OTHER"));
+    /* A renamed laptop: the fresh capture wins over the cached name. */
+    assert(!strcmp(peer_resolve("24:B2:B9:A1:A4:68", laptop_uid, "Parv's Laptop", &cache), "Parv's Laptop"));
     return 0;
 }
 """
         cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
         with tempfile.TemporaryDirectory() as td:
-            for lang, name, std in (("c", "rec.c", "-std=gnu11"), ("c++", "rec.cpp", "-std=c++17")):
+            for lang, name, std in (("c", "conn.c", "-std=gnu11"), ("c++", "conn.cpp", "-std=c++17")):
                 src = pathlib.Path(td) / name; exe = pathlib.Path(td) / (name + ".out"); src.write_text(harness)
                 extra = ["-Wno-missing-field-initializers"] if lang == "c++" else []
                 build = subprocess.run([cc if lang == "c" else (shutil.which("c++") or cc), std, "-Wall", "-Wextra",
@@ -611,32 +663,36 @@ int main(void) {
                 self.assertEqual(build.returncode, 0, build.stderr)
                 ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
                 self.assertEqual(ran.returncode, 0, ran.stderr)
-        # The tweak: at every CONFIGURE, forget the last PC first, then look - off the signalling thread - three times.
+        # The tweak: at CONFIGURE, from the connection's owner object; the address is cleared first and read at once.
         hooks = read(ROOT / "tweak/Hooks.xm")
         config = block_until(hooks, "static uint64_t hook_setconfigind(", "\n}\n")
-        self.assertIn("AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);\n        SpeakaPeerIdentifySoon();", config)
+        self.assertIn("AudioRelaySetStreamState(AUDIO_STREAM_CONFIGURED);\n        SpeakaPeerConnected(a0);", config)
         peer = read(ROOT / "tweak/PeerIdentity.c")
-        soon = block_until(peer, "void SpeakaPeerIdentifySoon(void)", "\n}\n")
-        self.assertLess(soon.index('SpeakaSetStatus("diag.v104.peer", "%s", "");'), soon.index("dispatch_async_f("))
-        self.assertEqual(soon.count("identify_later"), 3)               # now, +10 s, +60 s; plain C, no blocks
+        connected = block_until(peer, "void SpeakaPeerConnected(uint64_t owner)", "\n}\n")
+        self.assertLess(connected.index('SpeakaSetStatus("diag.v105.peer_address", "%s", "");'),
+                        connected.index("dispatch_async_f(q, context, attempt);"))   # immediate, before any audio
+        self.assertIn("vm_read_overwrite(mach_task_self()", peer)                     # a stale pointer fails, never crashes
         self.assertNotIn("^{", peer)
-        self.assertIn('CFSTR("com.apple.MobileBluetooth.devices")', peer)
-        for key in ('CFSTR("Name")', 'CFSTR("DefaultName")', 'CFSTR("LastSeenTime")'):
-            self.assertIn(key, peer)
-        ident = block_until(peer, "static void identify(const char *when)", "\n}\n")
-        self.assertIn("int pick = peer_pick_recent(r, n, now);", ident)
-        self.assertLess(ident.index("if (pick >= 0) {"), ident.index('SpeakaSetStatus("diag.v104.peer", "%s", entries[pick].name);'))
-        self.assertIn("V104_PEER_RECORD", ident)                                   # every record, for the log
-        self.assertIn("tweak/PeerIdentity.c", read(ROOT / "Makefile"))
-        # The app shows it first.
+        attempt = block_until(peer, "static void attempt(void *context)", "\n}\n")
+        self.assertIn("if (connection != __atomic_load_n(&g_connection, __ATOMIC_ACQUIRE)) return;", attempt)
+        # Learned only from a route capture made during this connection, and forgotten if a capture ever disagrees.
+        self.assertIn("if (when >= g_configured_at && pc", peer)
+        self.assertLess(attempt.index("V105_PATH_MISMATCH"), attempt.index("peer_scan_for_address(owner, peek, captured, &learned)"))
+        self.assertIn("save_path(NULL);", attempt)
+        self.assertNotIn("MobileBluetooth.devices", peer)                              # the records lookup is gone
+        # The helper: a capture belongs to the connection it was made in.
+        helper = read(ROOT / "audiohelper/AudioHelper.m")
+        self.assertIn("if(state==AUDIO_STREAM_CONFIGURED) forget_pc_port();", helper)
+        # The app: the connection's address, the verified cache, the resolver - and the connection line shows it.
         client = read(ROOT / "app/Speaka/Model/SPTweakClient.m")
-        self.assertIn('s.peerName = SPString(status[@"diag.v104.peer"]);', client)
+        self.assertIn('NSString *connection = SPString(status[@"diag.v105.peer_address"]);', client)
+        self.assertIn("static NSString *const SPPeerCacheKey = @SPEAKA_APP_KEY_PEER_NAMES;", client)
+        self.assertIn("peer_cache_learn(&cache, captureUID.UTF8String, captureName.UTF8String,", client)
+        self.assertIn("const char *resolved = peer_resolve(connection.length ? connection.UTF8String : NULL,", client)
         model = read(MODEL)
         self.assertIn("let peer: String? = snapshot.peerName.isEmpty ? nil : snapshot.peerName", model)
-        # Credits explains BluetoothManager's state, including why it didn't attach.
-        device = read(ROOT / "app/Speaka/Model/SPConnectedDevice.m")
-        self.assertIn("@selector(lastInitError)", device)
-        self.assertIn("lastInitError %d", device)
+        line = block(model, "var statusLine: StatusLine? {")
+        self.assertLess(line.index("let name = peer ??"), line.index('text: "\\(who) · connected"'))   # named before audio
 
     def test_the_pcs_name_shows_as_soon_as_it_connects(self):
         """The PC is named from iOS's Bluetooth list once it's connected, before any audio, whatever form its device class

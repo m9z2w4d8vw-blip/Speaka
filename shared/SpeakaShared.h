@@ -45,6 +45,11 @@
 #define SPEAKA_KEY_OUTPUT_MODE   "SpeakaV89OutputMode"     /* "speaker" (default) | "headphones" | "any" */
 #define SPEAKA_KEY_NEVER_OUTPUTS         "SpeakaV89NeverOutputs"   /* array of {uid,name}: never play there */
 #define SPEAKA_KEY_HELPER_STATUS        "SpeakaV89HelperStatus"   /* written by BTPSAudioHelper for Settings */
+/* v9.9.6: where the connection keeps its peer's address, learned by matching a route-verified address
+ * (tweak/PeerIdentity.c, shared/PeerName.h peer_path_t). Written by the tweak. */
+#define SPEAKA_KEY_PEER_PATH "SpeakaPeerPath"
+/* v9.9.6: the app's verified name cache (its own defaults): iOS's name/address pairs, bounded (PeerName.h). */
+#define SPEAKA_APP_KEY_PEER_NAMES "SpeakaPeerNames"
 
 /* ---- the 64-bit notification state word ---------------------------------------------------------------------
  * bit 0  tweak loaded in the daemon      bit 1  UUID matched the analysed build     bit 2  experiments enabled

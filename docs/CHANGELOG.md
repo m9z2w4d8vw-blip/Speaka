@@ -77,6 +77,23 @@ Later in this cycle:
   (non-mixing) and asks iOS not to interrupt it for system alerts; when another app takes the audio, the helper takes
   it back within 250 ms (a call or an alarm makes that fail until it ends). Resuming on the PC plays at once: nothing
   is re-initialized.
+- **The PC's name from the connection itself (v9.8.94 test):** the paired-device records were never found ("no
+  paired-device records found", every connection), the route listed the PC in only 2 of 7 connections (V102_PC_ROUTE),
+  and BluetoothManager stayed unavailable. When a route does list the PC, iOS gives its name and address together
+  (name=LAPTOP-UGIVBIA5 uid=24:B2:B9:A1:A4:68-tacl). SetConfigInd's registers rule out an address argument (x1 is the
+  transaction label), but x0 is the connection's native owner object. The tweak now searches that object, and the
+  objects it points to one level deep, for the exact six bytes of an address iOS verified *during this connection*,
+  in either byte order; a match shows where the connection keeps its peer's address, and the path is saved. From then
+  on every configuration reads the PC's address straight from the connection, immediately - before any audio - and
+  the app names it from a bounded cache (8) of iOS's own name/address pairs. A different computer has a different
+  address, so it never inherits the last PC's name; a path that ever disagrees with a fresh route capture is
+  forgotten. The records lookup is removed. Unverified on the device: that the address is within the searched range
+  (V105_PATH_LEARNED or V105_PATH_NOT_FOUND says, with a one-time dump of the object, V105_CONNECTION_OWNER).
+- **Startup, re-measured (v9.8.94):** the four slow streams started 14.2-17.4 s after a bluetoothd launch and all
+  reached full rate 43.3-45.0 s after it, whenever they started; streams starting 64.8 s or later were at full rate at
+  once (3 of 3). The slowness is already present where packets enter Speaka's receive callback. Start restarts
+  bluetoothd because the endpoint can only be registered at its launch, so a connection within ~40 s of Start lands in
+  that window. Not shortened in this release.
 - **CI fix (run 114720996133):** the startup fixtures were named *.log, which .gitignore drops, so they were never
   committed and CI's checkout failed two tests. They are .txt now, and a test fails if any file the build or tests
   need would be ignored by git.

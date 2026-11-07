@@ -300,9 +300,9 @@ void AudioRelaySetActive(int active);
  * close. Any open state also connects the helper at once, before the stream starts, so it owns the output before
  * the PC's START instead of activating mid-stream (which made Apple's A2DP code suspend the stream). */
 void AudioRelaySetStreamState(uint32_t state);
-/* v9.9.5: name the PC that just configured the speaker from bluetoothd's own device records (PeerIdentity.c);
- * asynchronous, never on the signalling thread. */
-void SpeakaPeerIdentifySoon(void);
+/* v9.9.6: the PC's address from its own connection (PeerIdentity.c): owner is SetConfigInd x0. Asynchronous, never
+ * on the signalling thread. */
+void SpeakaPeerConnected(uint64_t owner);
 /* v9.3 experimental, AAC: publish the negotiated codec (A2DP_CODEC_SBC / A2DP_CODEC_AAC, AACConfig.h) and, for AAC,
  * its 6-byte Codec Specific Information into the ring header, so the helper builds the right decoder. Call before
  * AudioRelaySetActive(1). codec_config may be NULL for SBC. Today the tweak only ever negotiates SBC (a second,

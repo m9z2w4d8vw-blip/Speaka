@@ -40,7 +40,8 @@ typedef NS_ENUM(NSInteger, SPSession) {
 @property (nonatomic) BOOL connected;                // v9.6: a PC is connected: streaming, paused, or just set up
 @property (nonatomic, copy) NSString *routeName;     // v9.6: a Bluetooth output's name in the audio route, else empty
 @property (nonatomic, copy) NSString *routeUID;      // v9.9.4: that output's UID (it carries the PC's address), else empty
-@property (nonatomic, copy) NSString *peerName;      // v9.9.5: the PC bluetoothd recorded at this connection, else empty
+@property (nonatomic, copy) NSString *peerName;      // v9.9.6: this connection's PC, named by its address, else empty
+@property (nonatomic, copy) NSString *peerAddress;   // v9.9.6: the address the tweak read from the connection, else empty
 @property (nonatomic, readonly) BOOL canStart;
 @property (nonatomic, readonly) BOOL canStop;
 @end

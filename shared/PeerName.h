@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdint.h>
+#include <stdio.h>
 
 /* AVAudioSession's Bluetooth output port types (the public constants' string values). */
 static inline int peer_port_is_bluetooth(const char *type)
@@ -99,30 +101,174 @@ static inline const char *peer_choose_name(const peer_names_t *n)
     return NULL;
 }
 
-/* ---- the connected PC from bluetoothd's own paired-device records (v9.9.5) ----
- * Test-92: every route the helper saw was the speaker (21 of 21), so the route never names the PC while Speaka holds
- * it, and the app's BluetoothManager reported "not ready". bluetoothd keeps a record per paired device - its name and
- * when it was last seen (com.apple.MobileBluetooth.devices) - and the tweak reads it from inside bluetoothd when the PC
- * configures the speaker. The device that just connected is the one seen most recently; it is named only when that is
- * unambiguous: seen within PEER_RECENT_S, and no other record within PEER_TIE_S of it. Otherwise nothing is named and
- * the app keeps "Your PC" - never a wrong device. */
-#define PEER_RECENT_S 600.0
-#define PEER_TIE_S 10.0
-typedef struct { const char *name; const char *address; double last_seen; int has_time; } peer_record_t;
+/* ---- the PC's identity from the connection itself (v9.9.6) ----
+ * v9.8.94: the paired-device records were never found ("no paired-device records found", every connection), the
+ * route listed the PC in only 2 of 7 connections (V102_PC_ROUTE), and BluetoothManager stayed unavailable. But when a
+ * route does list the PC, iOS gives its name and its address together (name=LAPTOP-UGIVBIA5 uid=24:B2:B9:A1:A4:68-tacl),
+ * and the PC's AVDTP configuration arrives with a native owner object (SetConfigInd x0). The tweak searches that object -
+ * and the objects it points to, one level deep - for the exact six bytes of an address iOS has verified, in either byte
+ * order. A 48-bit match by chance is effectively impossible, so a match shows where the connection keeps its peer's
+ * address; that path is remembered, and from then on every configuration reads the PC's address straight from the
+ * connection, before any audio. The app names an address only from a verified cache of iOS's own name/address pairs:
+ * a different computer has a different address, so it can never inherit the last PC's name. */
+#define PEER_SCAN_OWNER_BYTES 0x400u     /* searched at the owner object */
+#define PEER_SCAN_CHILD_BYTES 0x200u     /* searched at each object the owner points to */
+#define PEER_CACHE_SIZE 8u
 
-/* LastSeenTime as Unix seconds: stored either as Unix time or as CFAbsoluteTime (seconds since 2001). */
-static inline double peer_unix_time(double t) { return t > 1.0e9 ? t : t + 978307200.0; }
-
-/* Index of the record that names the connection; -1 if none was seen recently, -2 if two are too close to call. */
-static inline int peer_pick_recent(const peer_record_t *r, unsigned n, double now)
+/* "AA:BB:CC:DD:EE:FF" (or any UID carrying it) -> six bytes, most significant first. */
+static inline int peer_address_bytes(const char *text, unsigned char out[6])
 {
-    int best = -1, second = -1;
-    for (unsigned i = 0; i < n; ++i) {
-        if (!r[i].has_time || !r[i].name || !r[i].name[0]) continue;
-        if (best < 0 || r[i].last_seen > r[best].last_seen) { second = best; best = (int)i; }
-        else if (second < 0 || r[i].last_seen > r[second].last_seen) second = (int)i;
+    char a[18];
+    if (!peer_uid_address(text, a)) return 0;
+    for (int i = 0; i < 6; ++i) {
+        unsigned hi = (unsigned)(isdigit((unsigned char)a[i * 3]) ? a[i * 3] - '0' : a[i * 3] - 'A' + 10);
+        unsigned lo = (unsigned)(isdigit((unsigned char)a[i * 3 + 1]) ? a[i * 3 + 1] - '0' : a[i * 3 + 1] - 'A' + 10);
+        out[i] = (unsigned char)(hi << 4 | lo);
     }
-    if (best < 0 || now - r[best].last_seen > PEER_RECENT_S) return -1;
-    if (second >= 0 && r[best].last_seen - r[second].last_seen < PEER_TIE_S) return -2;
-    return best;
+    return 1;
+}
+
+static inline void peer_address_text(const unsigned char b[6], char out[18])
+{
+    static const char hex[] = "0123456789ABCDEF";
+    for (int i = 0; i < 6; ++i) {
+        out[i * 3] = hex[b[i] >> 4];
+        out[i * 3 + 1] = hex[b[i] & 15u];
+        out[i * 3 + 2] = i < 5 ? ':' : 0;
+    }
+}
+
+/* Not an address: all zero or all ones (an unset field reads like that). */
+static inline int peer_address_plausible(const unsigned char b[6])
+{
+    int zero = 1, ones = 1;
+    for (int i = 0; i < 6; ++i) { zero &= b[i] == 0; ones &= b[i] == 0xffu; }
+    return !zero && !ones;
+}
+
+/* Offset of addr in buf, forwards or byte-reversed (*reversed says which); -1 if absent. */
+static inline long peer_find_address(const unsigned char *buf, size_t n, const unsigned char addr[6], int *reversed)
+{
+    for (size_t i = 0; i + 6 <= n; ++i) {
+        int fwd = 1, rev = 1;
+        for (int k = 0; k < 6 && (fwd || rev); ++k) {
+            fwd &= buf[i + (size_t)k] == addr[k];
+            rev &= buf[i + (size_t)k] == addr[5 - k];
+        }
+        if (fwd || rev) { if (reversed) *reversed = rev && !fwd; return (long)i; }
+    }
+    return -1;
+}
+
+/* Where a connection keeps its peer's address: owner+off1 (depth 0), or *(owner+off1)+off2 (depth 1). */
+typedef struct { unsigned valid, depth, off1, off2, reversed; } peer_path_t;
+
+/* As stored in preferences: "d0:0x58:0:f" or "d1:0x18:0x30:r". */
+static inline int peer_path_format(const peer_path_t *p, char *out, size_t n)
+{
+    if (!p->valid) return 0;
+    return snprintf(out, n, "d%u:%#x:%#x:%c", p->depth, p->off1, p->off2, p->reversed ? 'r' : 'f') > 0;
+}
+
+static inline int peer_path_parse(const char *text, peer_path_t *p)
+{
+    unsigned depth, off1, off2;
+    char order;
+    memset(p, 0, sizeof *p);
+    if (!text || sscanf(text, "d%u:%x:%x:%c", &depth, &off1, &off2, &order) != 4) return 0;
+    if (depth > 1u || off1 >= PEER_SCAN_OWNER_BYTES || off2 >= PEER_SCAN_CHILD_BYTES || (order != 'f' && order != 'r'))
+        return 0;
+    if (depth == 1u && (off1 % 8u)) return 0;
+    *p = (peer_path_t){1, depth, off1, off2, order == 'r' ? 1u : 0u};
+    return 1;
+}
+
+/* A heap pointer as it sits in an object (data pointers aren't signed; the top byte is masked anyway). */
+static inline int peer_pointer(uint64_t v, uint64_t *out)
+{
+    v &= 0x0000FFFFFFFFFFFFull;
+    if (v < 0x100000000ull || v >= 0x1000000000ull || (v & 7u)) return 0;
+    *out = v;
+    return 1;
+}
+
+typedef int (*peer_peek_fn)(uint64_t address, void *out, size_t n);
+
+/* Search the owner object and the objects it points to for addr. Returns 1 with *path set on a match. */
+static inline int peer_scan_for_address(uint64_t owner, peer_peek_fn peek, const unsigned char addr[6], peer_path_t *path)
+{
+    unsigned char top[PEER_SCAN_OWNER_BYTES], child[PEER_SCAN_CHILD_BYTES];
+    int reversed = 0;
+    memset(path, 0, sizeof *path);
+    if (!owner || !peek(owner, top, sizeof top)) return 0;
+    long at = peer_find_address(top, sizeof top, addr, &reversed);
+    if (at >= 0) { *path = (peer_path_t){1, 0, (unsigned)at, 0, (unsigned)reversed}; return 1; }
+    for (unsigned off = 0; off + 8u <= sizeof top; off += 8u) {
+        uint64_t raw, target;
+        memcpy(&raw, top + off, 8);
+        if (!peer_pointer(raw, &target) || !peek(target, child, sizeof child)) continue;
+        at = peer_find_address(child, sizeof child, addr, &reversed);
+        if (at >= 0) { *path = (peer_path_t){1, 1, off, (unsigned)at, (unsigned)reversed}; return 1; }
+    }
+    return 0;
+}
+
+/* Read the address a learned path points at. Returns 1 with a plausible address. */
+static inline int peer_read_path(uint64_t owner, peer_peek_fn peek, const peer_path_t *path, unsigned char out[6])
+{
+    unsigned char raw[6];
+    uint64_t base = owner;
+    if (!path->valid || !owner) return 0;
+    if (path->depth == 1u) {
+        uint64_t ptr;
+        if (!peek(owner + path->off1, &ptr, sizeof ptr) || !peer_pointer(ptr, &base)) return 0;
+        if (!peek(base + path->off2, raw, sizeof raw)) return 0;
+    } else if (!peek(owner + path->off1, raw, sizeof raw)) {
+        return 0;
+    }
+    for (int i = 0; i < 6; ++i) out[i] = path->reversed ? raw[5 - i] : raw[i];
+    return peer_address_plausible(out);
+}
+
+/* The app's verified cache: address -> name, from iOS's own name/address pairs only. Bounded; least recently seen
+ * goes first; a pair with a known address updates its name (the PC was renamed). */
+typedef struct { char address[18]; char name[128]; double seen; } peer_cache_entry_t;
+typedef struct { peer_cache_entry_t e[PEER_CACHE_SIZE]; unsigned n; } peer_cache_t;
+
+static inline void peer_cache_learn(peer_cache_t *c, const char *uid_or_address, const char *name, double now)
+{
+    char a[18];
+    if (!name || !name[0] || !peer_uid_address(uid_or_address, a)) return;
+    unsigned slot = c->n;
+    for (unsigned i = 0; i < c->n; ++i) if (!strcmp(c->e[i].address, a)) { slot = i; break; }
+    if (slot == c->n) {
+        if (c->n < PEER_CACHE_SIZE) c->n++;
+        else { slot = 0; for (unsigned i = 1; i < c->n; ++i) if (c->e[i].seen < c->e[slot].seen) slot = i; }
+    }
+    memcpy(c->e[slot].address, a, sizeof a);
+    snprintf(c->e[slot].name, sizeof c->e[slot].name, "%s", name);
+    c->e[slot].seen = now;
+}
+
+static inline const char *peer_cache_lookup(const peer_cache_t *c, const char *uid_or_address)
+{
+    char a[18];
+    if (!peer_uid_address(uid_or_address, a)) return NULL;
+    for (unsigned i = 0; i < c->n; ++i) if (!strcmp(c->e[i].address, a)) return c->e[i].name;
+    return NULL;
+}
+
+/* The connection's name. connection: the address the tweak read from this connection (or NULL); capture: the route's
+ * name and UID seen during this connection (or NULLs). A known connection address is named only by a capture of that
+ * same address or by the cache - never by another device. With no connection address, only this connection's capture. */
+static inline const char *peer_resolve(const char *connection, const char *capture_uid, const char *capture_name,
+                                       const peer_cache_t *cache)
+{
+    char a[18];
+    int have_connection = peer_uid_address(connection, a);
+    if (have_connection) {
+        if (capture_name && capture_name[0] && peer_address_equal(connection, capture_uid)) return capture_name;
+        return peer_cache_lookup(cache, connection);
+    }
+    return capture_name && capture_name[0] && peer_uid_address(capture_uid, a) ? capture_name : NULL;
 }
