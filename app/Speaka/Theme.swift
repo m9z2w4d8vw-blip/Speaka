@@ -2,8 +2,8 @@
 //  Theme.swift
 //  Speaka
 //
-//  Colours, metrics and small building blocks, the same as Caz's (Caz/Theme.swift) so the two apps look alike,
-//  on Speaka's own background and with Speaka's teal. Caz follows Dopamine's DOGlobalAppearance, DOThemeManager and
+//  Colours, metrics and small building blocks, on Speaka's own background and with Speaka's teal. They follow
+//  Dopamine's DOGlobalAppearance, DOThemeManager and
 //  Themes.plist.
 //  Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).
 //
@@ -76,7 +76,7 @@ struct MenuButtonStyle: ButtonStyle {
 
 /// Speaka's own background, drawn exactly as the app drew it before v9.2 (SPTheme): deep indigo with violet, blue,
 /// teal and magenta glows, rendered for the screen's size and reaching 100 pt past its top and bottom. It dims to 40%
-/// over black while a window is open, like Caz's backdrop.
+/// over black while a window is open.
 struct Backdrop: View {
     var dimmed: Bool
     var size: CGSize

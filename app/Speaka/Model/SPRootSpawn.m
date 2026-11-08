@@ -2,7 +2,7 @@
 //  SPRootSpawn.m
 //  Speaka
 //
-//  Caz's RootSpawn.m, renamed. The app needs com.apple.private.persona-mgmt for this (Speaka.entitlements).
+//  See SPRootSpawn.h. The app needs com.apple.private.persona-mgmt for this (Speaka.entitlements).
 //
 
 #import "SPRootSpawn.h"

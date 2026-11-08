@@ -3,7 +3,7 @@
 Two questions, answered on the phone in one run, with no Bluetooth and nothing installed or changed:
 
 1. **Why was the standalone test killed at launch (exit 137)?** The kit runs four launch controls side by side.
-2. **Does Speaka's AAC decoder work on iOS?** `BTPSAudioHelper --aac-selftest` decodes an embedded ffmpeg AAC-LATM
+2. **Does Speaka's AAC decoder work on iOS?** `SpeakaAudioHelper --aac-selftest` decodes an embedded ffmpeg AAC-LATM
    fixture (a 440 Hz tone) through the real `LATM.c`, `AACDecoder.c` and AudioToolbox, inside the installed helper -
    a binary already proven to launch on this phone, and the one that decodes AAC in production.
 

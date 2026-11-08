@@ -2,7 +2,7 @@
 //  MainComponents.swift
 //  Speaka
 //
-//  The main screen's pieces, the same as Caz's (Caz/MainComponents.swift): header, action menu, the big button
+//  The main screen's pieces: header, action menu, the big button
 //  and the log it expands into. Each mirrors one of Dopamine's DO classes: DOHeaderView, DOActionMenuView and
 //  DOActionMenuButton, DOJailbreakButton, DOLyricsLogView and DOLyricsLogItemView, DOLoadingIndicator and
 //  DODoubleHelixIndicator.
@@ -45,13 +45,13 @@ struct HeaderView: View {
     }
 }
 
-/// "Speaka" placed like Caz's title and Dopamine's logo: a 40 pt slot at the top of the header, drawn 7 pt
+/// "Speaka" placed like Dopamine's logo: a 40 pt slot at the top of the header, drawn 7 pt
 /// higher (DOHeaderView's alignment inset), with capitals 32 pt tall like the Dopamine wordmark.
 struct Wordmark: View {
     var body: some View {
         if let image = UIImage(named: "Wordmark") {
             // Dopamine draws its title from an image (Dopamine.imageset): 40 pt tall, 7 pt high. Speaka's
-            // Wordmark.imageset is drawn the same way as Caz's, in Fonarto Regular (app/scripts/make_wordmark.py).
+            // Wordmark.imageset is drawn in Fonarto Regular (app/scripts/make_wordmark.py).
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
@@ -162,7 +162,7 @@ struct MenuRow: View {
 }
 
 /// v9.8, Uninstall: laid out exactly like a MenuRow, but a tap does nothing. Held down, a gray fill sweeps across the
-/// row from left to right over the hold, and everything it has covered dims to Caz's disabled 45%, so the part it has
+/// row from left to right over the hold, and everything it has covered dims to the disabled 45%, so the part it has
 /// passed looks like a disabled row while the rest is still white. The title stays Uninstall throughout; let go early
 /// and the edge runs back. Held the whole time: a warning haptic and the action, with no second prompt, and the whole
 /// row keeps the disabled look while it runs, with a spinner in the icon's place and "Uninstalling...". It doesn't dim
@@ -173,7 +173,7 @@ struct HoldMenuRow: View {
     /// How far the hold has got, 0 to 1. Animated: linearly up to 1 over the hold, quickly back to 0 on letting go.
     @State private var progress: CGFloat = 0
 
-    /// Caz's disabled row: what the covered part of the row looks like.
+    /// The disabled row: what the covered part of the row looks like.
     static let dimmed = 0.45
     /// The gray behind the covered part.
     static let cover = Color.white.opacity(0.10)
@@ -283,7 +283,7 @@ struct ActionButton: View {
     }
 }
 
-/// Who is connected and where the audio plays, in the slot where Caz shows Update Available: the same 19 pt
+/// Who is connected and where the audio plays, in the slot above the big button: the same 19 pt
 /// symbol and 17 pt title 10 pt apart with 12 pt side insets, as a label rather than a button.
 struct StatusLineView: View {
     let line: SpeakaModel.StatusLine
@@ -335,7 +335,7 @@ struct LogSheet: View {
 struct LyricsLog: View {
     let lines: [LyricLine]
     /// Every line this log could show (SpeakaModel.possibleLines). The column is as wide as the widest of them from the
-    /// first line on, so no line moves sideways when a longer one appears or shrinks: it stays centered, as in Caz, but
+    /// first line on, so no line moves sideways when a longer one appears or shrinks: it stays centered, but
     /// never re-centers.
     let texts: [LyricText]
     let bottomInset: CGFloat

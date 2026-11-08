@@ -1,6 +1,6 @@
 /* AACSelfTest.c - see AACSelfTest.h.
  *
- *   BTPSAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=all|raw-esds|raw-asc|raw-none|adts-none]
+ *   SpeakaAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=all|raw-esds|raw-asc|raw-none|adts-none]
  *
  * It runs inside the helper because the helper is a binary already proven to launch on the phone (Theos-built,
  * arm64 + arm64e, installed by dpkg), and it is the very binary that decodes AAC in production.
@@ -191,7 +191,7 @@ int aac_selftest_main(int argc, const char **argv) {
     for (int i = 2; i < argc; ++i) {
         if (!strncmp(argv[i], "--stage=", 8)) stage = argv[i] + 8;
         else if (!strncmp(argv[i], "--strategy=", 11)) only = argv[i] + 11;
-        else { mark("usage: BTPSAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=NAME|all]"); return 2; }
+        else { mark("usage: SpeakaAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=NAME|all]"); return 2; }
     }
     if (!strcmp(stage, "entry")) { mark("STAGE exit code=0"); return 0; }
 

@@ -2,7 +2,7 @@
 //  Windows.swift
 //  Speaka
 //
-//  Windows open in the middle of the screen over the dimmed backdrop, the same as Caz's (Caz/Windows.swift), which
+//  Windows open in the middle of the screen over the dimmed backdrop, which
 //  follow Dopamine's Settings window: DONavigationController, DOPSListController and DOHeaderCell.
 //  Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).
 //
@@ -169,8 +169,8 @@ struct OutputWindow: View {
     }
 }
 
-/// One choice in Audio Output, drawn like Caz's category rows: the icon in a 22 pt column, the name and what it
-/// does, and a checkmark in Caz's gold on the one in use.
+/// One choice in Audio Output: the icon in a 22 pt column, the name and what it
+/// does, and a checkmark on the one in use.
 struct OutputRow: View {
     let mode: OutputMode
     let selected: Bool
@@ -251,7 +251,7 @@ struct RoutePickerAnchor: UIViewRepresentable {
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
 
-/// What Speaka is, which versions are installed, and the license of the interface it shares with Caz.
+/// What Speaka is, which versions are installed, and the license of the interface it adapts from Dopamine.
 /// Settings: Kill Bluetooth (the README's `killall -9 bluetoothd`, through the root helper) and Update notifications.
 struct SettingsWindow: View {
     @ObservedObject var model: SpeakaModel
@@ -267,7 +267,7 @@ struct SettingsWindow: View {
     var body: some View {
         // v9.9.3: one column of Dopamine's Actions buttons, 266 x 36 pt and 8 pt apart - Kill Bluetooth, Credits,
         // Update notifications (v9.9.4: a button too, green when on) and Check for Updates. A line shows under one
-        // only when it has something to say, at Caz's 12 pt for footers.
+        // only when it has something to say, at 12 pt, the footer size.
         WindowCard(title: "Settings") {
             VStack(spacing: WindowActionButton.spacing) {
                 WindowActionButton(title: model.killingBluetooth ? "Killing Bluetooth..." : "Kill Bluetooth",
@@ -329,7 +329,7 @@ struct SettingsWindow: View {
     }
 }
 
-/// A line under a Settings button: Caz's 12 pt footer, in the warning colour when something failed.
+/// A line under a Settings button: a 12 pt footer, in the warning colour when something failed.
 struct SettingsFootnote: View {
     let text: String
     let failed: Bool
@@ -368,7 +368,7 @@ struct CreditsWindow: View {
                     Text("Interface")
                         .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(.white)
-                    Text("Shared with Caz, and adapted from Dopamine by Lars Fröder (opa334) and its contributors under the MIT License:")
+                    Text("Adapted from Dopamine by Lars Fröder (opa334) and its contributors, under the MIT License:")
                         .font(.system(size: 15))
                         .foregroundStyle(Theme.secondary)
                         .padding(.bottom, 8)

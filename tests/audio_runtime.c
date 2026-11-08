@@ -10,17 +10,17 @@
 #include <unistd.h>
 
 /* The reference: all 258 recorded frames decoded in one go with libsbc, to compare the streamed decode against.
- * (This was audiohelper/BTPSV76Decode.c, which only the helper's removed --sbc-play test mode used.) */
-#define BTPS_V76_MAX_FRAMES 300u
-#define BTPS_V76_MAX_PER_CHANNEL (300u * SBC_MAX_SAMPLES)
-static int btps_v76_decode_sbc(const uint8_t *src,size_t src_bytes,int16_t *pcm,size_t pcm_slots,
+ * (Formerly the helper's own, used only by an SBC test mode since removed; kept here as the reference.) */
+#define REFERENCE_MAX_FRAMES 300u
+#define REFERENCE_MAX_PER_CHANNEL (300u * SBC_MAX_SAMPLES)
+static int reference_decode_sbc(const uint8_t *src,size_t src_bytes,int16_t *pcm,size_t pcm_slots,
                         size_t *frames_out,size_t *samples_out,unsigned *rate_out,unsigned *channels_out) {
     if(frames_out)*frames_out=0;
     if(samples_out)*samples_out=0;
     if(rate_out)*rate_out=0;
     if(channels_out)*channels_out=0;
     if(!src||!pcm||!frames_out||!samples_out||!rate_out||!channels_out||
-       src_bytes==0||src_bytes>20000u||pcm_slots>BTPS_V76_MAX_PER_CHANNEL*2u)return -1;
+       src_bytes==0||src_bytes>20000u||pcm_slots>REFERENCE_MAX_PER_CHANNEL*2u)return -1;
     sbc_t decoder;
     memset(&decoder,0,sizeof decoder);sbc_reset(&decoder);
     size_t offset=0,frames=0,per_channel=0;
@@ -33,7 +33,7 @@ static int btps_v76_decode_sbc(const uint8_t *src,size_t src_bytes,int16_t *pcm,
         size_t n=(size_t)frame.nblocks*(size_t)frame.nsubbands;
         if(frame_len<SBC_HEADER_SIZE || frame_len>src_bytes-offset ||
            channels!=2u||sr!=44100u||n==0||n>SBC_MAX_SAMPLES)return -3;
-        if(frames>=BTPS_V76_MAX_FRAMES || per_channel > BTPS_V76_MAX_PER_CHANNEL-n ||
+        if(frames>=REFERENCE_MAX_FRAMES || per_channel > REFERENCE_MAX_PER_CHANNEL-n ||
            n>pcm_slots/2u || per_channel > (pcm_slots/2u)-n) return -4;
         /* SBC API accepts output pitch for channel-interleaved PCM. */
         if(sbc_decode(&decoder,src+offset,frame_len,&frame,
@@ -115,7 +115,7 @@ static void decode(const char *path, const char *pcm_out) {
     FILE *f=fopen(path,"rb");assert(f);uint8_t src[20000];size_t size=fread(src,1,sizeof src,f);fclose(f);
     int16_t *reference=calloc(33024*2,2),*actual=calloc(33024*2,2);assert(reference && actual);
     size_t total_frames=0,total_samples=0;unsigned rate=0,channels=0;
-    assert(!btps_v76_decode_sbc(src,size,reference,33024*2,&total_frames,&total_samples,&rate,&channels));
+    assert(!reference_decode_sbc(src,size,reference,33024*2,&total_frames,&total_samples,&rate,&channels));
     SBCDecoder d;sbc_decoder_reset(&d);AudioPacket p={0};p.generation=3;
     size_t offset=0,written=0,frames=0;
     int16_t pcm[SBC_DECODER_PCM_SAMPLES];unsigned nf,ns,hz;

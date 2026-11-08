@@ -2,7 +2,7 @@
 //  SPRootSpawn.h
 //  Speaka
 //
-//  Caz's RootSpawn (Caz/RootSpawn.h), renamed: starts the update helper bundled in the app as root.
+//  Starts the update helper bundled in the app as root (posix_spawn with the root persona).
 //
 
 #import <Foundation/Foundation.h>

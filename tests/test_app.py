@@ -19,7 +19,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 # ---- the app ----
-# The Speaka companion app (app/): a SwiftUI app in Caz's style, on Speaka's own background, with Caz's updater for
+# The Speaka companion app (app/): a SwiftUI app on Speaka's own background, with its own updater for
 # both the app and the tweak. It must speak exactly the tweak's protocol, agree with the Settings page, keep Speaka's own
 # icon and background, and package correctly for TrollStore.
 #
@@ -843,12 +843,11 @@ int main(void) {
         views = read(UPDATE_VIEWS)
         self.assertIn('updater.resprings ? "Bluetooth restarts, then your iPhone resprings"', views)
         self.assertIn('"Speaka will close when it\'s done"', views)
-        self.assertNotIn("Caz will", views)
         content = read(CONTENT)
         self.assertIn('UpdateLinkButton(title: updater.tweakMissing ? "Install Tweak" : "Update Available",', content)
         self.assertIn("if window == .update && updater.isBusy { return }", content)
         self.assertIn("updater.check()", content)
-        # Update Available keeps Caz's place; the connection line moves up a line while it shows, so they never overlap.
+        # Update Available keeps its place above the big button; the connection line moves up a line while it shows, so they never overlap.
         self.assertIn(".offset(y: -(30 + linkGap))\n", content)
         self.assertIn(".offset(y: -(30 + linkGap) - (updater.showsLink ? 40 : 0))", content)
 
@@ -1064,7 +1063,7 @@ int main(void) {
             code, out = run("install-update", "--deb", str(deb))
             self.assertEqual(code, 0, out)
             self.assertEqual(arguments(out.split("would start", 1)[1]), ["finish-update", "--respring"])
-            # Only the app: Caz's way. TrollStore's installer is waited for, and nothing resprings.
+            # Only the app: TrollStore's installer is waited for, and nothing resprings.
             code, out = run("install-update", "--tipa", str(tipa))
             self.assertEqual(code, 0, out)
             self.assertIn("trollstorehelper in its own session", out)
@@ -1146,7 +1145,7 @@ int main(void) {
         self.assertIn("signal(SIGPIPE, SIG_IGN);", source)
         self.assertIn('if (resprings) respring();', source)
 
-    # ------------------------------------------------------------------ Caz's look
+    # ------------------------------------------------------------------ the look
     def test_the_look_is_cazs_on_speakas_background(self):
         theme = read(THEME)
         for line in ("static let menu = Color(red: 63 / 255.0, green: 63 / 255.0, blue: 63 / 255.0).opacity(114 / 255.0)",
@@ -1186,7 +1185,7 @@ int main(void) {
         self.assertIn('var headerSubtitle: String { "iOS \\(UIDevice.current.systemVersion)" }', model)
         self.assertIn('var headerDetail: String { headerWarning ?? codecWarning ?? "by Parv" }', model)
         self.assertIn(".background(Theme.window, in: RoundedRectangle(cornerRadius: 16, style: .continuous))", read(WINDOWS))
-        # Speaka's own background, exactly as v9.1 drew it, and its teal: not Caz's yellow backdrop or gold.
+        # Speaka's own background, exactly as v9.1 drew it, and its teal: no yellow backdrop or gold.
         glows = re.findall(r"glow\(context, space, CGPoint\(x: w \* ([\d.]+), y: h \* ([\d.]+)\), m \* ([\d.]+), "
                            r"0x([0-9A-F]{6}), ([\d.]+)\)", theme)
         self.assertEqual(glows, GLOWS)
@@ -1200,7 +1199,7 @@ int main(void) {
         self.assertIn("Backdrop(dimmed: window != nil, size: geo.size)", content)
         code = "".join(read(source) for source in SWIFT)
         self.assertNotIn('Image("Backdrop")', code)
-        self.assertNotIn("green: 178 / 255.0, blue: 30", code)            # Caz's gold
+        self.assertNotIn("green: 178 / 255.0, blue: 30", code)            # no gold accent
 
     def test_the_icon_is_unchanged(self):
         for name, digest in ICON_DIGESTS.items():
@@ -1244,7 +1243,7 @@ int main(void) {
 
     def test_entitlements_are_only_what_the_app_needs(self):
         entitlements = plistlib.loads((APP / "Speaka.entitlements").read_bytes())
-        # persona-mgmt is what lets the app start its update helper as root (SPRootSpawn.m), as in Caz.
+        # persona-mgmt is what lets the app start its update helper as root (SPRootSpawn.m).
         # v9.9.12: com.apple.bluetooth.system - bluetoothd serves BluetoothManager's messages only from privilege level 1
         # (0x100261aa4), and this boolean is level 1 (0x10025db34); without it Speaka's list stayed "available NO".
         self.assertEqual(entitlements, {"platform-application": True, "com.apple.private.security.no-sandbox": True,
@@ -1268,7 +1267,7 @@ int main(void) {
             self.assertIn("Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).",
                           read(source), source.name)
         self.assertIn('Bundle.main.path(forResource: "LICENSE-Dopamine", ofType: "txt")', read(WINDOWS))
-        # The only picture is the title's, in Speaka's own asset catalog once it's drawn. Never Dopamine's or Caz's.
+        # The only picture is the title's, in Speaka's own asset catalog once it's drawn. Never Dopamine's.
         named = set()
         for source in SWIFT:
             for pair in re.findall(r'\bImage\("([^"]+)"\)|UIImage\(named: "([^"]+)"\)', read(source)):
@@ -1345,7 +1344,7 @@ int main(void) {
                      for path in (APP / "Speaka").glob(pattern)]
         self.assertEqual(leftovers, [], "left over from the UIKit app (v9.1): delete these in your clone")
         backdrop = APP / "Speaka/Assets.xcassets/Backdrop.imageset"
-        self.assertFalse(backdrop.exists(), "app/Speaka/Assets.xcassets/Backdrop.imageset is Caz's yellow backdrop, "
+        self.assertFalse(backdrop.exists(), "app/Speaka/Assets.xcassets/Backdrop.imageset is a yellow backdrop that isn't Speaka's, "
                                             "left over from v9.2: delete it in your clone")
         project = read(APP / "project.yml")                     # and even if they linger, they're never built
         for pattern in ('"UI/**"', "AudioHelper.m", '"SPAppDelegate.*"', '"SPSceneDelegate.*"'):
@@ -1616,7 +1615,7 @@ int main(void) {
 
 
 # ---- the menu and Uninstall ----
-# v9.8: the menu is Caz's four rows, and Uninstall, held for 4 s, removes the tweak, Speaka's leftovers, then the app.
+# v9.8: the menu is four rows, and Uninstall, held for 4 s, removes the tweak, Speaka's leftovers, then the app.
 
 SPEAKA_SOURCES = ROOT / "app/Speaka"
 
@@ -1637,13 +1636,13 @@ class Menu(unittest.TestCase):
             self.assertIn("chevron: true, enabled: !locked", rows[name])      # locked once Uninstall starts
         uninstall = rows["uninstall"]
         self.assertIn('title: "Uninstall", symbol: "trash"', uninstall)
-        self.assertNotIn("chevron", uninstall)                                  # an action, like Caz's Scan
+        self.assertNotIn("chevron", uninstall)                                  # an action, so no chevron
         self.assertIn("enabled: model.request == nil && !updater.isBusy", uninstall)
         self.assertIn("holdSeconds: 4, busy: locked) { model.uninstall() }", uninstall)
 
     def test_panel_keeps_cazs_measurements(self):
-        """Caz's spec: 73 pt rows (65 with a Home button, 52 on small screens), 20 pt sides, 5 pt top and bottom, 1 pt
-        separators 10 pt in, 14 pt continuous corners. Four rows make Caz's 302 pt panel."""
+        """The menu's measurements: 73 pt rows (65 with a Home button, 52 on small screens), 20 pt sides, 5 pt top and bottom, 1 pt
+        separators 10 pt in, 14 pt continuous corners. Four rows make a 302 pt panel."""
         components, theme = read(SPEAKA_SOURCES / "MainComponents.swift"), read(SPEAKA_SOURCES / "Theme.swift")
         menu = block_until(components, "struct ActionMenu: View {")
         for part in (".padding(.horizontal, innerPadding)", ".padding(.vertical, Metrics.innerTopPadding)",
@@ -1667,7 +1666,7 @@ class Menu(unittest.TestCase):
             self.assertIn(part, row)
             self.assertIn(part, plain)
         # Only a hold acts: no button and no press-dim. Interpretation 6 of the mockups: a gray fill sweeps from the
-        # left over the hold, and everything it has covered dims to Caz's disabled-row 45%, so the passed part looks
+        # left over the hold, and everything it has covered dims to the disabled-row 45%, so the passed part looks
         # disabled while the rest is still white. The title stays Uninstall all the way; letting go runs the edge back.
         self.assertNotIn("Button {", row)
         self.assertNotIn("MenuButtonStyle", row)
@@ -1720,7 +1719,7 @@ class SettingsWindow(unittest.TestCase):
         self.assertNotIn("Toggle(", settings)                       # v9.9.4: no switch; the button turns green
         for gone in ("Every 2 minutes", ".frame(height: 50)", "size: 17", "size: 13"):
             self.assertNotIn(gone, settings)
-        # A line only when something failed, in the warning colour at Caz's 12 pt for footers.
+        # A line only when something failed, in the warning colour at the 12 pt footer size.
         self.assertIn("if let failure = model.killResult {\n                    SettingsFootnote(text: failure, failed: true)", settings)
         self.assertIn('if model.notificationsRefused {\n                    SettingsFootnote(text: "Allow notifications', settings)
         footnote = block_until(windows, "struct SettingsFootnote: View {")
@@ -1799,7 +1798,8 @@ class Uninstall(unittest.TestCase):
             (box / "TrollStore.app/trollstorehelper").write_text("")
             (box / ".com.apple.mobile_container_manager.metadata.plist").write_text("com.opa334.TrollStore\n")
             logs, caches = phone / "tmp/FTABHarvest", phone / "var/mobile/Library/Caches/Speaka"
-            ours = ["Speaka.log", "SpeakaUpdate.log", "BTPSAudioHelper-v88.log", "BTPS-v88-123-abc.shm"]
+            ours = ["Speaka.log", "SpeakaUpdate.log", "SpeakaAudioHelper.log", "SpeakaAudioRing-123-abc.shm",
+                    "BTPSAudioHelper-v88.log", "BTPS-v88-123-abc.shm"]   # and an upgraded phone's old-named files
 
             def seed():
                 (info / "com.parv.speaka.list").write_text("")
@@ -1834,7 +1834,7 @@ class Uninstall(unittest.TestCase):
             self.assertEqual(code, 8, out)
             self.assertIn("Nothing else was removed.", out)
             self.assertNotIn("would kill", out)
-            self.assertEqual(len(list(logs.iterdir())), 5)
+            self.assertEqual(len(list(logs.iterdir())), len(ours) + 1)   # nothing removed
             self.assertTrue((caches / "Speaka-update.tipa").exists())
 
             code, out, args = run("uninstall-app")
@@ -2167,7 +2167,7 @@ int main(void) {
         cc = shutil.which("cc") or shutil.which("gcc")
         with tempfile.TemporaryDirectory() as td:
             src = pathlib.Path(td) / "policy.c"; exe = pathlib.Path(td) / "policy"; src.write_text(harness)
-            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("BTPS_SANITIZE") else []
+            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("SPEAKA_SANITIZE") else []
             build = subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), *extra, str(src),
                                     str(ROOT / "shared/UpdatePolicy.c"), "-o", str(exe)], capture_output=True, text=True, timeout=60)
             self.assertEqual(build.returncode, 0, build.stderr)
@@ -2476,7 +2476,7 @@ int main(void) {
         cc = shutil.which("cc") or shutil.which("gcc")
         with tempfile.TemporaryDirectory() as td:
             src = pathlib.Path(td) / "roster.c"; exe = pathlib.Path(td) / "roster"; src.write_text(harness)
-            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("BTPS_SANITIZE") else []
+            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("SPEAKA_SANITIZE") else []
             for std in ("-std=gnu11", "-std=c99"):
                 build = subprocess.run([cc, std, "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), *extra, str(src), "-o", str(exe)],
                                        capture_output=True, text=True, timeout=60)
@@ -2672,7 +2672,7 @@ int main(void) {
         cc = shutil.which("cc") or shutil.which("gcc")
         with tempfile.TemporaryDirectory() as td:
             src = pathlib.Path(td) / "connect.c"; exe = pathlib.Path(td) / "connect"; src.write_text(self.HARNESS)
-            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("BTPS_SANITIZE") else []
+            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("SPEAKA_SANITIZE") else []
             for std in ("-std=gnu11", "-std=c99"):
                 build = subprocess.run([cc, std, "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), *extra, str(src),
                                         "-o", str(exe)], capture_output=True, text=True, timeout=60)

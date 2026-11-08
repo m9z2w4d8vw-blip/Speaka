@@ -5,6 +5,10 @@ if [ "$1" = configure ]; then
         mkdir -m 0777 /tmp/FTABHarvest
         chown mobile:mobile /tmp/FTABHarvest
     fi
+    # The audio helper was /var/jb/usr/bin/BTPSAudioHelper before it was renamed SpeakaAudioHelper. dpkg removes the
+    # packaged copy on upgrade; this removes one no package owns (a manual install), so nothing runs it again.
+    legacy=/var/jb/usr/bin/BTPSAudioHelper
+    if [ -e "$legacy" ] && ! dpkg -S "$legacy" >/dev/null 2>&1; then rm -f "$legacy"; fi
     plist=/var/jb/Library/LaunchDaemons/com.parv.speaka.audio.plist
     chown root:wheel "$plist"
     chmod 644 "$plist"

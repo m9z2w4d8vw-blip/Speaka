@@ -32,9 +32,9 @@ SUBPROJECTS += audiohelper
 # audio helper's signature is unchanged.
 SUBPROJECTS += updatecheck
 # The Settings > Speaka page with the status and debug log (folder settings/).
-# If it ever fails to build, set this to 0 (or run: make package BTPS_WITH_PREFS=0) and the tweak still builds.
-BTPS_WITH_PREFS ?= 1
-ifeq ($(BTPS_WITH_PREFS),1)
+# The Settings > Speaka page. If it ever fails to build, run make package SPEAKA_WITH_SETTINGS=0: the tweak still builds.
+SPEAKA_WITH_SETTINGS ?= 1
+ifeq ($(SPEAKA_WITH_SETTINGS),1)
 SUBPROJECTS += settings
 endif
 

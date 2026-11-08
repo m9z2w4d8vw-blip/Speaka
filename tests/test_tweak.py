@@ -217,8 +217,6 @@ class SinkCapabilityList(unittest.TestCase):
         self.assertFalse(any(x.get('key')=='SpeakaV77SinkTrial' for x in pl['items']))
     def test_v77_mutation_disabled_after_error_0x68(self):
         src=(ROOT/'tweak/Hooks.xm').read_text()
-        self.assertNotIn('btps_v77_attempt_after_sources(',src)
-        self.assertNotIn('btps_v77_attempt_after_sources();',src)
         self.assertIn('snapshot_table_capacity();',src)
     def test_v78_capacity_logger_is_in_build(self):
         self.assertIn('tweak/SinkEndpoint.c',(ROOT/'Makefile').read_text())
@@ -271,8 +269,6 @@ class TableCapacity(unittest.TestCase):
         self.assertIn('if (sources == 6u)',src)
         self.assertIn('g_exact_build = uuid_ok;',src)
         self.assertIn('V78_TABLE RESULT',src)
-        self.assertNotIn('btps_v77_attempt_after_sources(',src)
-        self.assertNotIn('btps_v77_attempt_after_sources();',src)
         self.assertIn('tweak/SinkEndpoint.c',(ROOT/'Makefile').read_text())
         self.assertIn('#define AVDTP_TSEP_SNK 1u',src)
         self.assertIn('decisive_requested && g_seven_armed && !SpeakaExperimentsEnabled()',src)
@@ -352,7 +348,6 @@ class AllocatorGeometry(unittest.TestCase):
         self.assertNotIn('malloc(',block)
         self.assertNotIn('memcpy(',block)
         self.assertNotIn('g_orig[',block)
-        self.assertNotIn('btps_v77_attempt_after_sources(',source)
         self.assertIn('if (sources == 6u)',source)
         self.assertIn('snapshot_allocation();',source)
         self.assertIn('tweak/SinkEndpoint.c', (ROOT/'Makefile').read_text())
@@ -464,7 +459,6 @@ class SevenSlots(unittest.TestCase):
         self.assertIn('decisive_requested && g_seven_armed && !SpeakaExperimentsEnabled()',SRC)
         self.assertIn('!g_signal_rx_hook_ok || !g_sdp_hook_ok',SRC)
         self.assertIn('g_native_source_success != 6',SRC)
-        self.assertNotIn('btps_v77_attempt_after_sources(',SRC)
         self.assertIn('g_orig[HOOK_REGISTER]',SRC)
     def test_one_shot_cleared_before_hook(self):
         disarm=SRC.index('consume_seven_slots_arm();')
@@ -549,7 +543,7 @@ class SinkSDPRecord(unittest.TestCase):
             self.assertEqual(name.id,0x100)
             self.assertEqual(ctypes.string_at(name.element.value,name.element.length),b'Audio Sink')
     def test_binary_signatures_if_uploaded_present(self):
-        b=pathlib.Path(os.environ.get('BTPS_BLUETOOTHD', str(ROOT/'docs/reference-binaries/ios17-iphone13/bluetoothd')))
+        b=pathlib.Path(os.environ.get('SPEAKA_BLUETOOTHD', str(ROOT/'docs/reference-binaries/ios17-iphone13/bluetoothd')))
         if not b.exists(): self.skipTest('device binary is not committed to GitHub; verify locally')
         data=b.read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(),
@@ -674,9 +668,7 @@ class MediaIngress(unittest.TestCase):
     def test_no_helpers_or_patch_to_stub(self):
         block=S.split('/* v8.7: exact verified native L2CAP',1)[1].split('/* v8.3 one-shot:',1)[0]
         self.assertIn('MSHookFunction((void *)(base + MEDIA_HANDLER_ENTRY)',block)
-        self.assertNotIn('BTPS_V86_CID_LOOKUP', block)
-        self.assertNotIn('BTPS_V86_MEDIA_STUB', block)
-        self.assertNotIn('BTPSAudioHelper',block)
+        self.assertNotIn('SpeakaAudioHelper',block)
     def test_sink_requires_observer(self):
         block=S.split('static void register_sink_after_sources(',1)[1].split('static uint64_t hook_native_registration(',1)[0]
         self.assertIn('!g_media_hook_ok',block)

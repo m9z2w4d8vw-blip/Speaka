@@ -158,7 +158,7 @@ class LibsbcBootstrap(unittest.TestCase):
         text = WORKFLOW.read_text()
         for name in ('sbc.c', 'bits.c', 'sbc.h', 'bits.h', 'LICENSE', 'UPSTREAM_COMMIT'):
             self.assertIn(name, text)
-        self.assertIn('BTPSAudioHelper missing from the .deb', text)
+        self.assertIn('SpeakaAudioHelper missing from the .deb', text)
 
     def test_upstream_commit_pinned(self):
         fetch = (ROOT / 'tools' / 'fetch_google_sbc.sh').read_text()

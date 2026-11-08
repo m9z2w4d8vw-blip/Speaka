@@ -1859,7 +1859,7 @@ static int sink_receive_ready(void)
     SpeakaLogInit();
     SpeakaSessionStart();   /* v8.9: Settings Start/Stop works even if every hook below is refused */
     SpeakaSetStatus("diag.v89.build", "%s", SESSION_BUILD_TAG);
-    SpeakaLogLine("V89 build %s: Start/Stop from Settings; output selection in BTPSAudioHelper", SESSION_BUILD_TAG);
+    SpeakaLogLine("V89 build %s: Start/Stop from Settings; output selection in SpeakaAudioHelper", SESSION_BUILD_TAG);
     SpeakaLogNow("Speaka %s loaded into %s pid %d (built %s %s)", TWEAK_BUILD_TAG, prog, (int)getpid(), __DATE__, __TIME__);
     SpeakaSetStatus("build", "%s, %s %s", TWEAK_BUILD_TAG, __DATE__, __TIME__);
     SpeakaSetStatus("pid", "%d", (int)getpid());

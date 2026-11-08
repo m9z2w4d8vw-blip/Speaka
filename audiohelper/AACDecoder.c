@@ -2,7 +2,7 @@
  * public API. Everything Apple-specific here is documented AudioToolbox; nothing is reverse-engineered.
  *
  * Validation: the LATM extraction is checked on the host against ffmpeg; the AudioConverter stage runs for real on
- * macOS in CI (tests/test_aac.py, RealAudioToolbox) and on the phone through `BTPSAudioHelper --aac-selftest`. AAC
+ * macOS in CI (tests/test_aac.py, RealAudioToolbox) and on the phone through `SpeakaAudioHelper --aac-selftest`. AAC
  * stays behind the SpeakaAAC switch until a real Bluetooth AAC stream has been decoded on the device. */
 #include "AACDecoder.h"
 #include <AudioToolbox/AudioToolbox.h>

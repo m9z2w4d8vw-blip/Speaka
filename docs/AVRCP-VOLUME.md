@@ -154,7 +154,7 @@ large changes may click and need listening tests. Sidecars follow the existing t
 ```sh
 bash tools/fetch_google_sbc.sh
 python3 -m unittest discover -s tests -v
-BTPS_SANITIZE=1 python3 -m unittest discover -s tests -p test_volume.py -v
+SPEAKA_SANITIZE=1 python3 -m unittest discover -s tests -p test_volume.py -v
 ```
 
 Host checks exercise real protocol C and shared mappings: all 128 volume values, all 65,536 int16 samples at
@@ -171,7 +171,7 @@ UndefinedBehaviorSanitizer. Regenerating the evidence produced identical text an
 Use a build from this branch. Over SSH **as mobile**, first enable observation:
 
 ```sh
-/var/jb/usr/bin/BTPSAudioHelper --volume-mode observe
+/var/jb/usr/bin/SpeakaAudioHelper --volume-mode observe
 ```
 
 Tap **Stop**, then **Start** in Speaka; connect Windows and move its volume slider. Collect `AVRCP_VOLUME`
@@ -181,14 +181,14 @@ PDU/ctype/label/count, along with the A2DP configuration and helper heartbeat.
 For the experimental native adapter, repeat with:
 
 ```sh
-/var/jb/usr/bin/BTPSAudioHelper --volume-mode on   # 9.9: the default; only needed after --volume-mode off
+/var/jb/usr/bin/SpeakaAudioHelper --volume-mode on   # 9.9: the default; only needed after --volume-mode off
 ```
 
 After Stop/Start and reconnection, verify native installation gates pass, then test Windows slider values,
 mute and maximum. With a registered event `0x0d`, issue a local Speaka change:
 
 ```sh
-/var/jb/usr/bin/BTPSAudioHelper --volume 64
+/var/jb/usr/bin/SpeakaAudioHelper --volume 64
 ```
 
 The command reports **submitted**, not applied. Confirm `local ... accepted=1`, native send status zero,
@@ -327,7 +327,7 @@ The policy is pure C (`shared/VolumeControl.c`, `SPVolumeDomain`) and host-teste
   turn into CHANGED responses fighting it. Later changes are the user's: the helper submits them as a local level, and
   the tweak sends CHANGED on Windows' retained label (one-shot; Windows registers again).
 * Each set is read back 400 ms later; three ineffective sets in a row fall back to Speaka's gain (`V107_DOMAIN
-  domain=speaka`), with no reverse sync in that domain. `BTPSAudioHelper --volume-domain speaka` chooses it directly.
+  domain=speaka`), with no reverse sync in that domain. `SpeakaAudioHelper --volume-domain speaka` chooses it directly.
 * `V107_LEVEL submitted_peak pre= post= pcm_gain= ios=` reports, every 2 s while playing, the peak actually submitted to
   the AudioQueue before and after Speaka's gain - the audible-attenuation check `V106_VOLUME` alone couldn't give.
 

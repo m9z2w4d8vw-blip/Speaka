@@ -2,7 +2,7 @@
 //  UpdateViews.swift
 //  Speaka
 //
-//  The update flow, the same as Caz's (Caz/UpdateViews.swift), which is drawn like Dopamine's: both screens sit in
+//  The update flow, drawn like Dopamine's: both screens sit in
 //  the centred window frame with no card behind them, only the dimmed background (DOUpdateViewController,
 //  DODownloadViewController, DOUpdateCircleView, DOModalTransitionPush).
 //  Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).
@@ -184,7 +184,7 @@ struct DownloadView: View {
                                                    : "Speaka will close when it's done"
         case .installed: return "Close Speaka and open it again"
         case .failed(let message): return message
-        // Caz's line, or which file is downloading when there are two: "Downloading the tweak, 1 of 2".
+        // The progress line, or which file is downloading when there are two: "Downloading the tweak, 1 of 2".
         case .changelog, .downloading:
             return updater.activity.isEmpty ? "Please wait while files finish downloading" : updater.activity
         }

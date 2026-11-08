@@ -40,7 +40,7 @@ Read it live:
 
 ```sh
 # on the phone, tail the helper log (path from shared/SpeakaShared.h):
-tail -f /tmp/FTABHarvest/BTPSAudioHelper-v88.log | grep -E "V93_CODEC|V91_SESSION|V881_PCM"
+tail -f /tmp/FTABHarvest/SpeakaAudioHelper.log | grep -E "V93_CODEC|V91_SESSION|V881_PCM"
 ```
 
 Or in the app: **Settings > Speaka > View debug log**, then **Save Log to iCloud Drive**. The `V93_CODEC` line is in

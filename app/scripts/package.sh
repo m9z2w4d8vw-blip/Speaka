@@ -1,6 +1,6 @@
 #!/bin/bash
 # Puts the update helper inside Speaka.app, signs both with their entitlements, and zips Speaka.tipa, plus the same
-# file as Speaka.ipa. As in Caz (scripts/package.sh).
+# file as Speaka.ipa.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

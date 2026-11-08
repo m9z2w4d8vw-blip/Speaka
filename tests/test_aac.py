@@ -7,7 +7,7 @@ Run on every host:
   - the decoder's contract with AudioConverter, through tests/fakes (one bare access unit per packet, a packet
     description, the software class description, the cookie), fragment reassembly and in-band config changes;
   - the codec dispatch, which never decodes AAC as SBC;
-  - the on-device self-test (BTPSAudioHelper --aac-selftest): stages, markers, JSON.
+  - the on-device self-test (SpeakaAudioHelper --aac-selftest): stages, markers, JSON.
 
 Run only where the real AudioToolbox exists, in CI's device-test job (SPEAKA_REAL_AAC=1 on macOS):
   - RealAudioToolbox: Apple's actual AAC decoder decodes the fixture, and the PCM matches ffmpeg's decode of it.
@@ -607,7 +607,7 @@ class DecoderContract(unittest.TestCase):
 
 
 class SelfTestRuns(unittest.TestCase):
-    """BTPSAudioHelper --aac-selftest (AACSelfTest.c), built with the helper's dispatch (tests/aac_selftest_main.c).
+    """SpeakaAudioHelper --aac-selftest (AACSelfTest.c), built with the helper's dispatch (tests/aac_selftest_main.c).
     With tests/fakes everywhere: stages, markers, JSON, and that its checks reject bad audio. On macOS also linked
     against the real AudioToolbox, to prove it builds and creates a converter there."""
     SOURCES = ["tests/aac_selftest_main.c", "audiohelper/AACSelfTest.c"] + DECODER_SOURCES

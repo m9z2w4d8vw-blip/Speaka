@@ -3,7 +3,7 @@
 //  Speaka
 //
 //  Checks GitHub for a newer Speaka and installs it: the tweak's .deb with dpkg (Bluetooth restarts, and the iPhone
-//  resprings at the end) and the app's .tipa with TrollStore. This is Caz's UpdateModel (Caz/UpdateModel.swift),
+//  resprings at the end) and the app's .tipa with TrollStore.
 //  which follows Dopamine's updater (DOUIManager, DOUpdateViewController, DODownloadViewController), with the .deb added.
 //  Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).
 //
@@ -52,7 +52,7 @@ final class SpeakaUpdater: ObservableObject {
     @Published private(set) var manual: ManualCheck = .idle
     /// When the app or SpeakaUpdateCheck last got an answer from GitHub.
     @Published private(set) var lastChecked: Date? = SPTweakClient.lastUpdateCheck()
-    /// What the circle shows. It eases toward the real progress like Caz's (25% of the gap per frame).
+    /// What the circle shows. It eases toward the real progress (25% of the gap per frame).
     @Published private(set) var progress: Double = 0
 
     /// What the update window says while it works: "Downloading the tweak, 1 of 2".
@@ -111,7 +111,7 @@ final class SpeakaUpdater: ObservableObject {
     }
 
     var isAvailable: Bool { tipa != nil || deb != nil }
-    /// Something sits where Caz has Update Available: Install Tweak, or Update Available itself.
+    /// What sits above the big button: Install Tweak, or Update Available.
     var showsLink: Bool { tweakMissing || isAvailable }
     var isBusy: Bool { stage == .downloading || stage == .installing }
     /// A new tweak restarts Bluetooth and ends with a respring.
@@ -149,7 +149,7 @@ final class SpeakaUpdater: ObservableObject {
     private var waiting: [(CheckResult) -> Void] = []
     private var lastFetch: Date? = nil
 
-    /// Fetches the releases once per launch, or `again`. Drafts and pre-releases are ignored, as in Caz and Dopamine.
+    /// Fetches the releases once per launch, or `again`. Drafts and pre-releases are ignored, as in Dopamine.
     /// v9.9.3: through `fetchReleases` (conditional, with reasons), and every caller of a check in flight gets its answer.
     func check(again: Bool = false, completion: ((CheckResult) -> Void)? = nil) {
         if let completion { waiting.append(completion) }
@@ -391,7 +391,7 @@ final class SpeakaUpdater: ObservableObject {
     // MARK: - Downloading and installing
 
     /// Downloads what's newer (the .deb, then the .tipa) and hands both to the update helper. If only the app was due
-    /// and installing it fails, TrollStore is asked to install it from its link instead, as in Caz.
+    /// and installing it fails, TrollStore is asked to install it from its link instead.
     func startDownload() {
         guard isAvailable, !isBusy else { return }
         var parts: [Part] = []
@@ -554,7 +554,7 @@ final class SpeakaUpdater: ObservableObject {
         stage = .failed(message)
     }
 
-    /// TrollStore installs from a link with apple-magnifier://install?url=, the same hand-off Caz and Dopamine use.
+    /// TrollStore installs from a link with apple-magnifier://install?url=, the same hand-off Dopamine uses.
     /// Without TrollStore, the releases page opens instead.
     func openInTrollStore() {
         guard let url = tipa?.tipaURL,

@@ -70,7 +70,7 @@ static NSDictionary *SPDaemonStatus(void)
     return [status isKindOfClass:[NSDictionary class]] ? status : @{};
 }
 
-#pragma mark - output names (as BTPSTypeLabel / BTPSOutputName / BTPSOutputsDescription)
+#pragma mark - output names
 
 static NSString *SPTypeLabel(NSString *type)
 {
@@ -215,7 +215,7 @@ static NSString *SPOutputsDescription(id outputs)
     s.diagnostics = status ?: @{};   // the app's Start and Stop steps read the tweak's own statuses
     s.build = SPString(status[@"diag.v89.build"]);
 
-    // The same rules, in the same order, as BTPSSessionSummary() in the Settings page.
+    // The session's state, from the tweak's status and the helper's, in this order.
     NSString *trial = SPString(status[@"diag.v82.trial"]);
     NSString *sep = SPString(status[@"diag.v82.sep"]);
     NSString *table = SPString(status[@"diag.v83.audio_table"]);
@@ -243,7 +243,7 @@ static NSString *SPOutputsDescription(id outputs)
         s.session = SPSessionOff;
     }
 
-    // What BTPSAudioHelper last reported, ignored once it is more than 20 s old (as in Settings).
+    // What SpeakaAudioHelper last reported, ignored once it is more than 20 s old (as in Settings).
     id helperValue = SPCopyPref(@SPEAKA_KEY_HELPER_STATUS);
     NSDictionary *helper = [helperValue isKindOfClass:[NSDictionary class]] ? helperValue : nil;
     id when = helper[@"time"];

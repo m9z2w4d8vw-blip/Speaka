@@ -42,7 +42,7 @@
 #define SPEAKA_LOG_DIR      "/tmp/FTABHarvest"
 #define SPEAKA_LOG_FILE     "/tmp/FTABHarvest/Speaka.log"
 #define SPEAKA_LOG_FILE_ALT     "/var/mobile/Library/Logs/Speaka.log"
-#define SPEAKA_HELPER_LOG_FILE  "/tmp/FTABHarvest/BTPSAudioHelper-v88.log"  /* launchd StandardOutPath of the helper */
+#define SPEAKA_HELPER_LOG_FILE  "/tmp/FTABHarvest/SpeakaAudioHelper.log"  /* launchd StandardOutPath of the helper */
 
 #define SPEAKA_NOTIFY_STATE     "com.parv.speaka.state"
 
@@ -50,7 +50,7 @@
  * Start/Stop: Settings writes SPEAKA_KEY_SESSION_REQUEST and posts SPEAKA_NOTIFY_SESSION. The tweak inside bluetoothd
  * consumes the request, sets or clears the two existing one-shot switches and restarts its own process. The
  * relaunched daemon reports the result under SPEAKA_STATUS_SESSION, matched to the request by its nonce.
- * Output: Settings stores the mode and a "never play to" list; BTPSAudioHelper reads them, re-reads them when
+ * Output: Settings stores the mode and a "never play to" list; SpeakaAudioHelper reads them, re-reads them when
  * SPEAKA_NOTIFY_OUTPUT is posted, and publishes what is playing where under SPEAKA_KEY_HELPER_STATUS. */
 #define SPEAKA_KEY_SINK_ONCE "SpeakaV82DecisiveOnce"  /* same literal tweak/Hooks.xm consumes at launch */
 #define SPEAKA_NOTIFY_SESSION    "com.parv.speaka.v89.session"
@@ -60,7 +60,7 @@
 #define SPEAKA_NOTIFY_OUTPUT     "com.parv.speaka.v89.output"
 #define SPEAKA_KEY_OUTPUT_MODE   "SpeakaV89OutputMode"     /* "speaker" (default) | "headphones" | "any" */
 #define SPEAKA_KEY_NEVER_OUTPUTS         "SpeakaV89NeverOutputs"   /* array of {uid,name}: never play there */
-#define SPEAKA_KEY_HELPER_STATUS        "SpeakaV89HelperStatus"   /* written by BTPSAudioHelper for Settings */
+#define SPEAKA_KEY_HELPER_STATUS        "SpeakaV89HelperStatus"   /* written by SpeakaAudioHelper for Settings */
 /* v9.9.6: the app's verified name cache (its own defaults): iOS's name/address pairs, bounded (PeerName.h). */
 #define SPEAKA_APP_KEY_PEER_NAMES "SpeakaPeerNames"
 
@@ -87,7 +87,7 @@ static inline void speaka_state_unpack(uint64_t s, unsigned *loaded, unsigned *u
 /* Opt-in AVRCP experiment; absent/off preserves current playback behavior. */
 #define SPEAKA_KEY_VOLUME_MODE "SpeakaAVRCPVolumeMode"   /* legacy (v9.8.9x experiment): removed at install */
 /* v9.9.11: AVRCP volume sync - a standard feature. Absent or "on": on. "off" / "observe": recovery and diagnostics
- * (BTPSAudioHelper --volume-mode). A new key, so the experiment's old values (off by default) don't carry over. */
+ * (SpeakaAudioHelper --volume-mode). A new key, so the experiment's old values (off by default) don't carry over. */
 #define SPEAKA_KEY_VOLUME_SYNC "SpeakaVolumeSync"
 #define SPEAKA_KEY_VOLUME_REQUEST "SpeakaAVRCPLocalVolumeRequest"
 /* The last verified Speaka PC (PeerIdentity.c): bound at startup so its AVRCP requests are answered even if they
@@ -97,5 +97,5 @@ static inline void speaka_state_unpack(uint64_t s, unsigned *loaded, unsigned *u
  * Written by the tweak. */
 #define SPEAKA_KEY_VOLUME_LEVEL "SpeakaAVRCPVolumeLevel"
 /* v9.9.10: which volume Windows controls - "ios" (default: iOS output volume, one volume) or "speaka" (Speaka's own
- * PCM gain, no reverse sync). Written by BTPSAudioHelper --volume-domain. */
+ * PCM gain, no reverse sync). Written by SpeakaAudioHelper --volume-domain. */
 #define SPEAKA_KEY_VOLUME_DOMAIN "SpeakaAVRCPVolumeDomain"

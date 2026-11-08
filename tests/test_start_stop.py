@@ -39,7 +39,7 @@ class StartStop(unittest.TestCase):
         flags = ["-std=c++17" if cpp else "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror",
                  "-I" + str(ROOT), "-I" + str(ROOT / "audiohelper"), *extra]
         env = dict(os.environ)
-        if os.environ.get("BTPS_SANITIZE"):
+        if os.environ.get("SPEAKA_SANITIZE"):
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
             env.update(ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1")
         with tempfile.TemporaryDirectory() as td:
@@ -147,7 +147,6 @@ int main(void) {
         self.assertLess(ctor.index("SpeakaSessionStart();"), ctor.index("find_main_image(&index, &mh)"))
         final = ctor.rindex("SpeakaSessionReport(g_sink_armed, sink_receive_ready());")
         self.assertLess(ctor.index("install_native_registration_hook((uintptr_t)mh, uuid_ok);"), final)
-        self.assertNotIn("BTPSDaemonProbeStart", tweak)                     # v9.8: the v7.4/v7.5 probes are gone
         early = ctor.split("if (!find_main_image(&index, &mh)) {", 1)[1].split("return;", 1)[0]
         self.assertIn("SpeakaSessionReport(0, 0);", early)
         self.assertIn("tweak/Session.c", read("Makefile").split("Speaka_FILES", 1)[1].split("\n", 1)[0])

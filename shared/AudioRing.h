@@ -11,7 +11,7 @@ extern "C" {
 #define AUDIO_RING_PAYLOAD 2048u
 #define AUDIO_RING_EVENTS 256u
 #define AUDIO_HELPER_PORT 37594
-#define AUDIO_RING_PATH_FORMAT "/tmp/FTABHarvest/BTPS-v88-%u-%016llx.shm"
+#define AUDIO_RING_PATH_FORMAT "/tmp/FTABHarvest/SpeakaAudioRing-%u-%016llx.shm"
 
 typedef struct { uint64_t write, read, dropped; } AudioRingQueue;
 typedef struct {

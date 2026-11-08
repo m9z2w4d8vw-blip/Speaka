@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 /* ---- where to play: the three modes and the never-play list ---- */
-/* OutputPolicy.h - v8.9 audio output policy for BTPSAudioHelper.
+/* OutputPolicy.h - v8.9 audio output policy for SpeakaAudioHelper.
  *
  * Pure C with no Apple frameworks, so the host tests can run it. AudioHelper.m classifies every
  * AVAudioSession output port into a output_kind_t using the real AVAudioSessionPort constants and then asks
@@ -122,15 +122,14 @@ static inline const char *output_route_reason(int code)
  *     stream starts - so the PC's START moves nothing;
  *   - it keeps the session and queue through pauses, track changes, START/SUSPEND, close and reopen (the queue plays
  *     silence when there is no PCM), and never lets go for lack of media;
- *   - if anything takes the output (another app's session, an error) it takes it back: OWN_RETAKE_MS after another
- *     app, with a backoff after a failure, at once when an interruption ends or a device changes. A phone call or an
- *     alarm makes the attempts fail, so they simply back off until its interruption ends;
+ *   - if anything takes the output it takes it back: another app's session is an interruption (own_interrupted,
+ *     below), a failed start backs off, and it starts at once when an interruption ends or a device changes. A phone
+ *     call or an alarm makes the attempts fail, so they simply back off until its interruption ends;
  *   - a route the selected mode can't use (headphones mode with nothing plugged in) waits for a device change rather
  *     than retrying, which would toggle the session;
  *   - it lets go only when the session ends (Stop, a bluetoothd restart: the helper's connection closes), or
  *     OWN_CLOSED_RELEASE_MS after the PC closed its stream and opened none, when there is no stream left to start. */
 
-#define OWN_RETAKE_MS 250u              /* another session took the output: take it back this soon */
 #define OWN_RETRY_MS 1000u              /* after a failed start, times the consecutive failures ... */
 #define OWN_RETRY_MAX_MS 4000u          /* ... up to this */
 #define OWN_CLOSED_RELEASE_MS 30000u    /* the PC closed its stream: keep the output this long for a reopen */
@@ -180,14 +179,6 @@ static inline void own_start_failed(own_state_t *h, uint64_t now, int route_refu
     if (h->failures < 16u) h->failures++;
     uint64_t wait = (uint64_t)OWN_RETRY_MS * h->failures;
     h->next_ms = now + (wait > OWN_RETRY_MAX_MS ? OWN_RETRY_MAX_MS : wait);
-}
-
-/* Another session took the output (an interruption began): take it back shortly. */
-static inline void own_taken(own_state_t *h, uint64_t now)
-{
-    h->running = 0;
-    h->retaking = 1;
-    h->next_ms = now + OWN_RETAKE_MS;
 }
 
 /* ---- interruptions (v9.9.2) ----

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Speaka device test. Run as mobile over SSH:   sh /tmp/speaka-device-test.sh
 #
-# 1. Launch controls: the installed BTPSAudioHelper (a binary known to work on this phone), the same binary copied
+# 1. Launch controls: the installed SpeakaAudioHelper (a binary known to work on this phone), the same binary copied
 #    to /tmp, and the two smoke binaries (arm64-only, and arm64 + arm64e) from /tmp. Together they separate
 #    "SSH can't launch anything", "/tmp is the problem", "the arm64-only recipe is the problem".
 # 2. The AAC self-test inside the installed helper, stage by stage: entry, create, decode1, full.
@@ -12,7 +12,7 @@ emulate sh 2>/dev/null || true
 
 # The defaults are the phone's paths; the variables exist so the script can be tested off the phone.
 OUT=${SPEAKA_OUT:-/tmp/speaka-device-test}
-HELPER=${SPEAKA_HELPER:-/var/jb/usr/bin/BTPSAudioHelper}
+HELPER=${SPEAKA_HELPER:-/var/jb/usr/bin/SpeakaAudioHelper}
 CRASH=${SPEAKA_CRASH_DIR:-/var/mobile/Library/Logs/CrashReporter}
 TIMEOUT=${SPEAKA_TIMEOUT:-90}
 rm -rf "$OUT"

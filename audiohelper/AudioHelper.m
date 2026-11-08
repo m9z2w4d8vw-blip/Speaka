@@ -1,6 +1,6 @@
 #include "../shared/VolumeControl.h"
 #include "../shared/VolumeMailbox.h"
-/* AudioHelper.m - BTPSAudioHelper: plays the audio bluetoothd hands it. launchd starts it on demand, as mobile,
+/* AudioHelper.m - SpeakaAudioHelper: plays the audio bluetoothd hands it. launchd starts it on demand, as mobile,
  * when the tweak connects to 127.0.0.1:37594 (layout/Library/LaunchDaemons/com.parv.speaka.audio.plist).
  *
  * Live SBC is decoded and played only in this process, never inside bluetoothd. The output follows the app's Audio
@@ -1204,11 +1204,11 @@ int main(int argc, const char **argv) {
         /* A diagnostic, run by hand over SSH: decodes an embedded AAC fixture through the real decoder (AACSelfTest.c).
          * It touches nothing else - no ring, no preferences, no audio output. */
         if (argc >= 2 && strcmp(argv[1], "--aac-selftest") == 0) return aac_selftest_main(argc, argv);
-        hlog(stderr, "usage: BTPSAudioHelper --stream-service (launchd starts it: com.parv.speaka.audio)\n"
-                     "       BTPSAudioHelper --volume-mode on|off|observe (volume sync; on by default; restart Speaka)\n"
-                     "       BTPSAudioHelper --volume 0..127 (a local level for Windows; tests the CHANGED path)\n"
-                     "       BTPSAudioHelper --volume-domain ios|speaka (ios: Windows sets iOS output volume)\n"
-                     "       BTPSAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=NAME|all]\n");   /* timestamped, as every line is */
+        hlog(stderr, "usage: SpeakaAudioHelper --stream-service (launchd starts it: com.parv.speaka.audio)\n"
+                     "       SpeakaAudioHelper --volume-mode on|off|observe (volume sync; on by default; restart Speaka)\n"
+                     "       SpeakaAudioHelper --volume 0..127 (a local level for Windows; tests the CHANGED path)\n"
+                     "       SpeakaAudioHelper --volume-domain ios|speaka (ios: Windows sets iOS output volume)\n"
+                     "       SpeakaAudioHelper --aac-selftest [--stage=entry|create|decode1|full] [--strategy=NAME|all]\n");   /* timestamped, as every line is */
         return 2;
     }
 }

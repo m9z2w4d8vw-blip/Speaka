@@ -17,7 +17,7 @@
 //
 // install-update installs the tweak's .deb with dpkg first and reports how that went; the package's install script
 // restarts Bluetooth. Then comes what closes Speaka, in its own session so it finishes after Speaka is gone: TrollStore's
-// installer for the .tipa, then a respring. With only a .tipa it works like Caz's helper: TrollStore's installer runs in
+// installer for the .tipa, then a respring. With only a .tipa, TrollStore's installer runs in
 // its own session, and its result comes back, so Speaka can fall back to TrollStore's link if it fails.
 //
 // v9.5: Speaka.app carries the tweak (Speaka.app/Speaka.deb), so one .tipa installs both. --tweak-from-app installs the
@@ -70,6 +70,9 @@ static char *const k_dpkg_env[] = {
 #define SPEAKA_CARRIED_DEB "Speaka.app/Speaka.deb"                 // inside the app's bundle container
 #define SPEAKA_TWEAK_TEMP "/var/tmp/speaka-tweak.XXXXXX"          // root's own copy, for dpkg
 #define SPEAKA_PACKAGE "com.parv.speaka"
+// Compatibility: the prefix of the helper's log and ring files before they were renamed (SpeakaAudioHelper.log,
+// SpeakaAudioRing-*.shm). Only the uninstall cleanup uses it.
+#define LEGACY_FILE_PREFIX "BTPS"
 #define SPEAKA_DPKG_LIST "/var/jb/var/lib/dpkg/info/com.parv.speaka.list"   // there while dpkg has the tweak
 #include "../../shared/SpeakaShared.h"                    // SPEAKA_LOG_DIR: the tweak's logs and shared memory
 #define SPEAKA_CACHES "/var/mobile/Library/Caches/Speaka"           // downloaded updates (SpeakaUpdater)
@@ -139,7 +142,7 @@ static int update_file_ok(const char *path, const char *ext, const char *alt_ext
     return ends_with_ci(path, ext) || (alt_ext && ends_with_ci(path, alt_ext));
 }
 
-// ---------------------------------------------------------------- finding TrollStore (as in Caz's helper)
+// ---------------------------------------------------------------- finding TrollStore
 
 // The real thing needs CoreFoundation, which test builds never use, on any platform (CI runs them on macOS).
 #if defined(__APPLE__) && !defined(SPEAKA_TEST)
@@ -244,7 +247,7 @@ static int run_and_wait(const char *path, char *const argv[], char *const envp[]
 #endif
 }
 
-// TrollStore's installer, in its own session so it finishes even when installing closes Speaka (Caz's codes 5 to 7).
+// TrollStore's installer, in its own session so it finishes even when installing closes Speaka (exit codes 5 to 7).
 static int install_tipa(const char *path) {
     if (!update_file_ok(path, ".tipa", ".ipa")) {
         emit("ERR\tThe downloaded app wasn't found");
@@ -348,7 +351,7 @@ static int install_carried_tweak(void) {
 }
 
 #if defined(__APPLE__) && !defined(SPEAKA_TEST)
-// Kills every process whose executable is called `name` (Caz's kill_procs, by basename).
+// Kills every process whose executable is called `name`, matched by basename.
 static int kill_named(const char *name) {
     int mib[3] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL };
     size_t len = 0;
@@ -484,7 +487,7 @@ static int do_install_update(const char *deb, const char *tipa, int tweak_from_a
         emit("LOG\tInstalling the app, then its tweak, then respringing");
         return 0;
     }
-    if (!deb && !tweak_from_app) return install_tipa(tipa);   // Caz's way: Speaka waits, and falls back to its link
+    if (!deb && !tweak_from_app) return install_tipa(tipa);   // Speaka waits, and falls back to its link
     int code = deb ? install_deb(deb) : install_carried_tweak();
     if (code != 0) return code;                                // the app is left alone and nothing resprings
     if (start_finish(tipa, 0) != 0) return 10;
@@ -543,7 +546,9 @@ static int do_remove_tweak(void) {
     kill_named("Preferences");
 #endif
     char folder[PATH_MAX];
-    static const char *const logs[] = { "Speaka", "BTPS" };          // Speaka.log, BTPS-v88-*.shm, BTPSAudioHelper-*.log
+    // Speaka*: this version's logs and audio-ring files. LEGACY_FILE_PREFIX: the same files from versions before the
+    // helper and ring were renamed, so an upgraded phone is cleaned as fully as a new one.
+    static const char *const logs[] = { "Speaka", LEGACY_FILE_PREFIX };
     rp(folder, SPEAKA_LOG_DIR);
     remove_matching(folder, logs, sizeof logs / sizeof logs[0]);
     static const char *const all[] = { "" };

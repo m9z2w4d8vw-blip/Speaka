@@ -23,14 +23,12 @@ REMOVED_ROWS = ("Playing on", "Never play to current device", "Never play to", "
 
 
 REMOVED_CODE = ("playingValue:", "neverValue:", "neverList", "neverPlayCurrent:", "clearNeverPlay:",
-                "currentExternalOutputs", "BTPSOutputName", "BTPSOutputsDescription", "BTPSTypeLabel", "BTPSIsBuiltIn",
-                "startSink:", "stopSink:", "sendSession", "pollSession", "confirmSession", "sessionValue:",
-                "BTPSSessionSummary", "chooseOutput:", "AVRoutePickerView", "reloadSpecifierID", "refreshTimer",
-                "BTPSWritePref", "notify_post")
+                "currentExternalOutputs", "startSink:", "stopSink:", "sendSession", "pollSession", "confirmSession", "sessionValue:",
+                "chooseOutput:", "AVRoutePickerView", "reloadSpecifierID", "refreshTimer",
+                "notify_post")
 
 
-REMOVED_TESTS = ("Verify Test Checklist", "Test iOS Audio Output", "Send PCM", "Send SBC", "BTPSAudioProbe",
-                 "BTPSIPCSender", "showChecklist", "promptIPCTest", "promptDaemonIPCTest", "promptSBCIPCTest")
+REMOVED_TESTS = ("Verify Test Checklist", "Test iOS Audio Output", "Send PCM", "Send SBC", "showChecklist", "promptIPCTest", "promptDaemonIPCTest", "promptSBCIPCTest")
 
 
 class SettingsPage(unittest.TestCase):
@@ -72,8 +70,7 @@ class SettingsPage(unittest.TestCase):
         reader = (ROOT / "settings/DebugLog.m").read_text()
         for name in REMOVED_TESTS:
             self.assertNotIn(name, viewer, name)
-        for name in ("BTPSAudioTestLastResult", "BTPSIPCPlaybackLastResult", "BTPSV75SBCRequestLastResult",
-                     "BTPSDaemonIPCRequestLastResult", "diag.v74_ipc", "diag.v75_sbc"):
+        for name in ("diag.v74_ipc", "diag.v75_sbc"):
             self.assertNotIn(name, reader, name)
         self.assertIn("Save Log to iCloud Drive", viewer)
         make = (ROOT / "settings/Makefile").read_text()

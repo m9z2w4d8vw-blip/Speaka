@@ -1,6 +1,6 @@
 # AAC integration audit
 
-> **9.9:** historical. AAC-LC is standard (SEID 7, preferred) with an SBC Sink as the fallback; see [BLUETOOTHD.md](BLUETOOTHD.md#the-dual-sink-layout-99).
+> **Historical record (9.9).** AAC-LC is standard (SEID 7, preferred) with an SBC Sink as the fallback; see [BLUETOOTHD.md](BLUETOOTHD.md#the-dual-sink-layout-99).
 
 Where experimental AAC stands, what is verified, what is assumed, and the minimum remaining work for real Bluetooth
 AAC reception. Verified means checked against the code or a run; assumed means inferred from the spec or open-source

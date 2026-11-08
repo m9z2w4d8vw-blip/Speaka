@@ -1,5 +1,8 @@
 # Changelog
 
+> **Historical record.** Each entry describes its release as it shipped, under the names it had then: the audio
+> helper was `BTPSAudioHelper`, logging to `BTPSAudioHelper-v88.log`, until the cleanup in the newest entry.
+
 Newest first. Since v9.3 every push to `main` is a release, numbered from `control`'s version and the build's run
 number (9.8.74 is a push of 9.8), so the versions below are the ones where something changed. Each release's full
 notes, with its device-test steps, are in the git history (`docs/history/`, before v9.8's cleanup). How each part of
@@ -9,6 +12,15 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **Cleanup: one name, no dead code, current docs.** Behavior is unchanged.
+  - The audio helper is now `SpeakaAudioHelper` (it was `BTPSAudioHelper`). It logs to `SpeakaAudioHelper.log`, and
+    its audio ring is `SpeakaAudioRing-*.shm`. Upgrading removes the old helper, reloads the launch job at the new path
+    and restarts Bluetooth, so the tweak and the helper switch together. Uninstall still removes the old-named files.
+  - Removed: `own_taken`, superseded by the interruption path, and four `audiohelper/` files that only included
+    `shared/` sources, which the helper now builds directly.
+  - The build and test variables are now `SPEAKA_WITH_SETTINGS`, `SPEAKA_SANITIZE` and `SPEAKA_BLUETOOTHD`.
+  - The README describes Speaka as it works today, the historical documents say so at the top, and
+    `tests/test_legacy_identity.py` keeps the old names out of active files.
 - **The iPhone's volume reaches Windows again after connecting from the iPhone (to be confirmed on the device).**
   Connecting from the iPhone brings AVRCP up before A2DP: Windows registered for volume changes, then configured the
   stream about 10 s later. Speaka's reset at configuration dropped that registration, so every press logged
@@ -295,7 +307,7 @@ Later in this cycle:
 
 ## v9.8
 
-- **Caz's four-row menu:** Settings, Audio Output, Uninstall, Credits, at Caz's exact sizes and positions.
+- **A four-row menu:** Settings, Audio Output, Uninstall, Credits, at fixed sizes and positions.
 - **Uninstall, held for 4 seconds:** removes the tweak with dpkg and restarts Bluetooth, deletes Speaka's logs,
   settings and downloads, then has TrollStore remove the app. A gray fill sweeps across the row while you hold; a tap
   does nothing, and letting go early cancels.
@@ -331,13 +343,13 @@ Later in this cycle:
 
 ## v9.3
 
-- **Speaka's own background** and teal accent again, on Caz's panels.
+- **Speaka's own background** and teal accent again, on the redesigned panels.
 - **The app updates itself and the tweak** from GitHub releases.
 - **A numbered release for every push,** instead of a rolling nightly.
 
 ## v9.2
 
-- **The app takes Caz's look,** from Caz's own code: one Start/Stop button that opens into a live log. Only the app
+- **The app's new look:** one Start/Stop button that opens into a live log. Only the app
   changed.
 
 ## v9.1

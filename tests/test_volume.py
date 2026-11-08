@@ -82,7 +82,7 @@ class VolumeRuntime(unittest.TestCase):
                 "-I",
                 str(ROOT),
             ]
-            if os.environ.get("BTPS_SANITIZE"):
+            if os.environ.get("SPEAKA_SANITIZE"):
                 flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
             subprocess.run(
                 [
@@ -606,7 +606,7 @@ int main(void) {
         cc = shutil.which("cc") or shutil.which("gcc")
         with tempfile.TemporaryDirectory() as td:
             src = Path(td) / "lifetime.c"; exe = Path(td) / "lifetime"; src.write_text(self.HARNESS)
-            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("BTPS_SANITIZE") else []
+            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("SPEAKA_SANITIZE") else []
             for std in ("-std=gnu11", "-std=c99"):
                 build = subprocess.run([cc, std, "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), *extra, str(src),
                                         str(ROOT / "shared/VolumeControl.c"), "-o", str(exe)],

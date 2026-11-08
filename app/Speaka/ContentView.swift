@@ -2,9 +2,9 @@
 //  ContentView.swift
 //  Speaka
 //
-//  The main screen, laid out exactly like Caz's (Caz/ContentView.swift), which follows Dopamine's
+//  The main screen, which follows Dopamine's
 //  DOMainViewController: a header, the action menu and the big button in one vertical stack, 73% of the screen tall
-//  with 30 pt margins. The big button is Start or Stop; tapping it opens it into the log, as Caz's Clean button does.
+//  with 30 pt margins. The big button is Start or Stop; tapping it opens it into the log.
 //  Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).
 //
 
@@ -40,10 +40,10 @@ struct ContentView: View {
         .ignoresSafeArea()
         .animation(.spring(response: 0.75, dampingFraction: 0.9), value: model.sheetVisible)
         .animation(.spring(response: 0.6, dampingFraction: 0.9), value: window)
-        // Update Available and the connection line come and go like Caz's Update Available: up 25 pt as they fade in.
+        // Update Available and the connection line come and go together: up 25 pt as they fade in.
         .animation(.spring(response: 0.5, dampingFraction: 0.9), value: updater.showsLink)
         .animation(.spring(response: 0.5, dampingFraction: 0.9), value: model.statusLine != nil)
-        // A light tap as each step finishes and a success buzz at the end, as in Caz. UIKit's generators,
+        // A light tap as each step finishes and a success buzz at the end. UIKit's generators,
         // because sensoryFeedback needs iOS 17.
         .onChange(of: model.completedSteps) { steps in
             if steps > 0 { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
@@ -132,7 +132,7 @@ struct ContentView: View {
             }
             .frame(height: 60)
             .overlay(alignment: .top) {
-                // Caz's Update Available: 30 pt tall, 20 pt above the big button (10 on home-button phones), sliding
+                // Update Available: 30 pt tall, 20 pt above the big button (10 on home-button phones), sliding
                 // up 25 pt as it fades in, and hidden while the big button is open. The connection line takes the same
                 // place, or the line above it, 10 pt higher, while Update Available is showing.
                 // v9.5: with no tweak installed it's Install Tweak, which installs the one this app carries; with a
@@ -219,8 +219,8 @@ struct ContentView: View {
 
     // MARK: - Menu
 
-    /// Four rows, like Caz's menu, so the panel is Caz's to the point: 4 x 73 + 10 = 302 pt at y 306.7 on an iPhone 13.
-    /// Uninstall is an action, like Caz's Scan, so no chevron. Once it starts, every other row is locked.
+    /// Four rows: 4 x 73 + 10 = 302 pt at y 306.7 on an iPhone 13.
+    /// Uninstall is an action, so no chevron. Once it starts, every other row is locked.
     private var menuItems: [MenuItem] {
         let locked = model.uninstalling
         return [

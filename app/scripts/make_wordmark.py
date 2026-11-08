@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Draws Speaka's title the way Caz's and Dopamine's are drawn, as Wordmark.imageset (1x, 2x and 3x).
+"""Draws Speaka's title in Fonarto Regular, as Wordmark.imageset (1x, 2x and 3x).
 
 Dopamine's title (Dopamine.imageset) is a picture of the word in Fonarto Regular, white, with the letter
 spacing tightened by 0.65% of the em. Its header shows that picture 40 pt tall. These numbers were measured
 from Dopamine's own image; redrawing "Dopamine" with them reproduces it at the same 810 x 160 px size.
 
-This is Caz's scripts/make_wordmark.py with Speaka's defaults. Until the picture exists, the app writes "Speaka"
+Until the picture exists, the app writes "Speaka"
 in SF Rounded Bold in the same place.
 
 Usage:
@@ -37,7 +37,7 @@ def draw(font_path, text, height):
     # Dopamine's proportions leave room below the baseline for its own "p", not for every font's: in Fonarto Regular,
     # "Speaka" would reach from 2 px under the top of a 120 px canvas to 1.75 px past its bottom. A word that doesn't fit
     # is drawn just small enough to (about 1.5% here), a pixel clear of the top and the bottom. Words that fit, like
-    # "Caz", are drawn exactly as before.
+    # are drawn exactly as before.
     top = min(font.getbbox(ch, anchor="ls")[1] for ch in text) / SUPERSAMPLE      # above the baseline: negative
     bottom = max(font.getbbox(ch, anchor="ls")[3] for ch in text) / SUPERSAMPLE
     if baseline + bottom + 1 > height:

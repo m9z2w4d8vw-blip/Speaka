@@ -1,4 +1,4 @@
-# Speaka.app, built the same way as Caz: XcodeGen makes the Xcode project from this file, xcodebuild compiles it, and
+# Speaka.app: XcodeGen makes the Xcode project from this file, xcodebuild compiles it, and
 # scripts/package.sh signs it with Speaka.entitlements and zips Speaka.tipa. `make -C app tipa` runs all three.
 name: Speaka
 options:

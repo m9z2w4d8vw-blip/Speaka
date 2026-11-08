@@ -3,7 +3,7 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>com.parv.speaka.audio</string>
   <key>ProgramArguments</key><array>
-    <string>/var/jb/usr/bin/BTPSAudioHelper</string><string>--stream-service</string>
+    <string>/var/jb/usr/bin/SpeakaAudioHelper</string><string>--stream-service</string>
   </array>
   <key>UserName</key><string>mobile</string>
   <key>GroupName</key><string>mobile</string>
@@ -16,6 +16,6 @@
     <key>SockType</key><string>stream</string>
     <key>SockPassive</key><true/>
   </dict></dict>
-  <key>StandardOutPath</key><string>/tmp/FTABHarvest/BTPSAudioHelper-v88.log</string>
-  <key>StandardErrorPath</key><string>/tmp/FTABHarvest/BTPSAudioHelper-v88.log</string>
+  <key>StandardOutPath</key><string>/tmp/FTABHarvest/SpeakaAudioHelper.log</string>
+  <key>StandardErrorPath</key><string>/tmp/FTABHarvest/SpeakaAudioHelper.log</string>
 </dict></plist>

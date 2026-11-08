@@ -44,7 +44,7 @@ class AudioRuntime(unittest.TestCase):
         'audiohelper/SBCDecoder.c',
         'audiohelper/vendor_sbc/sbc.c','audiohelper/vendor_sbc/bits.c']
    flags=['-std=gnu11','-O2','-Wall','-Wextra','-Werror','-pthread','-I'+str(P),'-I'+str(P/'audiohelper/vendor_sbc')]
-   if os.environ.get('BTPS_SANITIZE'): flags+=['-fsanitize=address,undefined','-fno-omit-frame-pointer']
+   if os.environ.get('SPEAKA_SANITIZE'): flags+=['-fsanitize=address,undefined','-fno-omit-frame-pointer']
    objects=[]
    for i,file in enumerate(src):
     obj=str(pathlib.Path(td)/('%d.o'%i));objects.append(obj)
@@ -56,7 +56,7 @@ class AudioRuntime(unittest.TestCase):
    r=subprocess.run([cc,*flags,*objects,'-o',exe],capture_output=True,text=True)
    self.assertEqual(r.returncode,0,r.stderr)
    env=dict(os.environ)
-   if os.environ.get('BTPS_SANITIZE'):
+   if os.environ.get('SPEAKA_SANITIZE'):
     env['ASAN_OPTIONS']='detect_leaks=0' # LSan cannot inspect /proc under this runner
     env['UBSAN_OPTIONS']='halt_on_error=1'
    out=str(pathlib.Path(td)/'decoded.pcm')
@@ -106,7 +106,7 @@ class AudioRuntime(unittest.TestCase):
   p=plistlib.loads((P/'layout/Library/LaunchDaemons/com.parv.speaka.audio.plist').read_bytes())
   self.assertEqual(p['UserName'],'mobile')
   self.assertEqual(p['Sockets']['Stream']['SockNodeName'],'127.0.0.1')
-  self.assertEqual(p['ProgramArguments'],['/var/jb/usr/bin/BTPSAudioHelper','--stream-service'])
+  self.assertEqual(p['ProgramArguments'],['/var/jb/usr/bin/SpeakaAudioHelper','--stream-service'])
   self.assertNotIn('KeepAlive',p)
 
 
@@ -119,7 +119,7 @@ class IdleGuard(unittest.TestCase):
         self.assertIsNotNone(compiler)
         flags = ["-std=c++17" if cpp else "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT)]
         env = dict(os.environ)
-        if os.environ.get("BTPS_SANITIZE"):
+        if os.environ.get("SPEAKA_SANITIZE"):
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
             env.update(ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1")
         with tempfile.TemporaryDirectory() as td:
@@ -266,9 +266,9 @@ int main() {
 ''', cpp=True)
 
     def test_exact_binary_gates(self):
-        path = os.environ.get("BTPS_BLUETOOTHD", str(ROOT / "docs/reference-binaries/ios17-iphone13/bluetoothd"))
+        path = os.environ.get("SPEAKA_BLUETOOTHD", str(ROOT / "docs/reference-binaries/ios17-iphone13/bluetoothd"))
         if not pathlib.Path(path).exists():
-            self.skipTest("Set BTPS_BLUETOOTHD to the verified iOS 17.0 device binary")
+            self.skipTest("Set SPEAKA_BLUETOOTHD to the verified iOS 17.0 device binary")
         data = pathlib.Path(path).read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(), "e9408df54c3eebfd263eb745a0b06cf1130dd3228f56c104697f92264c91dbd6")
         source = (ROOT / "tweak/Hooks.xm").read_text()
@@ -342,7 +342,7 @@ class RelayDiagnostics(unittest.TestCase):
         self.assertIsNotNone(compiler)
         flags = ["-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT)]
         env = dict(os.environ)
-        if os.environ.get("BTPS_SANITIZE"):
+        if os.environ.get("SPEAKA_SANITIZE"):
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
             env.update(ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1")
         with tempfile.TemporaryDirectory() as td:
@@ -584,7 +584,7 @@ int main(void) {
         self.assertIsNotNone(cc)
         flags = ["-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-pthread"]
         env = dict(os.environ)
-        if os.environ.get("BTPS_SANITIZE"):
+        if os.environ.get("SPEAKA_SANITIZE"):
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
             env["ASAN_OPTIONS"] = "detect_leaks=0"
             env["UBSAN_OPTIONS"] = "halt_on_error=1"
@@ -668,7 +668,7 @@ int main(void) {
         cc = shutil.which("cc"); self.assertIsNotNone(cc)
         flags = ["-std=gnu11","-O2","-Wall","-Wextra","-Werror","-pthread"]
         env = dict(os.environ)
-        if os.environ.get("BTPS_SANITIZE"):
+        if os.environ.get("SPEAKA_SANITIZE"):
             flags += ["-fsanitize=address,undefined","-fno-omit-frame-pointer"]
             env["ASAN_OPTIONS"]="detect_leaks=0"; env["UBSAN_OPTIONS"]="halt_on_error=1"
         with tempfile.TemporaryDirectory() as td:
@@ -1048,7 +1048,7 @@ class WiredOutput(unittest.TestCase):
         flags = ["-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT),
                  "-I" + str(ROOT / "audiohelper")]
         env = dict(os.environ)
-        if os.environ.get("BTPS_SANITIZE"):
+        if os.environ.get("SPEAKA_SANITIZE"):
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
             env.update(ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1")
         with tempfile.TemporaryDirectory() as td:
@@ -1305,7 +1305,7 @@ class OutputOwnership(unittest.TestCase):
         flags = ["-std=c++17" if cpp else "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror",
                  "-I" + str(ROOT), "-I" + str(ROOT / "audiohelper")]
         env = dict(os.environ)
-        if os.environ.get("BTPS_SANITIZE"):
+        if os.environ.get("SPEAKA_SANITIZE"):
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
             env.update(ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1")
         with tempfile.TemporaryDirectory() as td:
@@ -1333,10 +1333,12 @@ int main(void) {
     own_stream(&h, AUDIO_STREAM_PAUSED, 10000);        /* Windows paused ... */
     for (uint64_t t = 10000; t < 10000 + 3600000; t += 5000)
         assert(h.running && !own_should_release(&h, t));   /* ... for an hour: never let go for lack of media */
-    /* Another app takes the output: take it back shortly. */
-    own_taken(&h, 20000);
-    assert(!own_may_start(&h, 20000 + OWN_RETAKE_MS - 1) && own_may_start(&h, 20000 + OWN_RETAKE_MS));
-    own_started(&h, 20300);
+    /* Another app takes the output (an interruption): taken back after OWN_TAKEOVER_MS, or at once when it ends. */
+    own_interrupted(&h, 20000);
+    assert(!own_may_start(&h, 20000 + OWN_TAKEOVER_MS - 1) && own_may_start(&h, 20000 + OWN_TAKEOVER_MS));
+    own_interruption_cleared(&h, 20100);
+    assert(own_may_start(&h, 20100));
+    own_resumed(&h, 20300);
     /* Failures back off 1 s, 2 s, 3 s, 4 s, 4 s ... */
     uint64_t t = 30000;
     unsigned want[] = {1000, 2000, 3000, 4000, 4000};

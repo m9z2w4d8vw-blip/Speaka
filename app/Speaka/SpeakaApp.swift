@@ -2,7 +2,7 @@
 //  SpeakaApp.swift
 //  Speaka
 //
-//  The app's entry point, as in Caz (Caz/CazApp.swift).
+//  The app's entry point.
 //
 
 import SwiftUI

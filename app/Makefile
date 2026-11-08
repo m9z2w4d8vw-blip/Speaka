@@ -1,4 +1,4 @@
-# Speaka.app for TrollStore, built like Caz: XcodeGen generates the Xcode project from project.yml, xcodebuild
+# Speaka.app for TrollStore: XcodeGen generates the Xcode project from project.yml, xcodebuild
 # compiles it, clang builds the update helper (RootHelper/main.c), and scripts/package.sh signs both with their
 # entitlements and zips them.
 #

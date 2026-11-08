@@ -3,8 +3,8 @@
 //  Speaka
 //
 //  Drives the screen. It reads the tweak through SPTweakClient, which keeps the same rules as Settings > Speaka, and
-//  turns a Start or a Stop into the log the big button opens into, the way Caz's CleanerModel does for a scan.
-//  The log's lines follow Caz's, which follow Dopamine's DOLyricsLogItemView.
+//  turns a Start or a Stop into the log the big button opens into, step by step.
+//  The log's lines follow Dopamine's DOLyricsLogItemView.
 //  Dopamine: Copyright (c) 2023-2024 Lars Fröder (opa334), MIT License (see LICENSE-Dopamine.txt).
 //
 
@@ -12,7 +12,7 @@ import Combine
 import Foundation
 import UIKit
 
-/// One line of the log the big button opens into (Caz's LyricLine, Dopamine's DOLyricsLogItemView).
+/// One line of the log the big button opens into (Dopamine's DOLyricsLogItemView).
 struct LyricLine: Identifiable, Equatable {
     enum Status: Equatable { case running, completed, failed, success }
     let id = UUID()
@@ -58,7 +58,7 @@ final class SpeakaModel: ObservableObject {
         var peerAddress = ""   // v9.9.12: the address of the computer whose stream this is
     }
 
-    /// The line above the big button, where Caz shows Update Available.
+    /// The line above the big button.
     struct StatusLine: Equatable {
         let symbol: String
         let text: String
@@ -151,7 +151,7 @@ final class SpeakaModel: ObservableObject {
     var buttonSymbol: String { buttonStops ? "stop" : "play" }
 
     /// Greyed out while nothing would answer it (no tweak, or an older one still running in Bluetooth) and while a
-    /// request is in flight, like Caz's Clean button before a scan.
+    /// request is in flight.
     var canPress: Bool {
         guard request == nil, !uninstalling else { return false }
         switch snapshot.session {
@@ -162,7 +162,7 @@ final class SpeakaModel: ObservableObject {
         }
     }
 
-    /// First line under the name, as in Caz.
+    /// First line under the name.
     var headerSubtitle: String { "iOS \(UIDevice.current.systemVersion)" }
 
     /// Second line under the name: "by Parv", or whatever needs attention, in the warning colour.
@@ -480,7 +480,7 @@ final class SpeakaModel: ObservableObject {
         }
     }
 
-    /// A failed log stays up long enough to read which step failed (a finished one folds after Caz's 1.6 s).
+    /// A failed log stays up long enough to read which step failed (a finished one folds after 1.6 s).
     static let failedLogSeconds: TimeInterval = 6
 
     /// What the line says when a request ends before Bluetooth restarts, and what the header says afterwards. The
@@ -618,7 +618,7 @@ final class SpeakaModel: ObservableObject {
         }
     }
 
-    // MARK: - The log (Caz's lyrics log)
+    // MARK: - The log
 
     private func startLyric(_ text: String) {
         completeRunningLyric()
@@ -649,7 +649,7 @@ final class SpeakaModel: ObservableObject {
         successCount += 1
     }
 
-    /// The step that was running fails with `text`, and the title becomes "Stopped", as in Caz.
+    /// The step that was running fails with `text`, and the title becomes "Stopped".
     private func fail(_ text: String, problem: String?) {
         if let index = lyrics.lastIndex(where: { $0.status == .running }) {
             lyrics[index].text = text
@@ -663,7 +663,7 @@ final class SpeakaModel: ObservableObject {
         problemStep = nil   // advance() sets it again for a step's failure
     }
 
-    /// Keep the finished log on screen for a moment, then fold the button back (1.6 s, as in Caz).
+    /// Keep the finished log on screen for a moment, then fold the button back (1.6 s).
     private func collapseSoon(after seconds: TimeInterval = 1.6) {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             self?.sheetVisible = false

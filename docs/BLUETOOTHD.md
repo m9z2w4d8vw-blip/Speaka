@@ -1,5 +1,10 @@
 # bluetoothd: what Speaka hooks, and how each part was found
 
+> **Historical record and current reference.** The sections on the hooks Speaka installs describe the current tweak.
+> The sections on experiments (the seven-slot copy, the Legacy Sink, the SBC test modes) are historical: those
+> features were removed, and files and symbols appear under the names they had then, including the project's earlier
+> `BTPS` prefix. The table below maps the old file names to today's.
+
 Speaka supports exactly one `bluetoothd`, the one from the iOS 17.0 iPhone it was developed on:
 
 | | |
@@ -344,6 +349,8 @@ and restore v7.9 if necessary. Do NOT enable Legacy Sink. Do NOT enable the
 v7.7 extra endpoint trial.
 
 ## 8. The seven-slot copy (v8.1)
+
+*Historical: this procedure, and the Settings switches it names, were removed in v9.8. It's kept as the record of how the seven-slot copy was tested.*
 
 **This experimental code is not verified by an iOS device test.** It intercepts an undocumented initialization function, and may crash/restart `bluetoothd`. Keep a working v8.0 .deb and SSH access.
 

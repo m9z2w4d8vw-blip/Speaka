@@ -279,7 +279,7 @@ static uint64_t avrcp_connect(uint64_t manager,uint64_t device) {
     if(n<=16u) SpeakaLogNow("AVRCP_VOLUME avrcp_outgoing #%u peer=%s result=%#llx",n,a,(unsigned long long)result);
     return result;
 }
-/* A local Speaka change (BTPSAudioHelper --volume) - the reverse direction, CHANGED to a registered Windows. */
+/* A local Speaka change (SpeakaAudioHelper --volume) - the reverse direction, CHANGED to a registered Windows. */
 static void tick(void *unused) {
     (void)unused;
     (void)CFPreferencesAppSynchronize(CFSTR(SPEAKA_PREFS_DOMAIN));
