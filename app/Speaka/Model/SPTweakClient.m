@@ -492,6 +492,31 @@ static NSString *const SPNotifiedVersionKey = @"notifiedUpdateVersion";
     return [when isKindOfClass:[NSNumber class]] ? [NSDate dateWithTimeIntervalSinceReferenceDate:[when doubleValue]] : nil;
 }
 
++ (NSDictionary<NSString *, NSString *> *)verifiedNames
+{
+    peer_cache_t cache;
+    SPPeerCacheLoad(&cache);
+    NSMutableDictionary<NSString *, NSString *> *names = [NSMutableDictionary dictionary];
+    for (unsigned i = 0; i < cache.n; i++) {
+        NSString *address = [NSString stringWithUTF8String:cache.e[i].address];
+        NSString *name = [NSString stringWithUTF8String:cache.e[i].name];
+        if (address.length && name.length) names[address] = name;
+    }
+    return names;
+}
+
++ (NSArray<NSDictionary *> *)connectionHistory
+{
+    SPSynchronize();   // the tweak, in bluetoothd, writes it
+    id list = SPCopyPref(@SPEAKA_KEY_CONNECTION_HISTORY);
+    if (![list isKindOfClass:[NSArray class]]) return @[];
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+    for (id entry in (NSArray *)list)
+        if ([entry isKindOfClass:[NSDictionary class]] && [entry[@"address"] isKindOfClass:[NSString class]])
+            [entries addObject:entry];
+    return entries;
+}
+
 + (void)setLastUpdateCheck:(NSDate *)date
 {
     SPWritePref(@SPEAKA_KEY_UPDATE_CHECKED, @(date.timeIntervalSinceReferenceDate));

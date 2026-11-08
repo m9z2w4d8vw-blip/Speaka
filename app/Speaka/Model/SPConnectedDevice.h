@@ -7,6 +7,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// BluetoothManager's class, loaded once with the main queue for its callbacks; Nil when the framework isn't there.
+/// Shared by SPConnectedDevice and SPBluetoothDevices.
+Class _Nullable SPBluetoothManagerClass(void);
+
 @interface SPConnectedDevice : NSObject
 
 /// The name of a computer iOS's Bluetooth list reports as connected (or, failing that, of the one phone connected),

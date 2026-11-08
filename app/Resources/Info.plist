@@ -6,6 +6,10 @@
 	<array>
 		<string>speaka.update-check</string>
 	</array>
+	<!-- v9.9.12: Connect to reads iOS's Bluetooth devices. BluetoothManager doesn't ask for this, but if a Bluetooth
+	     privacy check ever does, iOS ends an app without a reason; with one, it asks. -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Speaka lists your computers and connects them, so you can send audio to this iPhone.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>

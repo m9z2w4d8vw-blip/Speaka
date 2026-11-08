@@ -211,7 +211,7 @@ struct ContentView: View {
         case .credits:
             CreditsWindow { self.window = .settings }
         case .connect:
-            ConnectWindow()
+            ConnectWindow(model: model)
         case .update:
             UpdateFlowView(updater: updater, screenWidth: size.width)
         }

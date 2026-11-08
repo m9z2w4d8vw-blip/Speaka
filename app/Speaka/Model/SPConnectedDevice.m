@@ -15,7 +15,8 @@
 static const unsigned int SPMajorComputer = 1;
 static const unsigned int SPMajorPhone = 2;
 
-static Class SPBluetoothManagerClass(void)
+// v9.9.12: shared with SPBluetoothDevices (the Connect to page), so the main queue is set before either asks first.
+Class SPBluetoothManagerClass(void)
 {
     static Class managerClass = Nil;
     static dispatch_once_t onceToken;

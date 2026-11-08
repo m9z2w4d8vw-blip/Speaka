@@ -91,6 +91,12 @@ typedef NS_ENUM(NSInteger, SPRoomVerdict) {
 + (void)setUpdateNotificationsEnabled:(BOOL)enabled NS_SWIFT_NAME(setUpdateNotificationsEnabled(_:));
 // v9.9.3: when the app or SpeakaUpdateCheck last got an answer from GitHub (Settings shows it).
 + (nullable NSDate *)lastUpdateCheck NS_SWIFT_NAME(lastUpdateCheck());
+// v9.9.12: the computers that connected to Speaka, most recent first - {address, name, last (Unix time), count}, as
+// the tweak records them at each verified connection (SPEAKA_KEY_CONNECTION_HISTORY).
++ (NSArray<NSDictionary *> *)connectionHistory NS_SWIFT_NAME(connectionHistory());
+// v9.9.12: the verified name cache's names, address -> name (iOS's own pairs). Its timestamps are when the app last
+// saw a pair while open - never a connection - so it's only ever a name, never history.
++ (NSDictionary<NSString *, NSString *> *)verifiedNames NS_SWIFT_NAME(verifiedNames());
 + (void)setLastUpdateCheck:(NSDate *)date NS_SWIFT_NAME(setLastUpdateCheck(_:));
 
 /// Uninstall (v9.8): every key Speaka keeps in com.apple.bluetooth (all start with "Speaka", shared/SpeakaShared.h) and the

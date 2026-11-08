@@ -34,6 +34,10 @@
 #define SPEAKA_KEY_UPDATE_CHECKED     "SpeakaUpdateLastChecked"    /* number: CFAbsoluteTime of the last answer */
 #define SPEAKA_KEY_UPDATE_ETAG        "SpeakaUpdateETag"           /* string: GitHub's ETag for the release list */
 #define SPEAKA_KEY_UPDATE_NEWEST      "SpeakaUpdateNewest"         /* string: the newest release with the app, then */
+/* v9.9.12: the computers that connected to Speaka - array of {address, name, last (Unix time), count}, most recent
+ * first, at most SP_HISTORY_MAX (shared/DeviceRoster.h). Written only by the tweak, when a computer configured
+ * Speaka's A2DP stream; read by the app's Connect to page. */
+#define SPEAKA_KEY_CONNECTION_HISTORY "SpeakaConnectionHistory"
 
 #define SPEAKA_LOG_DIR      "/tmp/FTABHarvest"
 #define SPEAKA_LOG_FILE     "/tmp/FTABHarvest/Speaka.log"

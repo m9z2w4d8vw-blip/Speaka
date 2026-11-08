@@ -130,6 +130,10 @@ def objc_declared_names(text):
         names |= set(re.findall(r"^\s*(\w+)\s*(?:=[^,\n]*)?,?", body, re.M))
     names |= set(re.findall(r"typedef\b[^;{]*?\b(\w+)\s*;", text))
     names |= set(re.findall(r"^\s*static\b[^;={(]*?\b(\w+)\s*(?:\(|=|;)", text, re.M))
+    # v9.9.12: exported C functions - a prototype, or a definition whose brace opens the next line - at file scope (column
+    # 0), so an indented call (`return SPFoo();`) never counts as declaring one.
+    names |= set(re.findall(r"^(?!return\b)[A-Za-z_][\w \t\*]*?\b(SP\w+)\s*\([^;{)]*\)\s*;", text, re.M))
+    names |= set(re.findall(r"^(?!return\b)[A-Za-z_][\w \t\*]*?\b(SP\w+)\s*\([^;{)]*\)\s*\n\{", text, re.M))
     return names
 
 
@@ -187,6 +191,9 @@ class SpeakaApp(unittest.TestCase):
         self.assertEqual(objc_undeclared_sp_names("CFStringRef d = (__bridge CFStringRef)SPPreferencesDomain;", declared),
                          {"SPPreferencesDomain"})
         self.assertEqual(objc_undeclared_sp_names('id v = SPCopyPref(@SPEAKA_KEY_AAC); // SPNotReal', declared), set())
+        # An indented call doesn't declare what it calls.
+        self.assertNotIn("SPInvented", objc_declared_names("    return SPInvented(x);\n    SPInvented();\n"))
+        self.assertIn("SPExported", objc_declared_names("Class _Nullable SPExported(void);\n"))
 
     def test_app_speaks_the_tweaks_protocol(self):
         client = read(CLIENT_M)
@@ -248,7 +255,7 @@ class SpeakaApp(unittest.TestCase):
                                   "connectedComputerName", "pairedComputerName", "computerName", "isAudioDevice", "lookupSummary",
                                   "updateNotificationsEnabled", "setUpdateNotificationsEnabled", "notifiedVersion",
                                   "setNotifiedVersion", "removeLeftoverPreferences", "removeLegacyCodecSettings",
-                                  "roomVerdict", "lastUpdateCheck", "setLastUpdateCheck"})
+                                  "roomVerdict", "lastUpdateCheck", "setLastUpdateCheck", "connectionHistory", "verifiedNames"})
         # Every method the client declares, apart from the unused singleton, has its Swift name pinned.
         interface = read(CLIENT_H).split("@interface SPTweakClient : NSObject", 1)[1].split("@end", 1)[0]
         for declaration in re.findall(r"^[-+][^;]+;", interface, re.M):
@@ -1238,8 +1245,11 @@ int main(void) {
     def test_entitlements_are_only_what_the_app_needs(self):
         entitlements = plistlib.loads((APP / "Speaka.entitlements").read_bytes())
         # persona-mgmt is what lets the app start its update helper as root (SPRootSpawn.m), as in Caz.
+        # v9.9.12: com.apple.bluetooth.system - bluetoothd serves BluetoothManager's messages only from privilege level 1
+        # (0x100261aa4), and this boolean is level 1 (0x10025db34); without it Speaka's list stayed "available NO".
         self.assertEqual(entitlements, {"platform-application": True, "com.apple.private.security.no-sandbox": True,
-                                        "com.apple.private.persona-mgmt": True})
+                                        "com.apple.private.persona-mgmt": True, "com.apple.bluetooth.system": True})
+        self.assertNotIn("com.apple.bluetooth.internal", entitlements)      # level 2 isn't needed
         helper = plistlib.loads((APP / "RootHelper/entitlements.plist").read_bytes())
         self.assertEqual(helper, {"platform-application": True, "com.apple.private.security.no-sandbox": True,
                                   "com.apple.private.security.container-required": False,
@@ -1291,7 +1301,8 @@ int main(void) {
         self.assertTrue((ROOT / "shared/SpeakaShared.h").is_file())       # what HEADER_SEARCH_PATHS is for
         bridge = read(APP / "Speaka/Speaka-Bridging-Header.h")
         imported = re.findall(r'#import "([^"]+)"', bridge)
-        self.assertEqual(imported, ["Model/SPTweakClient.h", "Model/SPConnectedDevice.h", "Model/SPRootSpawn.h"])
+        self.assertEqual(imported, ["Model/SPTweakClient.h", "Model/SPConnectedDevice.h", "Model/SPRootSpawn.h",
+                                    "Model/SPBluetoothDevices.h"])   # v9.9.12: Connect to
         for name in imported:
             self.assertTrue((APP / "Speaka" / name).is_file(), name)
         make = read(APP / "Makefile")
@@ -1533,6 +1544,9 @@ int main(void) {
                     self.assertGreaterEqual(depth[closing[ch]], 0, f"{source.name}: unbalanced {ch}")
             self.assertEqual(depth, {"(": 0, "[": 0, "{": 0}, source.name)
             defined |= set(re.findall(r"\b(?:struct|class|enum|protocol|typealias)\s+([A-Z]\w*)", code))
+            # v9.9.12: a generic type's parameters (struct ConnectSectionHeader<Trailing: View>)
+            for params in re.findall(r"\b(?:struct|class|enum)\s+[A-Z]\w*<([^>]*)>", code):
+                defined |= set(re.findall(r"\b([A-Z]\w*)\s*:", params))
             imports = set(re.findall(r"^import (\w+)", raw, re.M))
             # What each framework provides, so no file uses it without importing it.
             for pattern, frameworks in ((r"\bObservableObject\b|@Published", {"Combine"}),
@@ -1548,7 +1562,8 @@ int main(void) {
                 self.assertRegex(block(code[match.start():], match.group(0)), r"var body: some View", match.group(1))
         # Every capitalised name is defined here, bridged from Objective-C, or one of the framework names below.
         bridged = set()
-        headers = read(CLIENT_H) + read(DEVICE_H) + read(APP / "Speaka/Model/SPRootSpawn.h")
+        headers = (read(CLIENT_H) + read(DEVICE_H) + read(APP / "Speaka/Model/SPRootSpawn.h")
+                   + read(APP / "Speaka/Model/SPBluetoothDevices.h"))     # v9.9.12: Connect to
         for pair in re.findall(r"@interface (\w+)|NS_ENUM\(NSInteger, (\w+)\)", headers):
             bridged |= {name for name in pair if name}
         bridged |= set(re.findall(r"^int (\w+)\(", headers, re.M))     # C functions, such as SpeakaSpawnRoot
@@ -1579,6 +1594,8 @@ int main(void) {
             "NotificationCenter", "Notification", "NSObject", "NSLock", "URLError", "URLSessionConfiguration", "Result",
             "DateFormatter", "Calendar", "UNAuthorizationStatus", "UNUserNotificationCenterDelegate", "UNNotification",
             "UNNotificationResponse", "UNNotificationPresentationOptions",
+            # v9.9.12: SwiftUI, for the Connect to page
+            "ProgressView", "EmptyView",
         }
         code = "".join(strip_comments_and_strings(read(s)) for s in SWIFT)
         code = re.sub(r"^import \w+$", "", code, flags=re.M)
@@ -2102,7 +2119,7 @@ class DopamineActions(unittest.TestCase):
         menu = block_until(content, "    private var menuItems: [MenuItem] {", "\n    }\n")
         self.assertIn('MenuItem(id: "connect", title: "Connect to", symbol: "link",\n'
                       '                     chevron: true, enabled: !locked) { window = .connect },', menu)
-        self.assertIn("case .connect:\n            ConnectWindow()", content)
+        self.assertIn("case .connect:\n            ConnectWindow(model: model)", content)   # v9.9.12: the real page
         window = block_until(self.windows(), "struct ConnectWindow: View {")
         self.assertIn('WindowCard(title: "Connect to") {', window)
 
@@ -2363,3 +2380,200 @@ class UpdateCheckDaemon(unittest.TestCase):
         self.assertIn("fclose(log);", log)
         self.assertNotIn("g_log", source)
 
+
+
+class ConnectTo(unittest.TestCase):
+    """v9.9.12: the Connect to page. Its devices come from BluetoothManager - unlocked by com.apple.bluetooth.system,
+    since bluetoothd serves MobileBluetooth messages only from privilege level 1 (0x100261aa4) - merged with Speaka's
+    own history, which the tweak records when a computer configures Speaka's A2DP stream: the one event that proves a
+    connection. The merge is shared/DeviceRoster.h, compiled and run here as the tweak and the app run it."""
+
+    def test_the_roster(self):
+        harness = r"""
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include "shared/DeviceRoster.h"
+#include "shared/PeerName.h"
+int main(void) {
+    char a[SP_ADDR_LEN];
+    /* One identity, whatever form it comes in - including the tweak's own text. */
+    assert(sp_address_normalize("24-b2-b9-a1-a4-68", a) && strcmp(a, "24:B2:B9:A1:A4:68") == 0);
+    unsigned char raw[6] = {0x24, 0xB2, 0xB9, 0xA1, 0xA4, 0x68}; char text[18];
+    peer_address_text(raw, text); assert(sp_address_normalize(text, a) && strcmp(a, "24:B2:B9:A1:A4:68") == 0);
+    assert(!sp_address_normalize("24:B2:B9:A1:A4", a) && !sp_address_normalize("00:00:00:00:00:00", a));
+    assert(!sp_address_normalize("24:B2:B9:A1:A4:68:00", a) && !sp_address_normalize("LAPTOP-UGIVBIA5", a) && !sp_address_normalize(NULL, a));
+
+    /* History: verified connections only, deduplicated by address, most recent first, renamed, bounded, pruned. */
+    sp_history_entry h[SP_HISTORY_MAX]; int n = 0;
+    n = sp_history_record(h, n, "24:B2:B9:A1:A4:68", "LAPTOP-UGIVBIA5", 1000);
+    n = sp_history_record(h, n, "AA:BB:CC:DD:EE:01", "DESKTOP-OTHER", 2000);
+    n = sp_history_record(h, n, "24-b2-b9-a1-a4-68", "Parv's Laptop", 3000);       /* renamed, other form */
+    assert(n == 2 && strcmp(h[0].address, "24:B2:B9:A1:A4:68") == 0 && strcmp(h[0].name, "Parv's Laptop") == 0);
+    assert(h[0].count == 2 && h[0].last_connected == 3000 && h[1].count == 1);
+    n = sp_history_record(h, n, "24:B2:B9:A1:A4:68", "", 4000);                      /* no name: keeps the known one */
+    assert(strcmp(h[0].name, "Parv's Laptop") == 0 && h[0].last_connected == 4000);
+    assert(sp_history_record(h, n, "not an address", "x", 5000) == -1);
+    for (int i = 0; i < 20; i++) { char addr[18]; snprintf(addr, sizeof addr, "10:00:00:00:00:%02X", i + 1); n = sp_history_record(h, n, addr, "PC", 10000 + i); }
+    assert(n == SP_HISTORY_MAX && h[0].last_connected == 10019);                     /* the oldest went */
+    for (int i = 1; i < n; i++) assert(h[i - 1].last_connected >= h[i].last_connected);
+    sp_history_entry old[2] = {{"11:11:11:11:11:11", "new", 0, 1}, {"22:22:22:22:22:22", "old", 0, 1}};
+    old[0].last_connected = 200 * 86400.0; old[1].last_connected = 1;
+    assert(sp_history_prune(old, 2, 200 * 86400.0 + 5) == 1 && strcmp(old[0].name, "new") == 0);
+
+    /* The roster: one row per device across history, paired, connected and scan, with the best name. */
+    double now = 100000;
+    sp_roster *r = calloc(1, sizeof *r);
+    sp_device *d = sp_roster_upsert(r, "24:B2:B9:A1:A4:68"); d->in_history = 1; d->last_connected = now - 3600; sp_device_name(d, "LAPTOP-UGIVBIA5", SP_NAME_HISTORY);
+    d = sp_roster_upsert(r, "24-b2-b9-a1-a4-68"); d->paired = 1; sp_device_name(d, "Parv's Laptop", SP_NAME_IOS); sp_device_class(d, 0x2A010C);
+    d = sp_roster_upsert(r, "24:b2:b9:a1:a4:68"); sp_device_name(d, "", SP_NAME_DISCOVERY); sp_device_name(d, "LAPTOP-UGIVBIA5", SP_NAME_DISCOVERY); d->last_seen = now - 5;
+    assert(r->n == 1 && strcmp(r->d[0].name, "Parv's Laptop") == 0 && r->d[0].major == SP_MAJOR_COMPUTER);
+    assert(r->d[0].last_connected == now - 3600);                     /* a sighting never sets last connected */
+    assert(sp_device_state(&r->d[0], now) == SP_STATE_AVAILABLE);
+    assert(sp_device_section(&r->d[0], now) == SP_SECTION_RECENT);
+
+    /* States: Connected needs Speaka's stream; Connecting lasts until the timeout; Available only while fresh. */
+    sp_device x; memset(&x, 0, sizeof x); x.paired = 1; x.major = SP_MAJOR_COMPUTER;
+    assert(sp_device_state(&x, now) == SP_STATE_PAIRED);
+    x.linked = 1; assert(sp_device_state(&x, now) == SP_STATE_LINKED);           /* a link isn't audio */
+    x.connecting = 1; x.connect_started = now - 3; assert(sp_device_state(&x, now) == SP_STATE_CONNECTING);
+    x.linked = 0; x.connect_started = now - SP_CONNECT_TIMEOUT_S - 1; assert(sp_device_state(&x, now) == SP_STATE_PAIRED);
+    x.streaming = 1; assert(sp_device_state(&x, now) == SP_STATE_CONNECTED);
+    sp_device y; memset(&y, 0, sizeof y); y.major = SP_MAJOR_COMPUTER; y.last_seen = now - 10;
+    assert(sp_device_state(&y, now) == SP_STATE_AVAILABLE && sp_device_section(&y, now) == SP_SECTION_NEARBY);
+    y.last_seen = now - SP_SEEN_FRESH_S - 1;                                     /* gone quiet: not Available, not listed */
+    assert(sp_device_state(&y, now) == SP_STATE_UNAVAILABLE && sp_device_section(&y, now) == SP_SECTION_HIDDEN);
+    y.last_seen = now; assert(sp_device_section(&y, now) == SP_SECTION_NEARBY);  /* back again */
+
+    /* What can send audio into Speaka: never the iPhone's own headphones. */
+    sp_device z; memset(&z, 0, sizeof z); z.linked = 1; z.paired = 1; sp_device_class(&z, 0x240404);   /* headphones */
+    assert(z.major == SP_MAJOR_AUDIO && sp_device_section(&z, now) == SP_SECTION_HIDDEN);
+    sp_device w; memset(&w, 0, sizeof w); w.paired = 1; strcpy(w.name, "LAPTOP-ABC");               /* unclassified PC */
+    assert(sp_device_section(&w, now) == SP_SECTION_PAIRED);
+    strcpy(w.name, "Some speaker"); assert(sp_device_section(&w, now) == SP_SECTION_HIDDEN);
+    sp_device p; memset(&p, 0, sizeof p); p.paired = 1; p.major = SP_MAJOR_COMPUTER;               /* never connected */
+    assert(sp_device_section(&p, now) == SP_SECTION_PAIRED);                                        /* apart from history */
+
+    /* Order: connected first, then connecting, linked, available, paired; then the most recently connected. */
+    sp_roster_clear(r);
+    const char *addrs[] = {"01:00:00:00:00:01", "01:00:00:00:00:02", "01:00:00:00:00:03", "01:00:00:00:00:04"};
+    for (int i = 0; i < 4; i++) { d = sp_roster_upsert(r, addrs[i]); d->in_history = 1; d->major = SP_MAJOR_COMPUTER; d->last_connected = now - 100 * (i + 1); }
+    sp_roster_find(r, addrs[3])->streaming = 1;
+    sp_roster_find(r, addrs[2])->connecting = 1; sp_roster_find(r, addrs[2])->connect_started = now - 1;
+    int order[SP_ROSTER_MAX]; int k = sp_roster_order(r, SP_SECTION_RECENT, now, order, SP_ROSTER_MAX);
+    assert(k == 4 && order[0] == 3 && order[1] == 2 && order[2] == 0 && order[3] == 1);
+    /* Bounded: no overflow past SP_ROSTER_MAX. */
+    sp_roster_clear(r);
+    for (int i = 0; i < SP_ROSTER_MAX + 5; i++) { char addr[18]; snprintf(addr, sizeof addr, "02:00:00:00:%02X:%02X", i / 256, i % 256 + 1); sp_roster_upsert(r, addr); }
+    assert(r->n == SP_ROSTER_MAX);
+    char longname[200]; memset(longname, 'A', sizeof longname - 1); longname[sizeof longname - 1] = 0;
+    d = sp_roster_upsert(r, "02:00:00:00:00:01"); sp_device_name(d, longname, SP_NAME_IOS); assert(strlen(d->name) == SP_NAME_LEN - 1);
+    free(r);
+    puts("roster: one row per address, history only from connections, fresh sightings, timeouts, no headphones");
+    return 0;
+}
+"""
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = pathlib.Path(td) / "roster.c"; exe = pathlib.Path(td) / "roster"; src.write_text(harness)
+            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("BTPS_SANITIZE") else []
+            for std in ("-std=gnu11", "-std=c99"):
+                build = subprocess.run([cc, std, "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), *extra, str(src), "-o", str(exe)],
+                                       capture_output=True, text=True, timeout=60)
+                self.assertEqual(build.returncode, 0, build.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+
+    def test_the_tweak_records_only_verified_connections(self):
+        peer = read(ROOT / "tweak/PeerIdentity.c")
+        connected = peer.split("void SpeakaPeerConnected(uint64_t manager, unsigned handle)\n{", 1)[1]
+        ok, unresolved = connected.split("} else {", 1)
+        self.assertIn("dispatch_async_f(g_history_queue, visit, record_history);", ok)          # serial: no lost update
+        self.assertIn("dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0)", peer)
+        self.assertIn("visit->when = g_configured_at;", ok)                        # when it configured, not when listed
+        self.assertNotIn("record_history", unresolved)                             # an unknown peer records nothing
+        record = peer.split("static void record_history(void *context)\n{", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(record.index("sp_history_prune("), record.index("sp_history_record("))
+        self.assertIn("CFPreferencesSetValue(CFSTR(SPEAKA_KEY_CONNECTION_HISTORY), out, domain, kCFPreferencesCurrentUser,", record)
+        for field in ('CFSTR("address")', 'CFSTR("name")', 'CFSTR("last")', 'CFSTR("count")'):
+            self.assertIn(field, record)
+        self.assertIn("free(visit);", record)
+        self.assertEqual(peer.count("record_history"), 2)                          # defined, and scheduled once
+        self.assertNotIn("dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), visit", peer)
+        self.assertIn('#define SPEAKA_KEY_CONNECTION_HISTORY "SpeakaConnectionHistory"', read(ROOT / "shared/SpeakaShared.h"))
+        # The app reads what the tweak writes: the same key, the same fields.
+        client = read(CLIENT_M)
+        self.assertIn("id list = SPCopyPref(@SPEAKA_KEY_CONNECTION_HISTORY);", client)
+        devices = read(APP / "Speaka/Model/SPBluetoothDevices.m")
+        for field in ('entry[@"address"]', 'entry[@"name"]', 'entry[@"last"]'):
+            self.assertIn(field, devices)
+        self.assertNotIn("SPEAKA_KEY_CONNECTION_HISTORY", devices)                 # only the tweak writes it
+        # The existing name cache is reused for names only: its "seen" is when the app last saw a name while open.
+        names = devices.split("NSDictionary<NSString *, NSString *> *known = [SPTweakClient verifiedNames];", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("d->name_rank == SP_NAME_NONE ?", names)                      # only where nothing better names it
+        self.assertNotIn("last_connected", names)
+        self.assertNotIn("sp_roster_upsert", names)                                 # never a row of its own
+        self.assertNotIn('"seen"', devices)
+        cache = client.split("+ (NSDictionary<NSString *, NSString *> *)verifiedNames\n{", 1)[1].split("\n}\n", 1)[0]
+        self.assertNotIn(".seen", cache)
+
+    def test_bluetoothmanager_is_called_only_where_it_answers(self):
+        devices = read(APP / "Speaka/Model/SPBluetoothDevices.m")
+        lines = devices.splitlines()
+        for i, line in enumerate(lines):
+            for selector in re.findall(r"objc_msgSend\)\((?:manager|device|\(id\)managerClass)[^@]*@selector\(([\w:]+)\)", line):
+                window = "\n".join(lines[max(0, i - 12):i + 1])
+                guarded = f"respondsToSelector:@selector({selector})" in window or "if (!self.canScan)" in window
+                self.assertTrue(guarded, f"line {i + 1}: {selector} without a respondsToSelector: check")
+        self.assertIn("return _availability == SPBluetoothReady && [SPBTManager() respondsToSelector:@selector(setDeviceScanningEnabled:)];",
+                      devices)
+        # Bounded scans, and none left running: a timer per scan (a newer scan's generation wins), stopped on close.
+        start = devices.split("- (void)startScanningFor:(NSTimeInterval)seconds\n{", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("NSUInteger generation = ++_scanGeneration;", start)
+        self.assertIn("if (strongSelf && strongSelf->_scanGeneration == generation) [strongSelf stopScanning];", start)
+        # Start and Stop restart bluetoothd: what the scan saw and what was in flight are dropped, never reused.
+        refresh = devices.split("- (void)refresh\n{", 1)[1].split("\n}\n", 1)[0]
+        stale = refresh.split("if (availability != SPBluetoothReady) {", 1)[1].split("}", 1)[0]
+        for part in ("[_seen removeAllObjects];", "[_connecting removeAllObjects];", "_scanning = NO;"):
+            self.assertIn(part, stale)
+        self.assertNotIn("@property (nonatomic, strong", devices.split("@interface SPSighting", 1)[1].split("@end", 1)[0])
+        # Connect only a paired device; everything else says why, and a request ends by success, failure or timeout.
+        connect = devices.split("- (SPConnectOutcome)connectAddress:(NSString *)address\n{", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("if (!device) return _seen[key] ? SPConnectNotPaired : SPConnectNotFound;", connect)
+        self.assertNotIn("acceptSSP", devices)                                     # no pairing accepted for anyone
+        rows = devices.split("- (NSArray<SPDeviceRow *> *)rowsWithStreamAddress:", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("if (d && (d->linked || d->streaming)) {", rows)
+        self.assertIn("} else if (now - started >= SP_CONNECT_TIMEOUT_S) {", rows)
+        self.assertIn("row.canConnect = canAsk && d->paired &&", rows)
+        self.assertIn('static NSString *const SPConnectLogPath = @"/tmp/FTABHarvest/SpeakaConnect.log";', devices)
+        self.assertIn("[self logInterface:manager];", refresh)                     # what this iOS has, for the device test
+
+    def test_the_page(self):
+        entitlements = plistlib.loads((APP / "Speaka.entitlements").read_bytes())
+        self.assertTrue(entitlements["com.apple.bluetooth.system"])
+        connect_model = read(APP / "Speaka/ConnectModel.swift")
+        refresh = block(connect_model, "func refresh() {")
+        self.assertIn("if playing {\n                heldForAudio = true", refresh)    # no scan by itself while it plays
+        close = block(connect_model, "func close() {")
+        self.assertIn("devices.stopScanning()", close)
+        self.assertIn("timer?.invalidate()", close)
+        windows = read(WINDOWS)
+        window = windows.split("struct ConnectWindow: View {", 1)[1].split("\n/// A section's title", 1)[0]
+        self.assertIn(".onDisappear { connect.close() }", window)
+        self.assertIn("} else {\n                connect.close()\n            }", window)       # Speaka leaves the front
+        for text in ('"Recently connected"', '"Nearby devices"', '"Other paired devices"', 'Button("Rescan")', '"Searching"',
+                     '"Bluetooth is off"', "\"Bluetooth isn't available to Speaka\"", "To play audio, choose Speaka as"):
+            self.assertIn(text, window)
+        row = windows.split("struct ConnectRowView: View {", 1)[1]
+        # The history and the stream don't need BluetoothManager: the list shows whatever Bluetooth's state.
+        self.assertIn("private var content: some View { list }", window)
+        self.assertIn("if connect.availability != .ready {\n                    bluetoothState\n                }", window)
+        self.assertIn(".truncationMode(.middle)", row)                              # long computer names
+        self.assertIn(".frame(minHeight: 56)", row)                                 # a real touch target
+        self.assertIn('case .linked: return "Connected to this iPhone · choose Speaka as its output"', row)
+        # Connected is Speaka's own stream from that address - the tweak's verified one.
+        model = read(MODEL)
+        self.assertIn("var streamAddress: String { streamConnected ? snapshot.peerAddress : \"\" }", model)
+        self.assertIn("var streamConnected: Bool { snapshot.session == .on && snapshot.connected }", model)
+        self.assertIn("next.peerAddress = status.peerAddress", model)
+        self.assertIn("case .connect:\n            ConnectWindow(model: model)", read(CONTENT))

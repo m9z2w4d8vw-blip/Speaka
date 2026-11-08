@@ -55,6 +55,7 @@ final class SpeakaModel: ObservableObject {
         var routeName = ""
         var routeUID = ""
         var peerName = ""
+        var peerAddress = ""   // v9.9.12: the address of the computer whose stream this is
     }
 
     /// The line above the big button, where Caz shows Update Available.
@@ -127,6 +128,12 @@ final class SpeakaModel: ObservableObject {
     // MARK: - What the screen shows
 
     var isBusy: Bool { request != nil || sheetVisible }
+
+    /// v9.9.12, Connect to: the computer streaming to Speaka now (Speaka's own A2DP connection, the tweak's verified
+    /// address), and whether it's playing - the page doesn't scan by itself then.
+    var streamAddress: String { streamConnected ? snapshot.peerAddress : "" }
+    var streamConnected: Bool { snapshot.session == .on && snapshot.connected }
+    var streamPlaying: Bool { snapshot.receiving }
 
     /// The big button stops a speaker that is on, still starting, or stuck half-started (the restart that Stop does
     /// clears that), and starts it otherwise.
@@ -308,6 +315,7 @@ final class SpeakaModel: ObservableObject {
         next.routeName = status.routeName
         next.routeUID = status.routeUID
         next.peerName = status.peerName
+        next.peerAddress = status.peerAddress
         // Right after a change the preference can still read the old value for a moment: don't flip back.
         if let changed = outputChangeDate, Date().timeIntervalSince(changed) < 2.0 {
             next.outputMode = snapshot.outputMode

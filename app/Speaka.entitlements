@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- v9.9.12, Connect to: BluetoothManager's MobileBluetooth messages are served only to clients at privilege level
+	     1 or above (iOS 17.0 bluetoothd 0x100261aa4: "has insufficient entitlements to send MBFramework XPC
+	     messages"); level 1 is this boolean (0x10025db34). Without it Speaka's BluetoothManager stays
+	     "available NO" - what Credits showed. -->
+	<key>com.apple.bluetooth.system</key>
+	<true/>
 	<key>com.apple.private.persona-mgmt</key>
 	<true/>
 	<key>com.apple.private.security.no-sandbox</key>

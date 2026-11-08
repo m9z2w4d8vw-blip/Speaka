@@ -10,3 +10,4 @@
 #import "Model/SPTweakClient.h"
 #import "Model/SPConnectedDevice.h"
 #import "Model/SPRootSpawn.h"
+#import "Model/SPBluetoothDevices.h"

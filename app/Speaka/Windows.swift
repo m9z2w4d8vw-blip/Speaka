@@ -402,16 +402,273 @@ struct CreditsWindow: View {
     }()
 }
 
-/// v9.9.2: the menu's fourth row - where connecting to a computer will live. A window of its own, empty for now.
+/// v9.9.12: Connect to - the computers that connected to Speaka, the devices nearby, and asking iOS to connect one.
+/// Connect links the iPhone and the computer over Bluetooth; audio into Speaka still starts on the computer, which
+/// chooses its output, so the page says so rather than claiming more.
 struct ConnectWindow: View {
+    @ObservedObject var model: SpeakaModel
+    @StateObject private var connect = ConnectModel()
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         WindowCard(title: "Connect to") {
-            Text("Computers you can connect to will appear here.")
-                .font(.system(size: 15))
-                .foregroundStyle(Theme.secondary)
-                .multilineTextAlignment(.center)
-                .padding(16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .onAppear {
+            connect.open(streamAddress: model.streamAddress, streaming: model.streamConnected, playing: model.streamPlaying)
+        }
+        .onDisappear { connect.close() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                connect.open(streamAddress: model.streamAddress, streaming: model.streamConnected, playing: model.streamPlaying)
+            } else {
+                connect.close()
+            }
+        }
+        .onChange(of: model.streamAddress) { _ in
+            connect.update(streamAddress: model.streamAddress, streaming: model.streamConnected, playing: model.streamPlaying)
+        }
+        .onChange(of: model.streamPlaying) { _ in
+            connect.update(streamAddress: model.streamAddress, streaming: model.streamConnected, playing: model.streamPlaying)
+        }
+    }
+
+    /// The list always shows: Speaka's history and its stream don't need BluetoothManager, so they stay when Bluetooth
+    /// is off or not available to Speaka; only scanning and Connect wait for it (SPBluetoothDevices).
+    private var content: some View { list }
+
+    @ViewBuilder
+    private var bluetoothState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch connect.availability {
+            case .starting:
+                HStack(spacing: 8) {
+                    ProgressView().tint(.white)
+                    Text("Waiting for Bluetooth...")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Theme.secondary)
+                }
+            case .off:
+                Text("Bluetooth is off")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.white)
+                Text("Turn Bluetooth on to find and connect your computers.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                WindowActionButton(title: "Bluetooth Settings", symbol: "gearshape") { ConnectWindow.openBluetoothSettings() }
+                    .padding(.top, 6)
+            default:
+                Text("Bluetooth isn't available to Speaka")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.white)
+                Text(connect.detail)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 14)
+    }
+
+    /// iOS's Bluetooth page, else Speaka's own page in Settings. canOpenURL is false for any scheme not in
+    /// LSApplicationQueriesSchemes, so this asks open itself.
+    static func openBluetoothSettings() {
+        guard let bluetooth = URL(string: "App-prefs:Bluetooth") else { return }
+        UIApplication.shared.open(bluetooth, options: [:]) { opened in
+            if !opened, let own = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(own)
+            }
+        }
+    }
+
+    private var list: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if connect.availability != .ready {
+                    bluetoothState
+                }
+                ConnectSectionHeader(title: "Recently connected")
+                section(.recent, empty: "Computers that send audio to Speaka show here after they connect.")
+                ConnectSectionHeader(title: "Nearby devices") {
+                    if connect.scanning {
+                        HStack(spacing: 6) {
+                            ProgressView().tint(Theme.secondary).scaleEffect(0.7)
+                            Text("Searching")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.secondary)
+                        }
+                    } else if connect.canScan {
+                        Button("Rescan") { connect.rescan() }
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                            .buttonStyle(MenuButtonStyle())
+                    }
+                }
+                section(.nearby, empty: connect.availability != .ready ? "Searching needs Bluetooth."
+                        : connect.scanning ? "Searching for computers nearby..."
+                        : "No computers found. On the computer, open Bluetooth settings so it can be found, then Rescan.")
+                if !connect.rows(in: .paired).isEmpty {
+                    ConnectSectionHeader(title: "Other paired devices")
+                    section(.paired, empty: "")
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    if let notice = connect.notice {
+                        SettingsFootnote(text: notice, failed: false)
+                    }
+                    if connect.heldForAudio && !connect.scanning {
+                        SettingsFootnote(text: "Speaka is playing, so it didn't scan: a scan can interrupt Bluetooth audio. "
+                                         + "Rescan to scan anyway.", failed: false)
+                    }
+                    SettingsFootnote(text: "Connect links this iPhone and the computer. To play audio, choose Speaka as "
+                                     + "the output on the computer.", failed: false)
+                }
+                .padding(.top, 14)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ section: SPDeviceSection, empty: String) -> some View {
+        let rows = connect.rows(in: section)
+        if rows.isEmpty {
+            if !empty.isEmpty {
+                Text(empty)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 8)
+            }
+        } else {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 {
+                    Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1).padding(.leading, 40)
+                }
+                ConnectRowView(row: row) { connect.connect(row) }
+            }
+        }
+    }
+}
+
+/// A section's title, like Dopamine Settings' (JAILBREAK SETTINGS, ACTIONS), with an optional control at the right.
+struct ConnectSectionHeader<Trailing: View>: View {
+    let title: String
+    let trailing: Trailing
+
+    init(title: String, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13))
+                .textCase(.uppercase)
+                .foregroundStyle(Theme.secondary)
+            Spacer(minLength: 8)
+            trailing
+        }
+        .padding(.top, 16)
+        .padding(.bottom, 4)
+    }
+}
+
+extension ConnectSectionHeader where Trailing == EmptyView {
+    init(title: String) {
+        self.init(title: title) { EmptyView() }
+    }
+}
+
+/// One device: its icon, its name, what it's doing, and Connect when iOS can be asked.
+struct ConnectRowView: View {
+    let row: ConnectModel.Row
+    let connect: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(.white)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.name)
+                    .font(.system(size: 17))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(status)
+                    .font(.system(size: 12))
+                    .foregroundStyle(row.failure != nil ? Theme.failure : Theme.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            trailing
+        }
+        .frame(minHeight: 56)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch row.kind {
+        case .computer: return row.name.uppercased().hasPrefix("DESKTOP-") ? "desktopcomputer" : "laptopcomputer"
+        case .phone: return "iphone"
+        default: return "dot.radiowaves.left.and.right"
+        }
+    }
+
+    @ViewBuilder
+    private var trailing: some View {
+        switch row.state {
+        case .connected:
+            Image(systemName: "checkmark")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.enabled)
+                .accessibilityLabel("Connected")
+        case .connecting:
+            ProgressView().tint(.white)
+        default:
+            if row.canConnect {
+                Button(action: connect) {
+                    Text("Connect")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .circular)
+                            .strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(MenuButtonStyle())
+            }
+        }
+    }
+
+    private var status: String {
+        if let failure = row.failure { return "Couldn't connect: \(failure)" }
+        let last = row.lastConnected.map { " · last connected \(ConnectRowView.when($0))" } ?? ""
+        switch row.state {
+        case .connected: return "Connected"
+        case .connecting: return "Connecting..."
+        case .linked: return "Connected to this iPhone · choose Speaka as its output"
+        case .available: return row.paired ? "Available" + last : "Available · pair it from the computer"
+        case .paired: return "Paired" + last
+        default: return "Not available" + last
+        }
+    }
+
+    static func when(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let time = DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
+        if calendar.isDateInToday(date) { return "today at \(time)" }
+        if calendar.isDateInYesterday(date) { return "yesterday at \(time)" }
+        return DateFormatter.localizedString(from: date, dateStyle: .medium, timeStyle: .none)
     }
 }

@@ -9,6 +9,14 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **Connect to works.** It lists the computers that sent audio to Speaka (the tweak records each one when it sets
+  up the stream, with the time: the only thing that writes "last connected"), the computers and phones a bounded
+  scan finds, and the other paired computers, and asks iOS to connect a paired one. Its Bluetooth access needed an
+  entitlement: bluetoothd serves BluetoothManager only to clients at privilege level 1 or above (0x100261aa4,
+  "has insufficient entitlements to send MBFramework XPC messages"), and level 1 is
+  `com.apple.bluetooth.system` (0x10025db34). Without it the app's BluetoothManager stayed "available NO" - what
+  Credits showed - so this should also bring back the PC's name in the connection line. See
+  [CONNECT-TO.md](CONNECT-TO.md).
 - **Update notifications arrive on their own.** On the device the checker posted as Speaka and found new releases,
   but launchd ran it only once, at install: `runs = 1` hours later, with `run interval = 900 seconds` - StartInterval
   doesn't repeat there. SpeakaUpdateCheck now stays running (KeepAlive) and checks every 15 minutes by the wall clock
