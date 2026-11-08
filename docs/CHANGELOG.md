@@ -9,6 +9,14 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **Connect to connects the audio reliably (to be confirmed on the device).** Connecting from the iPhone gave audio
+  only sometimes. `-[BluetoothDevice connect]` asks for services `0xFFFFD7BF`, A2DP (`0x10`) among them, so iOS
+  started A2DP itself as a Source. It found the computer's endpoints, all Sources (`52:src 54:src 55:src` at
+  20:37), and disconnected A2DP (bluetoothd `0x10037423c`). Audio came only when Windows set up Speaka's Sink first.
+  The page now asks for iOS's own mask without A2DP (`0xFFFFD7AF`), so the computer sets up the stream, with iOS's
+  2-second grace for incoming connections, as when it connects first. It also ends a scan first, sends one request
+  per device, and logs each attempt as link, audio or neither. Each AVDTP signal is logged by name with who sent
+  it (`V113_AVDTP`). See [CONNECT-TO.md](CONNECT-TO.md).
 - **Connect to works.** It lists the computers that sent audio to Speaka (the tweak records each one when it sets
   up the stream, with the time: the only thing that writes "last connected"), the computers and phones a bounded
   scan finds, and the other paired computers, and asks iOS to connect a paired one. Its Bluetooth access needed an

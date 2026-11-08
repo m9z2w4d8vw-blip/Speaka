@@ -2533,17 +2533,20 @@ int main(void) {
         self.assertIn("if (strongSelf && strongSelf->_scanGeneration == generation) [strongSelf stopScanning];", start)
         # Start and Stop restart bluetoothd: what the scan saw and what was in flight are dropped, never reused.
         refresh = devices.split("- (void)refresh\n{", 1)[1].split("\n}\n", 1)[0]
-        stale = refresh.split("if (availability != SPBluetoothReady) {", 1)[1].split("}", 1)[0]
-        for part in ("[_seen removeAllObjects];", "[_connecting removeAllObjects];", "_scanning = NO;"):
+        stale = block(refresh, "if (availability != SPBluetoothReady) {")      # the whole block, braces balanced
+        for part in ("[_seen removeAllObjects];", "_scanning = NO;"):
             self.assertIn(part, stale)
+        # v9.9.13: an attempt in flight is abandoned, with a line saying so, never carried across the restart.
+        self.assertIn("if (sp_attempt_active(&_attempts[i])) {", refresh)
+        self.assertIn("_attempts[i].state = SP_ATTEMPT_FAILED;", refresh)
         self.assertNotIn("@property (nonatomic, strong", devices.split("@interface SPSighting", 1)[1].split("@end", 1)[0])
         # Connect only a paired device; everything else says why, and a request ends by success, failure or timeout.
         connect = devices.split("- (SPConnectOutcome)connectAddress:(NSString *)address\n{", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("if (!device) return _seen[key] ? SPConnectNotPaired : SPConnectNotFound;", connect)
         self.assertNotIn("acceptSSP", devices)                                     # no pairing accepted for anyone
         rows = devices.split("- (NSArray<SPDeviceRow *> *)rowsWithStreamAddress:", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("if (d && (d->linked || d->streaming)) {", rows)
-        self.assertIn("} else if (now - started >= SP_CONNECT_TIMEOUT_S) {", rows)
+        # v9.9.13: each attempt runs request -> link -> audio (shared/DeviceRoster.h): a link is never audio.
+        self.assertIn("if (sp_attempt_update(attempt, d && d->linked, d && d->streaming, now)) {", rows)
         self.assertIn("row.canConnect = canAsk && d->paired &&", rows)
         self.assertIn('static NSString *const SPConnectLogPath = @"/tmp/FTABHarvest/SpeakaConnect.log";', devices)
         self.assertIn("[self logInterface:manager];", refresh)                     # what this iOS has, for the device test
@@ -2562,7 +2565,7 @@ int main(void) {
         self.assertIn(".onDisappear { connect.close() }", window)
         self.assertIn("} else {\n                connect.close()\n            }", window)       # Speaka leaves the front
         for text in ('"Recently connected"', '"Nearby devices"', '"Other paired devices"', 'Button("Rescan")', '"Searching"',
-                     '"Bluetooth is off"', "\"Bluetooth isn't available to Speaka\"", "To play audio, choose Speaka as"):
+                     '"Bluetooth is off"', "\"Bluetooth isn't available to Speaka\"", "choose Speaka as the output on"):
             self.assertIn(text, window)
         row = windows.split("struct ConnectRowView: View {", 1)[1]
         # The history and the stream don't need BluetoothManager: the list shows whatever Bluetooth's state.
@@ -2577,3 +2580,138 @@ int main(void) {
         self.assertIn("var streamConnected: Bool { snapshot.session == .on && snapshot.connected }", model)
         self.assertIn("next.peerAddress = status.peerAddress", model)
         self.assertIn("case .connect:\n            ConnectWindow(model: model)", read(CONTENT))
+
+
+class ConnectReliability(unittest.TestCase):
+    """v9.9.13: connecting from the iPhone. -[BluetoothDevice connect] asks for services 0xFFFFD7BF (BluetoothManager
+    0x1f4bae94c), A2DP (0x10) among them, so iOS started A2DP itself as a Source: it discovered the computer's endpoints
+    at once (bluetoothd 0x1003793ec), kept only Sinks (0x1003b1a48) and disconnected A2DP (0x10037423c) - the 20:37
+    trace: DISCOVER from the iPhone, answered 52:src 54:src 55:src, then AVRCP dropped. The app now asks for everything
+    but A2DP, so the computer sets up Speaka's stream, as when it connects first."""
+
+    HARNESS = r"""
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include "shared/DeviceRoster.h"
+#include "shared/AvdtpTrace.h"
+int main(void) {
+    /* The mask: iOS's own, without A2DP; AVRCP and Handsfree stay. */
+    assert(SP_SERVICES_DEFAULT == 0xFFFFD7BFu && sp_connect_services() == 0xFFFFD7AFu);
+    assert(!(sp_connect_services() & SP_SERVICE_A2DP));
+    assert(sp_connect_services() & SP_SERVICE_AVRCP && sp_connect_services() & SP_SERVICE_HANDSFREE);
+    assert((sp_connect_services() | SP_SERVICE_A2DP) == SP_SERVICES_DEFAULT);
+
+    /* An attempt: request -> link -> audio. */
+    sp_attempt a; memset(&a, 0, sizeof a);
+    assert(sp_attempt_request(&a, "24-b2-b9-a1-a4-68", 100) && a.state == SP_ATTEMPT_REQUESTED);
+    assert(!sp_attempt_request(&a, "24:B2:B9:A1:A4:68", 101));                 /* one at a time */
+    assert(!sp_attempt_update(&a, 0, 0, 105) && a.state == SP_ATTEMPT_REQUESTED);
+    assert(sp_attempt_link_up(&a, 106) && a.state == SP_ATTEMPT_LINKED && a.linked == 106);
+    assert(!sp_attempt_link_up(&a, 107));                                       /* a duplicate notification */
+    assert(!sp_attempt_request(&a, "24:B2:B9:A1:A4:68", 107));                 /* still in flight after the link */
+    assert(!sp_attempt_update(&a, 1, 0, 110) && a.state == SP_ATTEMPT_LINKED); /* a link alone is never audio */
+    assert(sp_attempt_update(&a, 1, 1, 112) && a.state == SP_ATTEMPT_AUDIO && a.audio == 112);
+    assert(!sp_attempt_update(&a, 0, 0, 200) && a.state == SP_ATTEMPT_AUDIO);  /* done: nothing changes it */
+    assert(!sp_attempt_link_failed(&a));                                        /* a late failure doesn't either */
+
+    /* The link, but no stream: a link only, after SP_AUDIO_WAIT_S. */
+    assert(sp_attempt_request(&a, "24:B2:B9:A1:A4:68", 300));                  /* a new attempt once done */
+    assert(sp_attempt_update(&a, 1, 0, 301) && a.state == SP_ATTEMPT_LINKED);  /* iOS lists it before notifying */
+    assert(!sp_attempt_update(&a, 1, 0, 301 + SP_AUDIO_WAIT_S - 1) && a.state == SP_ATTEMPT_LINKED);
+    assert(sp_attempt_update(&a, 1, 0, 301 + SP_AUDIO_WAIT_S) && a.state == SP_ATTEMPT_LINK_ONLY);
+    assert(!sp_attempt_link_up(&a, 400));                                       /* the notification comes too late */
+
+    /* No link: iOS says so, or the time runs out. */
+    assert(sp_attempt_request(&a, "24:B2:B9:A1:A4:68", 500) && sp_attempt_link_failed(&a) && a.state == SP_ATTEMPT_FAILED);
+    assert(sp_attempt_request(&a, "24:B2:B9:A1:A4:68", 600));
+    assert(!sp_attempt_update(&a, 0, 0, 600 + SP_CONNECT_TIMEOUT_S - 1));
+    assert(sp_attempt_update(&a, 0, 0, 600 + SP_CONNECT_TIMEOUT_S) && a.state == SP_ATTEMPT_FAILED);
+
+    /* The stream before iOS reports the link (the computer was fast): audio, with the link time set. */
+    assert(sp_attempt_request(&a, "24:B2:B9:A1:A4:68", 700) && sp_attempt_update(&a, 0, 1, 701));
+    assert(a.state == SP_ATTEMPT_AUDIO && a.linked == 701);
+    assert(!sp_attempt_request(&a, "not an address", 800));
+
+    /* The trace line, on the exact PDUs of the device logs. */
+    char line[256];
+    const uint8_t cmd[] = {0x10, 0x01}, answer[] = {0x12, 0x01, 0xd0, 0x00, 0xd8, 0x00, 0xdc, 0x00};
+    const uint8_t suspend[] = {0xf0, 0x09, 0x1c}, closing[] = {0x00, 0x08, 0x1c};
+    sp_avdtp_trace_line(cmd, sizeof cmd, 1, line, sizeof line);
+    assert(strcmp(line, "V113_AVDTP from=iphone DISCOVER command tx=1") == 0);
+    sp_avdtp_trace_line(answer, sizeof answer, 0, line, sizeof line);
+    assert(strcmp(line, "V113_AVDTP from=pc DISCOVER accept tx=1 endpoints=52:src 54:src 55:src audio_sinks=0") == 0);
+    sp_avdtp_trace_line(suspend, sizeof suspend, 0, line, sizeof line);
+    assert(strcmp(line, "V113_AVDTP from=pc SUSPEND command tx=15 seid=7") == 0);
+    sp_avdtp_trace_line(closing, sizeof closing, 0, line, sizeof line);
+    assert(strcmp(line, "V113_AVDTP from=pc CLOSE command tx=0 seid=7") == 0);
+    /* A Sink in the answer is one iOS could use; in use, it isn't. */
+    const uint8_t with_sink[] = {0x22, 0x01, 0x04, 0x08, 0x0a, 0x08, 0xd0, 0x00};
+    char eps[64]; int sinks = -1;
+    assert(sp_avdtp_discover_endpoints(with_sink, sizeof with_sink, eps, sizeof eps, &sinks) == 3);
+    assert(sinks == 1 && strcmp(eps, "1:snk 2:snk:inuse 52:src") == 0);
+    /* Not a DISCOVER answer, or not whole: no endpoints claimed. */
+    const uint8_t odd[] = {0x12, 0x01, 0xd0}, fragment[] = {0x16, 0x01, 0xd0, 0x00};
+    assert(sp_avdtp_discover_endpoints(odd, sizeof odd, eps, sizeof eps, &sinks) == -1 && sinks == 0);
+    assert(sp_avdtp_discover_endpoints(fragment, sizeof fragment, eps, sizeof eps, &sinks) == -1);
+    assert(sp_avdtp_discover_endpoints(cmd, sizeof cmd, eps, sizeof eps, &sinks) == -1);
+    sp_avdtp_trace_line(fragment, sizeof fragment, 0, line, sizeof line);
+    assert(strstr(line, "fragmented packet type=1") != NULL);
+    sp_avdtp_trace_line(cmd, 1, 1, line, sizeof line);
+    assert(strstr(line, "short pdu len=1") != NULL);
+    char tiny[8]; sp_avdtp_trace_line(answer, sizeof answer, 0, tiny, sizeof tiny);
+    assert(strlen(tiny) == sizeof tiny - 1);                                  /* truncated, never overrun */
+    for (unsigned s = 1; s <= 13; s++) assert(strcmp(sp_avdtp_signal_name(s), "UNKNOWN") != 0);
+    assert(strcmp(sp_avdtp_signal_name(0), "UNKNOWN") == 0 && strcmp(sp_avdtp_message_name(3), "reject") == 0);
+    puts("connect: no A2DP from iOS; attempts end in audio, a link only, or no link; trace names the signals");
+    return 0;
+}
+"""
+
+    def test_the_attempt_machine_and_the_trace(self):
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = pathlib.Path(td) / "connect.c"; exe = pathlib.Path(td) / "connect"; src.write_text(self.HARNESS)
+            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("BTPS_SANITIZE") else []
+            for std in ("-std=gnu11", "-std=c99"):
+                build = subprocess.run([cc, std, "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), *extra, str(src),
+                                        "-o", str(exe)], capture_output=True, text=True, timeout=60)
+                self.assertEqual(build.returncode, 0, build.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+
+    def test_the_app_connects_without_a2dp(self):
+        devices = read(APP / "Speaka/Model/SPBluetoothDevices.m")
+        connect = devices.split("- (SPConnectOutcome)connectAddress:(NSString *)address\n{", 1)[1].split("\n}\n", 1)[0]
+        # The verified call and ABI (BluetoothManager 0x1f4bae94c passes the mask in w3), with the mask from the header.
+        self.assertIn("unsigned int services = sp_connect_services();", connect)
+        self.assertIn("if ([manager respondsToSelector:@selector(connectDevice:withServices:)]) {", connect)
+        self.assertIn("((void (*)(id, SEL, id, unsigned int))objc_msgSend)(manager, @selector(connectDevice:withServices:), device, services);",
+                      connect)
+        self.assertLess(connect.index("connectDevice:withServices:)]"), connect.index("@selector(connect)]"))   # a fallback only
+        self.assertNotIn("0x10", connect.replace("0x%x", "").replace("0x%08x", ""))   # no mask written out by hand here
+        # Sequencing: one request at a time, and the scan ends before the request.
+        self.assertLess(connect.index("if (existing && sp_attempt_active(existing)) {"), connect.index("[self stopScanning];"))
+        self.assertLess(connect.index("[self stopScanning];"), connect.index("objc_msgSend)(manager, @selector(connectDevice:withServices:)"))
+        self.assertIn("sp_attempt_request([self slotFor:key], key.UTF8String, SPNow());", connect)
+        # A success notification is a link, never audio; audio is Speaka's own stream.
+        self.assertNotIn("succeeded (notification)", devices)
+        self.assertIn("(BluetoothDeviceConnectSuccessNotification: a link, not audio)", devices)
+        self.assertIn('[self log:@"AUDIO %@ Speaka\'s A2DP stream set up %.1f s after the request%@"', devices)
+        self.assertIn("a link only - the computer didn't set up Speaka's stream", devices)
+        self.assertIn('[self log:@"CONNECT %s abandoned: Bluetooth is %@ (Start and Stop restart it)"', devices)
+        self.assertNotIn("_connecting", devices)
+
+    def test_the_tweak_names_each_signal(self):
+        hooks = read(ROOT / "tweak/Hooks.xm")
+        self.assertIn('#include "shared/AvdtpTrace.h"', hooks)
+        rx = hooks.split("static uint64_t hook_receive_signal", 1)[1].split("\nstatic void install_signal_rx", 1)[0]
+        tx = hooks.split("static uint64_t hook_transmit_signal", 1)[1].split("\nstatic void install_signal_tx", 1)[0] \
+            if "\nstatic void install_signal_tx" in hooks else hooks.split("static uint64_t hook_transmit_signal", 1)[1]
+        self.assertIn("sp_avdtp_trace_line(pdu, pdu_len, 0, trace, sizeof trace);", rx)            # from the pc
+        self.assertIn("sp_avdtp_trace_line(bytes, take, 1, trace, sizeof trace);", tx)            # from the iPhone
+        self.assertIn("int sampled = n <= 2000u;", tx)                                            # as RX, not 128
+        # The raw lines stay exactly as they were: the trace is added beside them, never instead.
+        self.assertIn('SpeakaLogNow("V82 RX_SIGNAL #%u CID=%#llx tx=%u pkt=%u msg=%u sig=%u len=%llu",', rx)
+        self.assertIn('SpeakaLogNow("V82 TX_SIGNAL #%u CID=%#llx tx=%u pkt=%u msg=%u sig=%u len=%llu",', tx)
+        self.assertIn("return g_signal_rx_orig ? g_signal_rx_orig(cid,ptr,length,a3,a4,a5,a6,a7) : 0;", rx)

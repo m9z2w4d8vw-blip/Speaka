@@ -33,6 +33,7 @@
 #include <mach/mach_time.h>
 #include <time.h>
 #include "tweak/Tweak.h"
+#include "shared/AvdtpTrace.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -874,6 +875,14 @@ static uint64_t hook_receive_signal(uint64_t cid, uint64_t ptr, uint64_t length,
             if (n < 2000u) {
                 SpeakaLogNow("V82 RX_SIGNAL #%u CID=%#llx tx=%u pkt=%u msg=%u sig=%u len=%llu",
                     n,(unsigned long long)cid,tx,packet,msg,id,(unsigned long long)length);
+                /* v9.9.13: the same PDU, named - who sent which signal, and a DISCOVER answer's endpoints and roles
+                 * (shared/AvdtpTrace.h). Logging only, from bytes read the same safe way. */
+                uint8_t pdu[64]; size_t pdu_len = (size_t)(length < sizeof pdu ? length : sizeof pdu);
+                if (safe_peek(ptr, pdu, pdu_len)) {
+                    char trace[256];
+                    sp_avdtp_trace_line(pdu, pdu_len, 0, trace, sizeof trace);
+                    SpeakaLogNow("%s CID=%#llx", trace, (unsigned long long)cid);
+                }
                 uint8_t bytes[32];
                 for (uint64_t off=0; off<length; off+=sizeof bytes) {
                     size_t take = (size_t)(length-off < sizeof bytes ? length-off : sizeof bytes);
@@ -918,7 +927,7 @@ static uint64_t hook_transmit_signal(uint64_t cid, uint64_t packet, uint64_t len
                                          uint64_t a6, uint64_t a7)
 {
     unsigned n = __sync_add_and_fetch(&g_signal_tx_calls, 1u);
-    int sampled = n <= 128u;
+    int sampled = n <= 2000u;   /* v9.9.13: as RX - 128 lost the iPhone's commands partway through a run of trials */
     unsigned tx = 0, ptype = 0, mtype = 0, sig = 0;
     uint8_t bytes[96];
     size_t take = 0;
@@ -932,6 +941,11 @@ static uint64_t hook_transmit_signal(uint64_t cid, uint64_t packet, uint64_t len
             SpeakaLogNow("V82 TX_SIGNAL #%u CID=%#llx tx=%u pkt=%u msg=%u sig=%u len=%llu",
                        n, (unsigned long long)cid, tx, ptype, mtype, sig,
                        (unsigned long long)length);
+            {   /* v9.9.13: named, as for RX (shared/AvdtpTrace.h) */
+                char trace[256];
+                sp_avdtp_trace_line(bytes, take, 1, trace, sizeof trace);
+                SpeakaLogNow("%s CID=%#llx", trace, (unsigned long long)cid);
+            }
             if (mtype == 3u && take >= 3u)
                 SpeakaLogNow("V82 TX_REJECT #%u sig=%u last_error_byte=0x%02x (inspect complete raw PDU)",
                            n, sig, (unsigned)bytes[take-1u]);

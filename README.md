@@ -107,8 +107,8 @@ whether it loaded. The package depends on `mobilesubstrate`, `preferenceloader` 
   scan finds (Rescan scans again). **Other paired devices** shows computers paired with the iPhone that never sent
   audio to Speaka. Each row says what it's doing: *Connected* (it's sending audio to Speaka), *Connected to this
   iPhone* (a Bluetooth link, no audio), *Connecting*, *Available*, *Paired* or *Not available*. **Connect** asks
-  iOS to connect a paired computer. That makes the Bluetooth link; the audio starts when the computer chooses Speaka
-  as its output, which is still done on the computer. A new computer is paired from the computer (*Bluetooth &
+  iOS to connect a paired computer, without starting A2DP itself, so the computer sets up Speaka's audio, as when it
+  connects first. *Connected* means Speaka's own stream, never just the Bluetooth link. A new computer is paired from the computer (*Bluetooth &
   devices > Add device*). The page doesn't scan by itself while Speaka plays, since a scan can interrupt Bluetooth
   audio, and it stops scanning when you close it. See [CONNECT-TO.md](docs/CONNECT-TO.md).
 
@@ -206,6 +206,7 @@ scp mobile@<iphone-ip>:/tmp/FTABHarvest/BTPSAudioHelper-v88.log "$env:USERPROFIL
 | `diag.v82.sep: LOCAL register=0 SEID=7 role=SNK ...` | The speaker endpoint is registered |
 | `V88_CONFIG handle=1 local_seid=7 remote_seid=...` | The PC configured a stream |
 | `V110_HISTORY recorded 24:B2:... "LAPTOP-...": N computers remembered` | That configuration was saved to Connect to's history |
+| `V113_AVDTP from=pc SET_CONFIGURATION command tx=... seid=7` | Each AVDTP signal, named, with who sent it; a DISCOVER answer lists each endpoint as `src` or `snk` |
 | `V88_STREAM active=1 generation=N` | The stream started (`active=0`: paused or closed) |
 | `V893_RX 2000ms forwarded=... ok=... decoded=... bad=...` | Two seconds of reception; errors are also logged individually |
 | `V881_PCM ... peak=... \| RENDER ... silence_frames=...` | Audio level, and underruns (`silence_frames`) |
@@ -369,8 +370,8 @@ arms each speaker session only once, so the next Bluetooth restart always comes 
 - **SBC only, one stream at a time.** The Windows laptop it was developed with sends SBC at its best standard
   setting (about 328 kbps); AAC isn't supported yet.
 - **Playback is controlled from the PC.** There are no media controls on the iPhone.
-- **Connect to links; the computer starts the audio.** Connect makes the Bluetooth link to a paired computer; the
-  computer still opens the audio stream when it chooses Speaka as its output. New computers are paired from the
+- **Connect to: the computer sets up the audio.** Connect links a paired computer and leaves A2DP to it. Windows
+  may still need Speaka chosen as its output: the device trials in CONNECT-TO.md tell. New computers are paired from the
   computer: the page doesn't pair, so it never accepts a pairing request for you.
 - **Bluetooth earbuds are less tested.** iOS may switch the sound back to the PC when it reconnects, and receiving
   and sending audio at the same time hasn't been tested on a device.

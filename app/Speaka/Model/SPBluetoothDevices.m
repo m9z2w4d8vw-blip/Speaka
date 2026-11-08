@@ -13,6 +13,7 @@
 #include "shared/DeviceRoster.h"
 
 static NSString *const SPConnectLogPath = @"/tmp/FTABHarvest/SpeakaConnect.log";
+#define SP_ATTEMPTS_MAX 8                    // connection attempts tracked at once (shared/DeviceRoster.h sp_attempt)
 
 // The notifications BluetoothManager posted up to iOS 16, by name. Which arrive on 17.0 is logged (the first of each),
 // so a device test shows what this iOS sends; one that never comes just leaves its event to the next poll.
@@ -86,11 +87,13 @@ static NSString *SPKey(NSString *address)
 
 @interface SPBluetoothDevices ()
 - (void)log:(NSString *)format, ... NS_FORMAT_FUNCTION(1, 2);
+- (sp_attempt *)attemptFor:(NSString *)key;
+- (sp_attempt *)slotFor:(NSString *)key;
 @end
 
 @implementation SPBluetoothDevices {
     NSMutableDictionary<NSString *, SPSighting *> *_seen;          // address -> sighting, this scan session
-    NSMutableDictionary<NSString *, NSNumber *> *_connecting;      // address -> when it was asked (Unix time)
+    sp_attempt _attempts[SP_ATTEMPTS_MAX];                       // v9.9.13: request -> link -> audio, per device
     NSMutableDictionary<NSString *, NSArray *> *_failures;         // address -> @[reason, until (Unix time)]
     NSMutableSet<NSString *> *_arrived;                            // notification names already logged
     NSUInteger _scanGeneration;
@@ -111,7 +114,6 @@ static NSString *SPKey(NSString *address)
 {
     if ((self = [super init])) {
         _seen = [NSMutableDictionary dictionary];
-        _connecting = [NSMutableDictionary dictionary];
         _failures = [NSMutableDictionary dictionary];
         _arrived = [NSMutableSet set];
         _availability = SPBluetoothStarting;
@@ -196,7 +198,12 @@ static NSString *SPKey(NSString *address)
         if (availability != SPBluetoothReady) {
             // bluetoothd restarted, or Bluetooth went off: what this scan saw and what was in flight are stale.
             [_seen removeAllObjects];
-            [_connecting removeAllObjects];
+            for (int i = 0; i < SP_ATTEMPTS_MAX; i++)
+                if (sp_attempt_active(&_attempts[i])) {
+                    [self log:@"CONNECT %s abandoned: Bluetooth is %@ (Start and Stop restart it)", _attempts[i].address,
+                              names[availability]];
+                    _attempts[i].state = SP_ATTEMPT_FAILED;
+                }
             _scanning = NO;
             _scanGeneration++;
         }
@@ -287,13 +294,16 @@ static NSString *SPKey(NSString *address)
     } else if ([note.name isEqualToString:SPNoteRemoved]) {
         [_seen removeObjectForKey:key];
     } else if ([note.name isEqualToString:SPNoteConnected]) {
-        if (_connecting[key]) [self log:@"CONNECT %@ succeeded (notification)", key];
-        [_connecting removeObjectForKey:key];
+        // A link, not audio: the attempt waits for Speaka's own stream (rowsWithStreamAddress:).
+        sp_attempt *attempt = [self attemptFor:key];
+        if (attempt && sp_attempt_link_up(attempt, now))
+            [self log:@"LINK %@ up %.1f s after the request (BluetoothDeviceConnectSuccessNotification: a link, not audio)",
+                      key, now - attempt->requested];
     } else if ([note.name isEqualToString:SPNoteConnectFailed]) {
-        if (_connecting[key]) {
-            [_connecting removeObjectForKey:key];
+        sp_attempt *attempt = [self attemptFor:key];
+        if (attempt && sp_attempt_link_failed(attempt)) {
             _failures[key] = @[@"iOS couldn't connect it.", @(now + 15)];
-            [self log:@"CONNECT %@ failed (notification)", key];
+            [self log:@"CONNECT %@ failed: no link (BluetoothDeviceConnectFailedNotification)", key];
         }
     }
 }
@@ -314,22 +324,59 @@ static NSString *SPKey(NSString *address)
             if ([SPKey(SPBTString(SPBTSend(candidate, @selector(address)))) isEqualToString:key]) { device = candidate; break; }
     if (!device) return _seen[key] ? SPConnectNotPaired : SPConnectNotFound;
     if (SPBTBool(device, @selector(connected), NO)) return SPConnectAlreadyConnected;
+    sp_attempt *existing = [self attemptFor:key];
+    if (existing && sp_attempt_active(existing)) {          // one at a time: never a second request in flight
+        [self log:@"CONNECT %@ already in flight (%.1f s): not asked again", key, SPNow() - existing->requested];
+        return SPConnectRequested;
+    }
+    if (_scanning) {                                         // the scan shares the radio with connecting: end it first
+        [self stopScanning];
+        [self log:@"CONNECT %@: stopped the scan first", key];
+    }
+    // v9.9.13: everything iOS's own connect asks for but A2DP (shared/DeviceRoster.h sp_connect_services): with A2DP,
+    // iOS starts A2DP itself as a Source, finds the computer's Sources, and disconnects it - closing the computer's
+    // stream if it won the race. Without it, the computer opens A2DP to Speaka's Sink, as when it connects first.
+    unsigned int services = sp_connect_services();
     NSString *how = nil;
-    if ([device respondsToSelector:@selector(connect)]) {
+    if ([manager respondsToSelector:@selector(connectDevice:withServices:)]) {
+        ((void (*)(id, SEL, id, unsigned int))objc_msgSend)(manager, @selector(connectDevice:withServices:), device, services);
+        how = [NSString stringWithFormat:@"connectDevice:withServices:0x%08x (iOS's 0x%08x without A2DP 0x%x)", services,
+               SP_SERVICES_DEFAULT, SP_SERVICE_A2DP];
+    } else if ([device respondsToSelector:@selector(connect)]) {
         ((void (*)(id, SEL))objc_msgSend)(device, @selector(connect));
-        how = @"-[BluetoothDevice connect]";
-    } else if ([manager respondsToSelector:@selector(connectDevice:)]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(manager, @selector(connectDevice:), device);
-        how = @"-[BluetoothManager connectDevice:]";
+        how = @"-[BluetoothDevice connect], with A2DP (no connectDevice:withServices: here)";
     }
     if (!how) {
         [self log:@"CONNECT %@ not possible: no connect method", key];
         return SPConnectUnsupported;
     }
-    _connecting[key] = @(SPNow());
+    sp_attempt_request([self slotFor:key], key.UTF8String, SPNow());
     [_failures removeObjectForKey:key];
-    [self log:@"CONNECT %@ requested with %@", key, how];
+    [self log:@"CONNECT %@ requested: %@", key, how];
     return SPConnectRequested;
+}
+
+/// The attempt for this device, in flight or finished; NULL if there's none.
+- (sp_attempt *)attemptFor:(NSString *)key
+{
+    const char *address = key.UTF8String;
+    for (int i = 0; address && i < SP_ATTEMPTS_MAX; i++)
+        if (_attempts[i].state != SP_ATTEMPT_IDLE && strcmp(_attempts[i].address, address) == 0) return &_attempts[i];
+    return NULL;
+}
+
+/// Where a new attempt for this device goes: its own, else a free one, else the oldest finished one.
+- (sp_attempt *)slotFor:(NSString *)key
+{
+    sp_attempt *mine = [self attemptFor:key];
+    if (mine) return mine;
+    sp_attempt *oldest = NULL;
+    for (int i = 0; i < SP_ATTEMPTS_MAX; i++) {
+        if (_attempts[i].state == SP_ATTEMPT_IDLE) return &_attempts[i];
+        if (!sp_attempt_active(&_attempts[i]) && (!oldest || _attempts[i].requested < oldest->requested))
+            oldest = &_attempts[i];
+    }
+    return oldest ? oldest : &_attempts[0];
 }
 
 #pragma mark - Rows
@@ -388,20 +435,32 @@ static void SPAddList(sp_roster *roster, id manager, SEL list, BOOL linked)
         NSString *name = d->name_rank == SP_NAME_NONE ? known[[NSString stringWithUTF8String:d->address] ?: @""] : nil;
         if (name.length) sp_device_name(d, name.UTF8String, SP_NAME_HISTORY);
     }
-    // In-flight connections: proven by the link or Speaka's stream, or failed by the timeout.
-    for (NSString *key in _connecting.allKeys) {
-        sp_device *d = sp_roster_find(roster, key.UTF8String);
-        double started = _connecting[key].doubleValue;
-        if (d && (d->linked || d->streaming)) {
-            [_connecting removeObjectForKey:key];
-            [self log:@"CONNECT %@ succeeded (%@)", key, d->streaming ? @"audio" : @"Bluetooth link"];
-        } else if (now - started >= SP_CONNECT_TIMEOUT_S) {
-            [_connecting removeObjectForKey:key];
-            _failures[key] = @[@"It didn't answer. Is it on, with Bluetooth on?", @(now + 15)];
-            [self log:@"CONNECT %@ timed out", key];
-        } else if (d) {
+    // v9.9.13: each attempt, from the request to an outcome (shared/DeviceRoster.h sp_attempt). A link isn't audio:
+    // AUDIO needs Speaka's own A2DP stream from that address; until then, or the time limits, the row says Connecting.
+    for (int i = 0; i < SP_ATTEMPTS_MAX; i++) {
+        sp_attempt *attempt = &_attempts[i];
+        if (!sp_attempt_active(attempt)) continue;
+        sp_device *d = sp_roster_find(roster, attempt->address);
+        NSString *key = [NSString stringWithUTF8String:attempt->address] ?: @"";
+        sp_attempt_state before = attempt->state;
+        if (sp_attempt_update(attempt, d && d->linked, d && d->streaming, now)) {
+            if (attempt->state == SP_ATTEMPT_LINKED) {
+                [self log:@"LINK %@ up %.1f s after the request (iOS lists it connected: a link, not audio)", key,
+                          now - attempt->requested];
+            } else if (attempt->state == SP_ATTEMPT_AUDIO) {
+                [self log:@"AUDIO %@ Speaka's A2DP stream set up %.1f s after the request%@", key, now - attempt->requested,
+                          before == SP_ATTEMPT_REQUESTED ? @", before iOS reported the link" : @""];
+            } else if (attempt->state == SP_ATTEMPT_FAILED) {
+                _failures[key] = @[@"It didn't answer. Is it on, with Bluetooth on?", @(now + 15)];
+                [self log:@"CONNECT %@ failed: no link within %.0f s", key, SP_CONNECT_TIMEOUT_S];
+            } else if (attempt->state == SP_ATTEMPT_LINK_ONLY) {
+                [self log:@"AUDIO %@ none within %.0f s of the link: a link only - the computer didn't set up Speaka's stream",
+                          key, SP_AUDIO_WAIT_S];
+            }
+        }
+        if (d && sp_attempt_active(attempt)) {
             d->connecting = 1;
-            d->connect_started = started;
+            d->connect_started = now;                      // the attempt keeps its own limits
         }
     }
     BOOL canAsk = _availability == SPBluetoothReady;

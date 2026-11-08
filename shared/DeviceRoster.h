@@ -228,4 +228,88 @@ static inline int sp_roster_order(const sp_roster *r, sp_section section, double
     return n;
 }
 
+/* ---- v9.9.13: connecting from the iPhone ----------------------------------------------------------------------------
+ *
+ * The services the app asks iOS to connect, with -[BluetoothManager connectDevice:withServices:]. What
+ * -[BluetoothDevice connect] sends is SP_SERVICES_DEFAULT (iOS 17.0 BluetoothManager 0x1f4bae94c: mov w3,#0xffffd7bf, then
+ * connectDevice:withServices:). Its bits are bluetoothd's services (0x100440678 names them): 0x1 Handsfree, 0x8 Remote
+ * (AVRCP), 0x10 A2DP. A2DP in the request has iOS start A2DP itself, as a Source: bluetoothd sets "we initiated"
+ * (0x100373ef4), discovers the computer's endpoints at once instead of waiting 2 s for the computer (0x1003793ec), keeps
+ * only audio Sinks (0x1003b1a48) - a computer has Sources - and disconnects A2DP (0x10037423c), closing a stream the
+ * computer set up meanwhile. So the app asks for everything but A2DP, and the computer opens A2DP to Speaka's Sink, as
+ * when it connects first. */
+#define SP_SERVICES_DEFAULT 0xFFFFD7BFu
+#define SP_SERVICE_HANDSFREE 0x1u
+#define SP_SERVICE_AVRCP 0x8u
+#define SP_SERVICE_A2DP 0x10u
+#define SP_AUDIO_WAIT_S 15.0                 /* after the link, how long the computer has to set up Speaka's stream */
+
+static inline unsigned sp_connect_services(void) { return SP_SERVICES_DEFAULT & ~SP_SERVICE_A2DP; }
+
+/* One connection attempt from the page, from the request to an outcome. A Bluetooth link is not audio: the attempt ends
+ * as AUDIO only when Speaka's own A2DP stream from that address appears (the tweak's verified peer). */
+typedef enum {
+    SP_ATTEMPT_IDLE = 0,
+    SP_ATTEMPT_REQUESTED,       /* asked iOS; no link yet */
+    SP_ATTEMPT_LINKED,          /* the link is up; waiting for the computer to set up the stream */
+    SP_ATTEMPT_AUDIO,           /* Speaka's stream from it: done */
+    SP_ATTEMPT_FAILED,          /* no link (iOS said so, or SP_CONNECT_TIMEOUT_S passed) */
+    SP_ATTEMPT_LINK_ONLY        /* a link, but no stream within SP_AUDIO_WAIT_S */
+} sp_attempt_state;
+
+typedef struct {
+    char address[SP_ADDR_LEN];
+    sp_attempt_state state;
+    double requested, linked, audio;
+} sp_attempt;
+
+static inline int sp_attempt_active(const sp_attempt *a) {
+    return a->state == SP_ATTEMPT_REQUESTED || a->state == SP_ATTEMPT_LINKED;
+}
+
+/* A new request. 0 if one is already in flight for this address: one at a time, never a second request. */
+static inline int sp_attempt_request(sp_attempt *a, const char *address, double now) {
+    char normal[SP_ADDR_LEN];
+    if (!sp_address_normalize(address, normal)) return 0;
+    if (sp_attempt_active(a) && strcmp(a->address, normal) == 0) return 0;
+    memset(a, 0, sizeof *a);
+    memcpy(a->address, normal, SP_ADDR_LEN);
+    a->state = SP_ATTEMPT_REQUESTED;
+    a->requested = now;
+    return 1;
+}
+
+/* iOS's connection notifications. Only for the attempt in flight; a late or duplicate one changes nothing. */
+static inline int sp_attempt_link_up(sp_attempt *a, double now) {
+    if (a->state != SP_ATTEMPT_REQUESTED) return 0;
+    a->state = SP_ATTEMPT_LINKED;
+    a->linked = now;
+    return 1;
+}
+
+static inline int sp_attempt_link_failed(sp_attempt *a) {
+    if (a->state != SP_ATTEMPT_REQUESTED) return 0;
+    a->state = SP_ATTEMPT_FAILED;
+    return 1;
+}
+
+/* Each refresh: what iOS lists now (linked) and Speaka's stream (streaming), then the time limits. Returns 1 when the
+ * state changed. The stream proves audio from any state in flight, even before iOS reports the link. */
+static inline int sp_attempt_update(sp_attempt *a, int linked, int streaming, double now) {
+    if (!sp_attempt_active(a)) return 0;
+    if (streaming) {
+        if (a->state == SP_ATTEMPT_REQUESTED) a->linked = now;
+        a->state = SP_ATTEMPT_AUDIO;
+        a->audio = now;
+        return 1;
+    }
+    if (a->state == SP_ATTEMPT_REQUESTED) {
+        if (linked) return sp_attempt_link_up(a, now);
+        if (now - a->requested >= SP_CONNECT_TIMEOUT_S) { a->state = SP_ATTEMPT_FAILED; return 1; }
+        return 0;
+    }
+    if (now - a->linked >= SP_AUDIO_WAIT_S) { a->state = SP_ATTEMPT_LINK_ONLY; return 1; }
+    return 0;
+}
+
 #endif

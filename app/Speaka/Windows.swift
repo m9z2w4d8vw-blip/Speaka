@@ -522,8 +522,9 @@ struct ConnectWindow: View {
                         SettingsFootnote(text: "Speaka is playing, so it didn't scan: a scan can interrupt Bluetooth audio. "
                                          + "Rescan to scan anyway.", failed: false)
                     }
-                    SettingsFootnote(text: "Connect links this iPhone and the computer. To play audio, choose Speaka as "
-                                     + "the output on the computer.", failed: false)
+                    SettingsFootnote(text: "Connect links this iPhone and the computer and lets the computer connect its "
+                                     + "audio to Speaka. If it connects without sound, choose Speaka as the output on "
+                                     + "the computer.", failed: false)
                 }
                 .padding(.top, 14)
             }
