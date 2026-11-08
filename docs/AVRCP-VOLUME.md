@@ -366,3 +366,88 @@ level is the last one applied, Windows' or the phone's, so the INTERIM usually a
 Bluetooth: AVRCP carries Windows' level for this endpoint only, and Windows answered Speaka's INTERIM rather than
 pushing a level of its own. Matching the laptop's previous level would need software on Windows.
 
+
+## v9.9.13: iPhone to Windows after connecting from the iPhone
+
+### The four volumes
+
+They're separate variables, linked by Speaka:
+
+| Volume | Range | Who changes it |
+| --- | --- | --- |
+| iOS output volume | 0.0–1.0 in 6.25% steps (`AVAudioSession.outputVolume`) | The buttons, Control Center, and Speaka for Windows' level |
+| AVRCP absolute volume | 0–127 (`SPVolume.value`) | Windows' SetAbsoluteVolume (`0x50`); the iPhone's changes, sent as CHANGED (`0x31`/`0x0d`) |
+| Speaka's PCM gain | 0–127 | Unity in `domain=ios` (`pcm_gain=127/127`); the level only in the fallback domain |
+| Windows' slider | 0–100 | Windows, from INTERIM and CHANGED |
+
+`V107_LEVEL ... ios=51/127` is the iOS output volume. It stays at 51 while nobody presses anything. Windows' 53 is
+41.7%, and iOS's nearest step is 40%, which is 51.
+
+### The path, and where it broke
+
+The path from the button to Windows:
+1. iOS's output volume changes.
+2. The audio helper reads `outputVolume` every 200 ms. `sp_domain_observed` passes a user change, and never the echo
+   of the helper's own set within 1 s.
+3. `report_local_volume()` writes `SpeakaVolumeRequest` in the shared preferences.
+4. The tweak's `tick()` (100 ms, in bluetoothd) calls `sp_volume_local()`.
+5. That sends CHANGED, on the label Windows registered with, to the bound PC.
+6. Windows sets its slider and registers again.
+
+The logs prove steps 1 to 4 in every session. Step 5 needs a registration (`subscribed=1`), and that depended on the
+order of connection:
+
+| Session | Order | Presses |
+| --- | --- | --- |
+| 20:36, Windows connected | A2DP configured, `reset why=configured`, **then** Windows registered (label 8) | `subscribed=1`; CHANGED on labels 8, 9, 10, 11 and 12, each renewed about 100 ms later |
+| 21:24, 21:27, 05:05, from the iPhone | AVRCP up (`avrcp_outgoing`), Windows registered (`configured=0`), **then** A2DP and `reset why=configured` | `subscribed=0` every time; no CHANGED |
+
+`SpeakaVolumeConfigure()`, at each A2DP configuration, reset everything: the subscription, the label and `engaged`.
+That discarded a registration Windows had made on an AVRCP connection that was still open. Windows doesn't register
+again while it holds one. AVRCP has no way to say a registration was forgotten.
+
+### The fix
+
+A registration lasts as long as its AVRCP connection, or until a CHANGED completes it, as the AVRCP specification has
+it. A stream configuring or closing doesn't end it.
+- `sp_volume_rebind()` (shared/VolumeControl.c) keeps the registration, label, level and any pending CHANGED for the
+  same peer, under the new epoch.
+- `SpeakaVolumeConfigure()` and `SpeakaVolumeDisconnect()` use it when the bound PC still has AVRCP engaged
+  (`AVRCP_VOLUME kept why=... registration=live`).
+- A different PC, an AVRCP disconnect (`reset why=avrcp_disconnected`, unchanged) and a bluetoothd restart still
+  start fresh.
+
+The Windows-first order is unchanged: there, configure comes after the previous AVRCP disconnect, so nothing is kept.
+
+The rest is unchanged: SetAbsoluteVolume answers ACCEPTED, never CHANGED, so there's no echo. The same level sends
+nothing. Presses before Windows renews are reported in its renewal's INTERIM, so Windows ends where the phone is. A
+CHANGED that can't be queued is retried on the next tick, once.
+
+### Reading the log
+
+| Line | Meaning |
+| --- | --- |
+| `rx ... ctype=3 pdu=0x31 param=0x0d` | Windows registered for volume changes |
+| `tx label=N response=0x0f INTERIM pdu=0x31` | The registration's answer, with the current level |
+| `kept why=configured ... registration=live label=N` | A2DP configured; the registration carried over |
+| `local value=V (P%) from=iphone ... outcome=changed_sent label=N` | A press, sent to Windows as CHANGED on label N |
+| `outcome=not_registered` | A press while Windows' renewal is still on its way; its INTERIM carries the level |
+| `outcome=unchanged` | The same level as Windows was last told (its own set, read back) |
+| `outcome=changed_failed_will_retry` | Not queued; retried on the next tick |
+| `local value=V suppressed reason=no_stream|no_bound_peer|helper_not_ready|stale` | A press that couldn't be sent, and why |
+| `set value=V (P%) from=windows` | Windows' SetAbsoluteVolume, applied |
+
+### Device test
+
+Connect once from Connect to, play audio, change the volume on Windows, then press the iPhone's buttons. Windows'
+slider should follow the presses.
+
+```powershell
+$Phone = "mobile@10.0.0.128"
+ssh $Phone 'grep -E "AVRCP_VOLUME (kept|reset|local|tx label=[0-9]+ response=0x0[df])" /tmp/FTABHarvest/Speaka.log | tail -n 25'
+```
+
+Expected:
+- a `kept why=configured ... registration=live` line after the connection;
+- for each press, `local ... outcome=changed_sent label=N`, then a `tx label=N+1 response=0x0f INTERIM` as Windows
+  registers again.

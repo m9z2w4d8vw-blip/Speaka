@@ -7,6 +7,15 @@ void sp_volume_bind(SPVolume *s,const uint8_t peer[6],uint64_t epoch,uint8_t ini
     if(!s || !peer || !epoch || initial>SP_VOLUME_MAX) return;
     memcpy(s->peer,peer,6);s->epoch=epoch;s->value=initial;s->bound=1;
 }
+int sp_volume_rebind(SPVolume *s,const uint8_t peer[6],uint64_t epoch,uint8_t initial) {
+    if(!s) return 0;
+    if(peer && epoch && initial<=SP_VOLUME_MAX && s->bound && !memcmp(s->peer,peer,6)) {
+        s->epoch=epoch;              /* the same AVRCP connection: subscribed, label, value, pending_local stay */
+        return s->subscribed!=0;
+    }
+    sp_volume_bind(s,peer,epoch,initial);
+    return 0;
+}
 static int reply(const SPVolume *s,const SPVolumeIO *io,uint8_t label,uint8_t code,
                  uint8_t pdu,const uint8_t *data,size_t length) {
     uint8_t bytes[264]={0,0x19,0x58,0,0,0,0};

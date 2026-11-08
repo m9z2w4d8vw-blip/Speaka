@@ -150,9 +150,10 @@ int main(void) {
     assert(last_code == SP_AVRCP_STABLE && last_pdu == 0x10 && last_payload[1] == 8);
     assert(cmd(&s, laptop, epoch, 2, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1 && last_code == SP_AVRCP_INTERIM);
     assert(s.subscribed && s.label == 2);
-    /* A2DP configures: a fresh epoch, the same verified device - no stale subscription or label survives. */
-    sp_volume_bind(&s, laptop, ++epoch, 127);
-    assert(!s.subscribed);
+    /* A2DP configures: a fresh epoch, the same verified device. v9.9.13: its AVRCP connection is still up, so its
+     * registration and label survive (sp_volume_rebind) - Windows won't register again while it holds one. */
+    assert(sp_volume_rebind(&s, laptop, ++epoch, 127) == 1);
+    assert(s.subscribed && s.label == 2 && s.epoch == epoch);
     assert(cmd(&s, laptop, epoch - 1, 3, SP_AVRCP_CONTROL, set64, sizeof set64) == 0);   /* the old epoch: native */
     assert(cmd(&s, laptop, epoch, 4, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1 && s.subscribed);
     /* Windows sets 64: applied, ACCEPTED, and the subscription is NOT completed (no CHANGED echo). */
@@ -492,3 +493,153 @@ int main(void) {
             self.assertEqual(build.returncode, 0, build.stderr)
             self.assertEqual(subprocess.run([str(exe)], timeout=30).returncode, 0)
 
+
+
+class VolumeRegistrationLifetime(unittest.TestCase):
+    """v9.9.13: iPhone -> Windows volume. Windows registers for EVENT_VOLUME_CHANGED (0x0d) once per AVRCP connection and
+    renews only after a CHANGED. Connecting from the iPhone brings AVRCP up first (05:05:32), Windows registers (label 4,
+    05:05:33), then configures A2DP (05:05:44) - and the configure reset dropped that registration, so every press logged
+    subscribed=0 and nothing reached Windows. Registrations now live as long as the AVRCP connection (sp_volume_rebind)."""
+
+    HARNESS = r"""
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include "shared/VolumeControl.h"
+static unsigned sends; static int fail_next; static uint8_t last_label, last_code, last_pdu, last_event, last_value;
+static int applied = -1;
+static int apply_fn(void *c, uint8_t v) { (void)c; applied = v; return 1; }
+static int send_fn(void *c, const uint8_t peer[6], uint8_t label, uint8_t code, const uint8_t *p, size_t n) {
+    (void)c; (void)peer;
+    if (fail_next) { fail_next = 0; return 0; }
+    sends++; last_label = label; last_code = code; last_pdu = p[3];
+    last_event = n > 7 ? p[7] : 0; last_value = n > 8 ? p[8] : 0xff; return 1;
+}
+static const SPVolumeIO io = { apply_fn, send_fn, NULL };
+static const uint8_t events[] = {1, 2, 8, 9, 10, 11, 12};
+static const uint8_t laptop[6] = {0x24, 0xB2, 0xB9, 0xA1, 0xA4, 0x68}, other[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+static const uint8_t reg[] = {0, 0x19, 0x58, 0x31, 0, 0, 5, 0x0d, 0, 0, 0, 0};
+static int cmd(SPVolume *s, const uint8_t *peer, uint64_t epoch, uint8_t label, uint8_t ctype, const uint8_t *p, size_t n) {
+    return sp_volume_command(s, &io, peer, epoch, label, ctype, p, n, events, sizeof events);
+}
+static int set_volume(SPVolume *s, uint64_t epoch, uint8_t label, uint8_t value) {
+    const uint8_t set[] = {0, 0x19, 0x58, 0x50, 0, 0, 1, value};
+    return cmd(s, laptop, epoch, label, SP_AVRCP_CONTROL, set, sizeof set);
+}
+#define CHANGED_ON(label_, value_) (last_code == SP_AVRCP_CHANGED && last_pdu == 0x31 && last_event == 0x0d && \
+                                    last_label == (label_) && last_value == (value_))
+int main(void) {
+    SPVolume s; uint64_t epoch = 1;
+
+    /* --- The 05:05 session, iPhone first: AVRCP, registration, then A2DP. --- */
+    sp_volume_bind(&s, laptop, epoch, 58);                                       /* install: last_level=58 */
+    assert(cmd(&s, laptop, epoch, 4, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1);   /* 05:05:33 label=4 */
+    assert(last_code == SP_AVRCP_INTERIM && last_value == 58 && s.subscribed && s.label == 4);
+    /* 05:05:44 A2DP configures, same PC, AVRCP up: the registration stays. */
+    assert(sp_volume_rebind(&s, laptop, ++epoch, 58) == 1 && s.subscribed && s.label == 4 && s.epoch == epoch);
+    /* 05:05:46 the helper's first reading: the phone is at 0 - Windows is told, on the label it registered with. */
+    unsigned before = sends;
+    assert(sp_volume_local(&s, &io, 0) == 1 && sends == before + 1 && CHANGED_ON(4, 0) && !s.subscribed);
+    /* Windows renews (label 5): INTERIM with the current level; the next press goes out on label 5. */
+    assert(cmd(&s, laptop, epoch, 5, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1 && last_code == SP_AVRCP_INTERIM && last_value == 0);
+    assert(sp_volume_local(&s, &io, 6) == 1 && CHANGED_ON(5, 6) && !s.subscribed);
+    /* Rapid presses before Windows renews: nothing to send them on - the level is kept, never lost... */
+    before = sends;
+    assert(sp_volume_local(&s, &io, 19) == 1 && sends == before && s.value == 19);
+    assert(sp_volume_local(&s, &io, 25) == 1 && sends == before && s.value == 25);
+    /* ...and the renewal's INTERIM carries the newest level, so Windows ends where the phone is. */
+    assert(cmd(&s, laptop, epoch, 6, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1 && last_code == SP_AVRCP_INTERIM && last_value == 25);
+    /* Windows' own SetAbsoluteVolume: applied and ACCEPTED, never echoed back as CHANGED; the registration survives. */
+    before = sends;
+    assert(set_volume(&s, epoch, 7, 56) == 1 && applied == 56 && last_code == SP_AVRCP_ACCEPTED && sends == before + 1);
+    assert(s.subscribed && s.label == 6 && s.value == 56);
+    /* The phone reads back what Windows set: the same level, no CHANGED (no echo, no oscillation). */
+    before = sends;
+    assert(sp_volume_local(&s, &io, 56) == 1 && sends == before && s.subscribed);
+    /* Boundaries: maximum and zero, encoded 0..127; out of range refused. */
+    assert(sp_volume_local(&s, &io, 127) == 1 && CHANGED_ON(6, 127));
+    assert(cmd(&s, laptop, epoch, 8, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1 && last_value == 127);
+    before = sends;
+    assert(sp_volume_local(&s, &io, 128) == 0 && sends == before && s.subscribed && s.value == 127);
+    assert(sp_volume_local(&s, &io, 0) == 1 && CHANGED_ON(8, 0));
+
+    /* A CHANGED that can't be queued is retried once, then the registration is done - never sent twice. */
+    assert(cmd(&s, laptop, epoch, 9, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1);
+    fail_next = 1; before = sends;
+    assert(sp_volume_local(&s, &io, 40) == 1 && sends == before && s.subscribed && s.pending_local);
+    assert(sp_volume_flush(&s, &io) == 1 && CHANGED_ON(9, 40) && !s.subscribed);
+    assert(sp_volume_flush(&s, &io) == 0);                                       /* nothing left to send */
+
+    /* The stream closes, AVRCP stays: the next registration still holds across it. */
+    assert(cmd(&s, laptop, epoch, 10, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1);
+    assert(sp_volume_rebind(&s, laptop, ++epoch, 64) == 1 && s.label == 10 && s.value == 40);
+    assert(cmd(&s, laptop, epoch - 1, 11, SP_AVRCP_NOTIFY, reg, sizeof reg) == 0);   /* an old epoch: never ours */
+    /* Another PC configures: nothing of the laptop's carries over. */
+    assert(sp_volume_rebind(&s, other, ++epoch, 64) == 0 && !s.subscribed && s.value == 64);
+    assert(memcmp(s.peer, other, 6) == 0);
+    before = sends;
+    assert(cmd(&s, laptop, epoch, 12, SP_AVRCP_NOTIFY, reg, sizeof reg) == 0 && sends == before);   /* not bound: native */
+    /* AVRCP disconnects (the adapter rebinds fresh): the registration ends; a local change sends nothing. */
+    assert(cmd(&s, other, epoch, 13, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1 && s.subscribed);
+    sp_volume_bind(&s, other, ++epoch, 64);
+    before = sends;
+    assert(!s.subscribed && sp_volume_local(&s, &io, 70) == 1 && sends == before);
+    /* Nothing bound, or bad arguments: refused, nothing kept. */
+    SPVolume blank; memset(&blank, 0, sizeof blank);
+    assert(sp_volume_rebind(&blank, laptop, 0, 64) == 0 && !blank.bound);
+    assert(sp_volume_rebind(&blank, laptop, 5, 200) == 0 && !blank.bound);
+    assert(sp_volume_rebind(NULL, laptop, 5, 64) == 0);
+
+    /* --- The 20:36 session, Windows first: configured, then registered - unchanged. --- */
+    sp_volume_bind(&s, laptop, ++epoch, 89);                                     /* configure, nothing engaged yet */
+    assert(cmd(&s, laptop, epoch, 8, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1 && last_value == 89);
+    before = sends;
+    assert(sp_volume_local(&s, &io, 89) == 1 && sends == before);               /* 20:36:01.584: the same level */
+    assert(sp_volume_local(&s, &io, 83) == 1 && CHANGED_ON(8, 83));             /* 20:36:08.085 */
+    assert(cmd(&s, laptop, epoch, 9, SP_AVRCP_NOTIFY, reg, sizeof reg) == 1 && sp_volume_local(&s, &io, 76) == 1 && CHANGED_ON(9, 76));
+    puts("volume: registrations outlive A2DP; CHANGED on the registered label; no echo; bounds; retry once");
+    return 0;
+}
+"""
+
+    def test_registrations_outlive_the_stream(self):
+        cc = shutil.which("cc") or shutil.which("gcc")
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "lifetime.c"; exe = Path(td) / "lifetime"; src.write_text(self.HARNESS)
+            extra = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] if os.environ.get("BTPS_SANITIZE") else []
+            for std in ("-std=gnu11", "-std=c99"):
+                build = subprocess.run([cc, std, "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), *extra, str(src),
+                                        str(ROOT / "shared/VolumeControl.c"), "-o", str(exe)],
+                                       capture_output=True, text=True, timeout=60)
+                self.assertEqual(build.returncode, 0, build.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+
+    def test_the_adapter_keeps_a_live_registration(self):
+        adapter = (ROOT / "tweak/VolumeControl.m").read_text()
+        configure = adapter.split("void SpeakaVolumeConfigure(const uint8_t *peer) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('if(peer && !changed && !memcmp(state.peer,peer,6) && keep_registration()) keep_locked("configured");',
+                      configure)
+        self.assertIn('else reset_locked(peer?"configured":"configured_unidentified");', configure)
+        disconnect = adapter.split("void SpeakaVolumeDisconnect(void) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('if(keep_registration()) keep_locked("stream_closed");', disconnect)
+        self.assertIn('else reset_locked("stream_closed");', disconnect)
+        keep = adapter.split("static void keep_locked(const char *why) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("int kept=sp_volume_rebind(&state,last_peer,epoch,(uint8_t)last_level);", keep)
+        self.assertNotIn("sp_volume_mailbox_set", keep)                     # Windows' engaged level stays
+        self.assertNotIn("engaged=0", keep)
+        self.assertIn("static int keep_registration(void) { return mode==2 && state.bound && (state.subscribed || engaged); }",
+                      adapter)
+        # The only end of a registration on a live AVRCP peer is its AVRCP disconnect.
+        disconnected = adapter.split("static void disconnected(const uint8_t *address,uint32_t reason) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('if(state.bound && !memcmp(state.peer,peer,6)) reset_locked("avrcp_disconnected");', disconnected)
+        # Diagnostics: who set a level, each response by name, each local change's outcome, each suppression's reason.
+        self.assertIn('applying_local?"iphone":"windows"', adapter)
+        for name in ('"INTERIM"', '"CHANGED"', '"ACCEPTED"', '"STABLE"', '"REJECTED"'):
+            self.assertIn(name, adapter)
+        tick = adapter.split("static void tick(void *unused) {", 1)[1].split("\n}\n", 1)[0]
+        for outcome in ('"changed_sent"', '"changed_failed_will_retry"', '"unchanged"', '"not_registered"', '"rejected"'):
+            self.assertIn(outcome, tick)
+        for reason in ('"no_bound_peer"', '"no_stream"', '"helper_not_ready"', '"stale"'):
+            self.assertIn(reason, tick)
+        self.assertIn("(void)sp_volume_flush(&state,&io);", tick)            # a failed CHANGED is retried each tick

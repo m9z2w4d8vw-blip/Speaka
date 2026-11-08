@@ -112,8 +112,8 @@ static int apply(void *unused,uint8_t value) {
     sp_volume_mailbox_set_from(mailbox,1,!applying_local,value);
     engaged=1;
     if(value!=last_level) {last_level=value;if(queue) dispatch_async_f(queue,NULL,persist_level);}
-    SpeakaLogNow("AVRCP_VOLUME set value=%u (%u%%) helper_live=%d",value,(value*100u+63u)/127u,
-                 sp_volume_mailbox_ready(mailbox));
+    SpeakaLogNow("AVRCP_VOLUME set value=%u (%u%%) from=%s helper_live=%d",value,(value*100u+63u)/127u,
+                 applying_local?"iphone":"windows",sp_volume_mailbox_ready(mailbox));
     return 1;
 }
 static int send_reply(void *unused,const uint8_t peer[6],uint8_t label,uint8_t code,
@@ -121,8 +121,10 @@ static int send_reply(void *unused,const uint8_t peer[6],uint8_t label,uint8_t c
     (void)unused;
     NativeFrame frame={code,9,0,0,0,p,(uint16_t)n,{0}};
     uint32_t result=send_response(peer,label,&frame);
-    SpeakaLogNow("AVRCP_VOLUME tx label=%u response=0x%02x pdu=0x%02x status=%u",
-                  label,code,p[3],result);
+    const char *name=code==SP_AVRCP_INTERIM?"INTERIM":code==SP_AVRCP_CHANGED?"CHANGED":code==SP_AVRCP_ACCEPTED?"ACCEPTED":
+                     code==SP_AVRCP_STABLE?"STABLE":code==SP_AVRCP_REJECTED?"REJECTED":"other";
+    SpeakaLogNow("AVRCP_VOLUME tx label=%u response=0x%02x %s pdu=0x%02x status=%u%s",
+                  label,code,name,p[3],result,result?" (NOT queued)":"");
     return result==0;
 }
 static const SPVolumeIO io={apply,send_reply,NULL};
@@ -134,6 +136,19 @@ static void reset_locked(const char *why) {
     char a[18];peer_address_text(last_peer,a);
     SpeakaLogNow("AVRCP_VOLUME reset why=%s epoch=%llu bound=%s",why,(unsigned long long)epoch,
                  state.bound?a:"none");
+}
+/* v9.9.13: a stream configured or closed by the device AVRCP is already engaged with. AVRCP notifications last as long
+ * as the AVRCP connection - its disconnect resets (disconnected()) - not the A2DP stream: the registration, its label,
+ * the level, `engaged` and the mailbox stay, so the iPhone's changes still reach Windows as CHANGED. Connecting from the
+ * iPhone brings AVRCP up first: Windows registers, configures A2DP ~10 s later, and doesn't register again while it
+ * holds one - a reset here left every later change unsent (subscribed=0). */
+static int keep_registration(void) { return mode==2 && state.bound && (state.subscribed || engaged); }
+static void keep_locked(const char *why) {
+    ++epoch;
+    int kept=sp_volume_rebind(&state,last_peer,epoch,(uint8_t)last_level);
+    char a[18];peer_address_text(last_peer,a);
+    SpeakaLogNow("AVRCP_VOLUME kept why=%s epoch=%llu bound=%s registration=%s label=%u value=%u engaged=%d",why,
+                 (unsigned long long)epoch,a,kept?"live":"none",state.label,state.value,engaged);
 }
 static void persist_level(void *unused) {
     (void)unused;
@@ -154,7 +169,10 @@ static void persist_peer(void *unused) {
 }
 void SpeakaVolumeDisconnect(void) {
     if(!installed) return;
-    pthread_mutex_lock(&lock);configured=0;reset_locked("stream_closed");pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock);configured=0;
+    if(keep_registration()) keep_locked("stream_closed");   /* the stream closed; AVRCP may not have */
+    else reset_locked("stream_closed");
+    pthread_mutex_unlock(&lock);
 }
 /* The PC configured the speaker: bind the A2DP device bluetoothd resolved for this stream (PeerIdentity.c). */
 void SpeakaVolumeConfigure(const uint8_t *peer) {
@@ -164,7 +182,9 @@ void SpeakaVolumeConfigure(const uint8_t *peer) {
     int changed=peer && (!have_last_peer || memcmp(last_peer,peer,6)!=0);
     if(peer) {memcpy(last_peer,peer,6);have_last_peer=1;}
     if(changed) last_level=SP_VOLUME_FIRST_DEFAULT;   /* another PC: its level is unknown */
-    reset_locked(peer?"configured":"configured_unidentified");
+    /* v9.9.13: the same PC, its AVRCP still engaged: keep its registration (keep_locked); anything else starts fresh. */
+    if(peer && !changed && !memcmp(state.peer,peer,6) && keep_registration()) keep_locked("configured");
+    else reset_locked(peer?"configured":"configured_unidentified");
     pthread_mutex_unlock(&lock);
     if(changed && queue) dispatch_async_f(queue,NULL,persist_peer);
 }
@@ -279,18 +299,29 @@ static void tick(void *unused) {
     pthread_mutex_lock(&lock);
     int ready=state.bound && configured && sp_volume_mailbox_ready(mailbox);
     if(!ready) state.pending_local=0;
+    const char *why=!state.bound?"no_bound_peer":!configured?"no_stream":"helper_not_ready";
     pthread_mutex_unlock(&lock);
-    if(!ready) return;
+    if(!ready) {
+        static unsigned suppressed;
+        if(value>=0 && suppressed++<32u) SpeakaLogNow("AVRCP_VOLUME local value=%d suppressed reason=%s",value,why);
+        return;
+    }
     /* Same stack mutex used around native AVRCP calls at 0x55a250/0x55a268. Lock order: native stack -> our state;
      * receive is assumed to run in the stack. This threading assumption still needs live validation. */
     stack_lock();pthread_mutex_lock(&lock);
     double age=CFAbsoluteTimeGetCurrent()-when;
     if(state.bound && value>=0 && value<=127 && age>=0 && age<2) {
+        int was=state.subscribed,label=state.label,before=state.value;
         applying_local=1;
         int ok=sp_volume_local(&state,&io,(unsigned)value);
         applying_local=0;
-        SpeakaLogNow("AVRCP_VOLUME local value=%d accepted=%d subscribed=%u",value,ok,state.subscribed);
-    }
+        /* v9.9.13: what became of it - sent to Windows as CHANGED, or why not. */
+        const char *outcome=!ok?"rejected":was && !state.subscribed?"changed_sent":
+                            was && state.pending_local?"changed_failed_will_retry":value==before?"unchanged":"not_registered";
+        SpeakaLogNow("AVRCP_VOLUME local value=%d (%d%%) from=iphone accepted=%d subscribed=%u outcome=%s label=%d",value,
+                     (value*100+63)/127,ok,state.subscribed,outcome,label);
+    } else if(value>=0) SpeakaLogNow("AVRCP_VOLUME local value=%d suppressed reason=%s age=%.1f",value,
+                                     state.bound?"stale":"no_bound_peer",age);
     (void)sp_volume_flush(&state,&io);
     pthread_mutex_unlock(&lock);stack_unlock();
 }

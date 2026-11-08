@@ -9,6 +9,12 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **The iPhone's volume reaches Windows again after connecting from the iPhone (to be confirmed on the device).**
+  Connecting from the iPhone brings AVRCP up before A2DP: Windows registered for volume changes, then configured the
+  stream about 10 s later. Speaka's reset at configuration dropped that registration, so every press logged
+  `subscribed=0` and nothing went to Windows, which doesn't register twice. Registrations now last as long as the AVRCP
+  connection (`sp_volume_rebind`). The log names each response, who set each level, and what became of each press
+  (`outcome=changed_sent`, or why not). See [AVRCP-VOLUME.md](AVRCP-VOLUME.md).
 - **Connect to connects the audio reliably (to be confirmed on the device).** Connecting from the iPhone gave audio
   only sometimes. `-[BluetoothDevice connect]` asks for services `0xFFFFD7BF`, A2DP (`0x10`) among them, so iOS
   started A2DP itself as a Source. It found the computer's endpoints, all Sources (`52:src 54:src 55:src` at

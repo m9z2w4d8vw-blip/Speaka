@@ -23,6 +23,12 @@ typedef struct {
 } SPVolume;
 void sp_volume_bind(SPVolume *, const uint8_t peer[6], uint64_t epoch, uint8_t initial);
 void sp_volume_reset(SPVolume *);
+/* v9.9.13: the device whose AVRCP connection holds the registration configured (or closed) an A2DP stream. AVRCP
+ * notifications last as long as the AVRCP connection, or until CHANGED completes them - not the A2DP stream: the same
+ * peer keeps its registration, label, level and any pending CHANGED under the new epoch. Another peer, or none bound,
+ * is bound fresh (sp_volume_bind). Returns 1 when a live registration was kept. Connecting from the iPhone brings AVRCP
+ * up first: Windows registers, then configures A2DP ~10 s later, and never registers again while it holds one. */
+int sp_volume_rebind(SPVolume *, const uint8_t peer[6], uint64_t epoch, uint8_t initial);
 /* Operands start with SIG company ID 00:19:58 (AV/C header is separate).
  * Return 1 when owned/consumed, 0 to delegate unchanged to the native handler.
  * existing_events is the native GetCapabilities list, to preserve its features. */
