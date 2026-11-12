@@ -75,6 +75,9 @@ struct WindowActionButton: View {
     let symbol: String
     /// v9.9.4: filled, with its edge in the same colour (Update notifications when on); none is Dopamine's outline.
     var fill: Color? = nil
+    /// The symbol's and title's colour: white, or dark on a light fill (Uninstall's warning colour).
+    var foreground: Color = .white
+    var weight: Font.Weight = .regular
     let action: () -> Void
 
     var body: some View {
@@ -83,11 +86,11 @@ struct WindowActionButton: View {
                 Image(systemName: symbol)
                     .font(.system(size: 18, weight: .regular))
                 Text(title)
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 17, weight: weight))
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(foreground)
             .padding(.horizontal, 4)
             .frame(maxWidth: .infinity)
             .frame(height: Self.height)
@@ -671,5 +674,104 @@ struct ConnectRowView: View {
         if calendar.isDateInToday(date) { return "today at \(time)" }
         if calendar.isDateInYesterday(date) { return "yesterday at \(time)" }
         return DateFormatter.localizedString(from: date, dateStyle: .medium, timeStyle: .none)
+    }
+}
+
+/// Uninstall's confirmation (design #79 of the uninstall popups): the whole screen for one decision. Speaka's icon with
+/// a minus badge, the question, what goes, then Uninstall above Cancel. Tapping outside the window cancels, as it closes
+/// every window. Uninstall runs the removal: the tweak, then the logs and downloads, then the
+/// app (SpeakaModel.uninstall()).
+struct UninstallWindow: View {
+    let uninstall: () -> Void
+    let cancel: () -> Void
+
+    /// What Uninstall removes, in the order it removes it.
+    static let removes: [(symbol: String, text: String)] = [
+        ("puzzlepiece.extension", "The tweak, and Bluetooth restarts"),
+        ("doc.text", "Speaka's logs and downloads"),
+        ("app", "The Speaka app"),
+    ]
+    /// Dark text on the warning colour: white on it is too faint to read.
+    static let onWarning = Color(red: 58 / 255.0, green: 20 / 255.0, blue: 16 / 255.0)
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            UninstallIcon()
+                .padding(.bottom, 14)
+            Text("Remove Speaka from this iPhone?")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(Theme.text)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Removes the tweak and restarts Bluetooth, deletes Speaka's logs and downloads, then removes the app.")
+                .font(.system(size: 15))
+                .foregroundStyle(Theme.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+            VStack(spacing: 0) {
+                ForEach(Array(Self.removes.enumerated()), id: \.offset) { index, item in
+                    if index > 0 {
+                        Rectangle().fill(Color.white.opacity(0.1)).frame(height: 1)
+                    }
+                    HStack(spacing: 12) {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 17))
+                            .foregroundStyle(Theme.failure)
+                            .frame(width: 22)
+                        Text(item.text)
+                            .font(.system(size: 15))
+                            .foregroundStyle(Theme.text)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 10)
+                }
+            }
+            .padding(.top, 16)
+            .accessibilityElement(children: .combine)
+            VStack(spacing: WindowActionButton.spacing) {
+                WindowActionButton(title: "Uninstall", symbol: "trash", fill: Theme.failure, foreground: Self.onWarning,
+                                   weight: .semibold, action: uninstall)
+                WindowActionButton(title: "Cancel", symbol: "xmark", action: cancel)
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 22)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.window, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+/// Speaka's icon with the warning-coloured minus badge on its corner: what's about to go.
+struct UninstallIcon: View {
+    /// The app's own icon (Info.plist's AppIcon60x60), or the same gradient and speaker if it can't be loaded.
+    private static let image: UIImage? = UIImage(named: "AppIcon60x60")
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let image = Self.image {
+                    Image(uiImage: image).resizable()
+                } else {
+                    LinearGradient(colors: [Color(red: 0.36, green: 0.17, blue: 0.71), Color(red: 0.07, green: 0.70, blue: 0.65)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .overlay(Image(systemName: "speaker.wave.2.fill").font(.system(size: 26)).foregroundStyle(.white))
+                }
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            Image(systemName: "minus")
+                .font(.system(size: 12, weight: .heavy))
+                .foregroundStyle(UninstallWindow.onWarning)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Theme.failure))
+                .overlay(Circle().strokeBorder(Theme.window, lineWidth: 2))
+                .offset(x: 7, y: -7)
+        }
+        .accessibilityHidden(true)
     }
 }

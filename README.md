@@ -58,8 +58,8 @@ either device. A companion app starts and stops the speaker, connects to your co
 3. Tap **Start**, then connect from the PC: see [Using Speaka](#using-speaka).
 
 The tweak can also be installed on its own: the release's `Speaka_<version>_iphoneos-arm64.deb`, with Sileo or
-`dpkg -i`. The app is still how you start, stop and connect. To remove everything, hold **Uninstall** in the app for 4
-seconds.
+`dpkg -i`. The app is still how you start, stop and connect. To remove everything, tap **Uninstall** in the app and
+confirm.
 
 ## Requirements
 
@@ -110,7 +110,8 @@ After that, connect from either side: from Windows as with any speaker, or from 
 - **Audio Output** chooses where the sound plays; see [Where the audio plays](#where-the-audio-plays).
 - **Settings** has **Kill Bluetooth**, which restarts Bluetooth at once without the speaker (the same as
   `killall -9 bluetoothd`), **Update notifications**, **Check for Updates** and **Credits**.
-- **Uninstall**, held for 4 seconds, removes the tweak, Speaka's files and logs, then the app.
+- **Uninstall** asks first, showing what it removes: the tweak, Speaka's files and logs, then the app. Tap
+  **Uninstall** to go ahead, or **Cancel**.
 
 **Settings > Speaka**, in iOS's Settings, shows the tweak's status and has **View debug log**.
 
@@ -329,7 +330,7 @@ real SBC fails; CI fetches it.
 >
 > 1. **Stop** in the app.
 > 2. **Settings > Kill Bluetooth** in the app, or `sudo killall -9 bluetoothd`.
-> 3. Hold **Uninstall** in the app for 4 seconds. Without the app: `sudo dpkg -r com.parv.speaka`, then
+> 3. **Uninstall** in the app, then confirm. Without the app: `sudo dpkg -r com.parv.speaka`, then
 >    `sudo killall -9 bluetoothd`.
 
 The tweak refuses to hook a build it wasn't made for, leaves Apple's own signaling and Source endpoints alone, and

@@ -83,10 +83,10 @@ struct MenuItem: Identifiable {
     let symbol: String
     var chevron = false
     var enabled = true
-    /// v9.8: a row that acts only once held this long (Uninstall). A tap alone does nothing.
-    var holdSeconds: Double? = nil
-    /// Its action is running: a spinner in the icon's place, and the row greyed out like a disabled one.
+    /// Its action is running: a spinner in the icon's place, `busyTitle` for the title, and the row greyed out like a
+    /// disabled one over a light fill (Uninstall while Speaka is being removed).
     var busy = false
+    var busyTitle: String? = nil
     let action: () -> Void
 }
 
@@ -98,13 +98,7 @@ struct ActionMenu: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                Group {
-                    if item.holdSeconds != nil {
-                        HoldMenuRow(item: item, height: rowHeight)
-                    } else {
-                        MenuRow(item: item, height: rowHeight)
-                    }
-                }
+                MenuRow(item: item, height: rowHeight)
                 .overlay(alignment: .bottom) {
                     if index < items.count - 1 {
                         Capsule()
@@ -125,6 +119,13 @@ struct MenuRow: View {
     let item: MenuItem
     let height: CGFloat
 
+    /// A disabled row, and a busy one: the content at 45%.
+    static let dimmed = 0.45
+    /// The light fill behind a busy row.
+    static let cover = Color.white.opacity(0.10)
+
+    private var contentOpacity: Double { item.enabled && !item.busy ? 1 : Self.dimmed }
+
     var body: some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -134,121 +135,39 @@ struct MenuRow: View {
             // padding, 17 pt title, symbols drawn at about 19 pt), with the chevron pinned 10 pt from the
             // button's trailing edge.
             HStack(spacing: 10) {
-                Image(systemName: item.symbol)
-                    .font(.system(size: 19, weight: .medium))
-                Text(item.title)
+                ZStack {
+                    if item.busy {
+                        Spinner()
+                    } else {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 19, weight: .medium))
+                    }
+                }
+                Text(item.busy ? (item.busyTitle ?? item.title) : item.title)
                     .font(.system(size: 17))
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(Theme.text)
+            .opacity(contentOpacity)
             .padding(.horizontal, 12)
             .frame(height: height)
+            .background(item.busy ? Self.cover : Color.clear)
             .overlay(alignment: .trailing) {
                 if item.chevron {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 16, weight: .regular))
                         .foregroundStyle(Color.white.opacity(0.6))
+                        .opacity(contentOpacity)
                         .padding(.trailing, 10)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(MenuButtonStyle())
-        .disabled(!item.enabled)
-        .opacity(item.enabled ? 1 : 0.45)
-    }
-}
-
-/// v9.8, Uninstall: laid out exactly like a MenuRow, but a tap does nothing. Held down, a gray fill sweeps across the
-/// row from left to right over the hold, and everything it has covered dims to the disabled 45%, so the part it has
-/// passed looks like a disabled row while the rest is still white. The title stays Uninstall throughout; let go early
-/// and the edge runs back. Held the whole time: a warning haptic and the action, with no second prompt, and the whole
-/// row keeps the disabled look while it runs, with a spinner in the icon's place and "Uninstalling...". It doesn't dim
-/// while pressed, as other rows do, so the sweep is the only thing a press does.
-struct HoldMenuRow: View {
-    let item: MenuItem
-    let height: CGFloat
-    /// How far the hold has got, 0 to 1. Animated: linearly up to 1 over the hold, quickly back to 0 on letting go.
-    @State private var progress: CGFloat = 0
-
-    /// The disabled row: what the covered part of the row looks like.
-    static let dimmed = 0.45
-    /// The gray behind the covered part.
-    static let cover = Color.white.opacity(0.10)
-
-    private var seconds: Double { item.holdSeconds ?? 4 }
-
-    /// Once the action runs, the whole row stays covered.
-    private var shown: CGFloat { item.busy ? 1 : progress }
-
-    private var content: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                if item.busy {
-                    Spinner()
-                } else {
-                    Image(systemName: item.symbol)
-                        .font(.system(size: 19, weight: .medium))
-                }
-            }
-            Text(item.busy ? "Uninstalling..." : item.title)
-                .font(.system(size: 17))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(Theme.text)
-        .padding(.horizontal, 12)
-        .frame(height: height)
-    }
-
-    var body: some View {
-        // The fill, then the row twice: white where the edge hasn't reached, dimmed where it has. One animatable shape
-        // draws the fill and cuts both copies, so all three move together.
-        ZStack {
-            HoldPortion(progress: shown).fill(Self.cover)
-            content.mask { HoldPortion(progress: shown, leading: false) }
-            content.opacity(Self.dimmed).mask { HoldPortion(progress: shown) }
-        }
-        .frame(height: height)
-        .contentShape(Rectangle())
-        .opacity(item.enabled || item.busy ? 1 : Self.dimmed)
-        .onLongPressGesture(minimumDuration: seconds, maximumDistance: 40) {
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            item.action()
-        } onPressingChanged: { pressing in
-            if pressing { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-            withAnimation(pressing ? Animation.linear(duration: seconds) : Animation.easeOut(duration: 0.25)) {
-                progress = pressing ? 1 : 0
-            }
-        }
         .disabled(!item.enabled || item.busy)
-        // The content is drawn twice; VoiceOver hears it once.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(item.busy ? "Uninstalling" : item.title)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Hold for \(Int(seconds)) seconds to uninstall Speaka and its tweak.")
-    }
-}
-
-/// The part of a frame a hold has covered (from the leading edge to `progress` of the width), or the part it hasn't.
-/// A Shape fills whatever frame it's given, so the row needn't measure itself, and `animatableData` makes the edge
-/// sweep smoothly instead of jumping to where the hold is going.
-struct HoldPortion: Shape {
-    var progress: CGFloat
-    var leading = true
-
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        let edge = rect.width * min(max(progress, 0), 1)
-        return Path(leading ? CGRect(x: rect.minX, y: rect.minY, width: edge, height: rect.height)
-                            : CGRect(x: rect.minX + edge, y: rect.minY, width: rect.width - edge, height: rect.height))
+        .accessibilityLabel(item.busy ? (item.busyTitle ?? item.title) : item.title)
     }
 }
 

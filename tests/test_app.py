@@ -1272,7 +1272,7 @@ int main(void) {
         for source in SWIFT:
             for pair in re.findall(r'\bImage\("([^"]+)"\)|UIImage\(named: "([^"]+)"\)', read(source)):
                 named |= {name for name in pair if name}
-        self.assertEqual(named, {"Wordmark"})
+        self.assertEqual(named, {"Wordmark", "AppIcon60x60"})   # and Speaka's own icon, in Uninstall's confirmation
 
     def test_wordmark_falls_back_until_the_picture_exists(self):
         parts = read(PARTS)
@@ -1638,7 +1638,7 @@ class Menu(unittest.TestCase):
         self.assertIn('title: "Uninstall", symbol: "trash"', uninstall)
         self.assertNotIn("chevron", uninstall)                                  # an action, so no chevron
         self.assertIn("enabled: model.request == nil && !updater.isBusy", uninstall)
-        self.assertIn("holdSeconds: 4, busy: locked) { model.uninstall() }", uninstall)
+        self.assertIn('busy: locked, busyTitle: "Uninstalling...") { window = .uninstall }', uninstall)
 
     def test_panel_keeps_cazs_measurements(self):
         """The menu's measurements: 73 pt rows (65 with a Home button, 52 on small screens), 20 pt sides, 5 pt top and bottom, 1 pt
@@ -1655,55 +1655,53 @@ class Menu(unittest.TestCase):
             self.assertIn(part, theme)
         self.assertIn("rowHeight: Metrics.actionHeight(size.height)", read(SPEAKA_SOURCES / "ContentView.swift"))
 
-    def test_hold_row(self):
+    def test_uninstall_asks_first(self):
+        """Uninstall opens a confirmation (design #79: the whole screen for one decision) instead of needing a 4 s hold.
+        Its Uninstall runs the same removal; Cancel, or a tap outside, closes it."""
+        content = read(SPEAKA_SOURCES / "ContentView.swift")
         components = read(SPEAKA_SOURCES / "MainComponents.swift")
-        row = block_until(components, "struct HoldMenuRow: View {")
-        plain = block_until(components, "struct MenuRow: View {")
-        # Laid out exactly like the other rows.
-        for part in ("HStack(spacing: 10)", ".font(.system(size: 19, weight: .medium))", ".font(.system(size: 17))",
-                     ".lineLimit(1)", ".minimumScaleFactor(0.6)", ".foregroundStyle(Theme.text)",
-                     ".padding(.horizontal, 12)", ".frame(height: height)", ".contentShape(Rectangle())"):
-            self.assertIn(part, row)
-            self.assertIn(part, plain)
-        # Only a hold acts: no button and no press-dim. Interpretation 6 of the mockups: a gray fill sweeps from the
-        # left over the hold, and everything it has covered dims to the disabled-row 45%, so the passed part looks
-        # disabled while the rest is still white. The title stays Uninstall all the way; letting go runs the edge back.
-        self.assertNotIn("Button {", row)
-        self.assertNotIn("MenuButtonStyle", row)
-        self.assertIn(".onLongPressGesture(minimumDuration: seconds, maximumDistance: 40) {", row)
-        self.assertIn("private var seconds: Double { item.holdSeconds ?? 4 }", row)
-        self.assertIn("@State private var progress: CGFloat = 0", row)
-        self.assertIn("pressing ? Animation.linear(duration: seconds) : Animation.easeOut(duration: 0.25)", row)
-        self.assertIn("progress = pressing ? 1 : 0", row)
+        windows = read(WINDOWS)
+        self.assertIn("case settings, output, credits, connect, update, uninstall", content)
+        menu = block_until(content, "private var menuItems: [MenuItem] {")
+        self.assertIn('busy: locked, busyTitle: "Uninstalling...") { window = .uninstall },', menu)
+        self.assertNotIn("model.uninstall()", menu)                             # the row only asks
+        view = content.split("        case .uninstall:\n", 1)[1].split("        }\n", 1)[0]
+        self.assertLess(view.index("self.window = nil"), view.index("notificationOccurred(.warning)"))
+        self.assertLess(view.index("notificationOccurred(.warning)"), view.index("model.uninstall()"))
+        self.assertIn("}, cancel: { self.window = nil })", view)
+        self.assertIn("frame(width: min(size.width - 32, Metrics.iPadMaxWidth), height: min(size.height - 104, 760))",
+                      content)                                                  # 16 pt from the sides
+        # Nothing is held any more.
+        for gone in ("HoldMenuRow", "HoldPortion", "holdSeconds", "onLongPressGesture"):
+            for source in SWIFT:
+                self.assertNotIn(gone, read(source), source.name)
+        # The window: the question, what goes in the order it goes, then Uninstall above Cancel.
+        window = block_until(windows, "struct UninstallWindow: View {")
+        self.assertIn('Text("Remove Speaka from this iPhone?")', window)
+        self.assertIn("Removes the tweak and restarts Bluetooth, deletes Speaka's logs and downloads, then removes the app.",
+                      window)
+        order = [window.index(t) for t in ('"The tweak, and Bluetooth restarts"', '"Speaka\'s logs and downloads"',
+                                           '"The Speaka app"')]
+        self.assertEqual(order, sorted(order))
+        self.assertLess(window.index('title: "Uninstall"'), window.index('title: "Cancel"'))
+        self.assertIn('WindowActionButton(title: "Uninstall", symbol: "trash", fill: Theme.failure, foreground: Self.onWarning,',
+                      window)
+        self.assertIn('WindowActionButton(title: "Cancel", symbol: "xmark", action: cancel)', window)
+        self.assertIn(".background(Theme.window, in: RoundedRectangle(cornerRadius: 16, style: .continuous))", window)
+        icon = block_until(windows, "struct UninstallIcon: View {")
+        self.assertIn('UIImage(named: "AppIcon60x60")', icon)
+        self.assertIn(".background(Circle().fill(Theme.failure))", icon)       # the minus badge
+        # While it runs: the row greyed over a light fill, a spinner for its icon, and Uninstalling...
+        row = block_until(components, "struct MenuRow: View {")
+        self.assertIn("if item.busy {\n                        Spinner()", row)
+        self.assertIn("Text(item.busy ? (item.busyTitle ?? item.title) : item.title)", row)
         self.assertIn("static let dimmed = 0.45", row)
-        self.assertIn(".opacity(item.enabled ? 1 : 0.45)", plain)                  # the same as a disabled row
         self.assertIn("static let cover = Color.white.opacity(0.10)", row)
-        # One animatable shape draws the fill and cuts both copies of the row, so all three move together.
-        stack = row[row.index("        ZStack {\n            HoldPortion"):]
-        self.assertIn("HoldPortion(progress: shown).fill(Self.cover)\n"
-                      "            content.mask { HoldPortion(progress: shown, leading: false) }\n"
-                      "            content.opacity(Self.dimmed).mask { HoldPortion(progress: shown) }", stack)
-        shape = block_until(components, "struct HoldPortion: Shape {")
-        self.assertIn("var animatableData: CGFloat {\n        get { progress }\n        set { progress = newValue }", shape)
-        self.assertIn("let edge = rect.width * min(max(progress, 0), 1)", shape)
-        self.assertIn("CGRect(x: rect.minX, y: rect.minY, width: edge, height: rect.height)", shape)
-        self.assertIn("CGRect(x: rect.minX + edge, y: rect.minY, width: rect.width - edge, height: rect.height)", shape)
-        for gone in ("Keep holding", "GeometryReader", "Theme.failure", "greyedOut", "holding"):
-            self.assertNotIn(gone, row)
-        self.assertIn('Text(item.busy ? "Uninstalling..." : item.title)', row)   # only once it's under way
-        self.assertIn("UINotificationFeedbackGenerator().notificationOccurred(.warning)\n            item.action()", row)
-        # While it runs: the whole row stays covered, with a spinner where the icon was. Disabled otherwise: 45%.
-        self.assertIn("private var shown: CGFloat { item.busy ? 1 : progress }", row)
-        self.assertIn("if item.busy {\n                    Spinner()", row)
-        self.assertIn(".opacity(item.enabled || item.busy ? 1 : Self.dimmed)", row)
+        self.assertIn("private var contentOpacity: Double { item.enabled && !item.busy ? 1 : Self.dimmed }", row)
+        self.assertIn(".background(item.busy ? Self.cover : Color.clear)", row)
         self.assertIn(".disabled(!item.enabled || item.busy)", row)
-        self.assertIn(".accessibilityElement(children: .ignore)", row)            # drawn twice, heard once
-        self.assertIn("if item.holdSeconds != nil {\n                        HoldMenuRow(item: item, height: rowHeight)",
-                      block_until(components, "struct ActionMenu: View {"))
         item = block_until(components, "struct MenuItem: Identifiable {")
-        self.assertIn("var holdSeconds: Double? = nil", item)
-        self.assertIn("var busy = false", item)
-
+        self.assertIn("var busy = false\n    var busyTitle: String? = nil", item)
 
 class SettingsWindow(unittest.TestCase):
     def test_smaller_and_without_descriptions(self):
@@ -2074,8 +2072,10 @@ class DopamineActions(unittest.TestCase):
         self.assertIn("static let spacing: CGFloat = 8", button)
         self.assertIn("HStack(spacing: 10) {", button)
         self.assertIn('Image(systemName: symbol)\n                    .font(.system(size: 18, weight: .regular))', button)
-        self.assertIn("Text(title)\n                    .font(.system(size: 17, weight: .regular))", button)
-        self.assertIn(".foregroundStyle(.white)", button)
+        self.assertIn("Text(title)\n                    .font(.system(size: 17, weight: weight))", button)
+        self.assertIn("var weight: Font.Weight = .regular", button)                # Dopamine's 17 pt Regular, by default
+        self.assertIn(".foregroundStyle(foreground)", button)
+        self.assertIn("var foreground: Color = .white", button)
         self.assertIn(".frame(maxWidth: .infinity)\n            .frame(height: Self.height)", button)
         self.assertIn(".overlay(RoundedRectangle(cornerRadius: 10, style: .circular)\n"
                       "                .strokeBorder(fill ?? Color.white.opacity(0.15), lineWidth: 1))", button)   # inside the edge
@@ -2331,7 +2331,7 @@ class NotificationsButton(unittest.TestCase):
         button = block_until(windows, "struct WindowActionButton: View {")
         self.assertIn(".background(RoundedRectangle(cornerRadius: 10, style: .circular).fill(fill ?? .clear))", button)
         self.assertIn(".strokeBorder(fill ?? Color.white.opacity(0.15), lineWidth: 1))", button)
-        self.assertIn(".foregroundStyle(.white)", button)                       # white title and symbol on the green
+        self.assertIn("var foreground: Color = .white", button)                 # white title and symbol on the green
         # `fill` comes before `action`, so every `WindowActionButton(...) { ... }` still hands its closure to action.
         self.assertLess(button.index("var fill: Color? = nil"), button.index("let action: () -> Void"))
         # It sits where the switch did: under Credits, above Check for Updates.

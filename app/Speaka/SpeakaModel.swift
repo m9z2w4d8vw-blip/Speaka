@@ -92,7 +92,7 @@ final class SpeakaModel: ObservableObject {
     @Published private(set) var routeIsAudioDevice = false
     /// Settings > Kill Bluetooth: running, and why it failed, if it did.
     @Published private(set) var killingBluetooth = false
-    /// Uninstall (v9.8): from the end of the 4 s hold until Speaka is gone, or it fails.
+    /// Uninstall: from the confirmation's Uninstall button until Speaka is gone, or it fails.
     @Published private(set) var uninstalling = false
     @Published private(set) var killResult: String? = nil
     /// Settings > Update notifications, and whether iOS refused permission the last time it was turned on.
@@ -547,7 +547,7 @@ final class SpeakaModel: ObservableObject {
         }
     }
 
-    /// The menu's Uninstall row, held for 4 s; the hold is the prompt, so there's no second one. The tweak goes first,
+    /// Uninstall, once its confirmation (UninstallWindow) is accepted: no other prompt follows. The tweak goes first,
     /// as root: dpkg removes it, Bluetooth restarts so it unloads, Settings closes, Speaka's files go. Then Speaka's
     /// preferences, as you, now that nothing writes them back. Then TrollStore removes the app, in a step of its own
     /// that outlives Speaka. If the tweak can't be removed, nothing else is, and the header says why.

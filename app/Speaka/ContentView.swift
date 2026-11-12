@@ -13,7 +13,7 @@ import SwiftUI
 import UIKit
 
 enum SpeakaWindow: Equatable {
-    case settings, output, credits, connect, update
+    case settings, output, credits, connect, update, uninstall
 }
 
 struct ContentView: View {
@@ -191,10 +191,17 @@ struct ContentView: View {
                     self.window = nil
                     updater.resetIfIdle()
                 }
-            windowView(window, size: size)
-                .frame(width: min(size.width - Metrics.modalPadding * 2, Metrics.iPadMaxWidth),
-                       height: size.height * (small ? 0.8 : 0.7))
-                .transition(.scale(scale: 0.7).combined(with: .opacity))
+            if window == .uninstall {
+                // The whole screen for one decision: 16 pt from the sides, clear of the status bar and home indicator.
+                windowView(window, size: size)
+                    .frame(width: min(size.width - 32, Metrics.iPadMaxWidth), height: min(size.height - 104, 760))
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+            } else {
+                windowView(window, size: size)
+                    .frame(width: min(size.width - Metrics.modalPadding * 2, Metrics.iPadMaxWidth),
+                           height: size.height * (small ? 0.8 : 0.7))
+                    .transition(.scale(scale: 0.7).combined(with: .opacity))
+            }
         }
         .zIndex(2)
     }
@@ -214,6 +221,12 @@ struct ContentView: View {
             ConnectWindow(model: model)
         case .update:
             UpdateFlowView(updater: updater, screenWidth: size.width)
+        case .uninstall:
+            UninstallWindow(uninstall: {
+                self.window = nil
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                model.uninstall()
+            }, cancel: { self.window = nil })
         }
     }
 
@@ -228,9 +241,10 @@ struct ContentView: View {
                      chevron: true, enabled: !locked) { window = .settings },
             MenuItem(id: "output", title: "Audio Output", symbol: "speaker.wave.2",
                      chevron: true, enabled: !locked) { window = .output },
+            // A tap opens Uninstall's confirmation; its Uninstall button removes Speaka.
             MenuItem(id: "uninstall", title: "Uninstall", symbol: "trash",
                      enabled: model.request == nil && !updater.isBusy,
-                     holdSeconds: 4, busy: locked) { model.uninstall() },
+                     busy: locked, busyTitle: "Uninstalling...") { window = .uninstall },
             // v9.9.2: Connect to, where Credits was (Credits is in Settings now).
             MenuItem(id: "connect", title: "Connect to", symbol: "link",
                      chevron: true, enabled: !locked) { window = .connect },

@@ -12,6 +12,10 @@ notes, with its device-test steps, are in the git history (`docs/history/`, befo
 
 Volume sync and AAC are standard.
 
+- **Uninstall asks with a window instead of a hold.** Tapping Uninstall opens a confirmation over the whole screen:
+  Speaka's icon, *Remove Speaka from this iPhone?*, what it removes in the order it removes it, then **Uninstall**
+  and **Cancel**. Uninstall runs the same removal as before, and the row still shows *Uninstalling...* while it runs.
+  The 4-second hold is gone.
 - **Cleanup: one name, no dead code, current docs.** Behavior is unchanged.
   - The audio helper is now `SpeakaAudioHelper` (it was `BTPSAudioHelper`). It logs to `SpeakaAudioHelper.log`, and
     its audio ring is `SpeakaAudioRing-*.shm`. Upgrading removes the old helper, reloads the launch job at the new path
